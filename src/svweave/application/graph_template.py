@@ -114,11 +114,14 @@ badge(m.completeness, m.completeness === "COMPLETE" ? "ok" : "warn");
 badge(m.freshness, m.freshness === "CURRENT" ? "ok" : "warn");
 badge("profile " + m.profile);
 badge(m.evidence_kind);
+if (m.root) badge("subtree " + m.root, "warn");
 var msgs = [];
 if (m.completeness !== "COMPLETE") msgs.push("Analysis is " + m.completeness + ": an absent instance or connection is not proof of absence.");
 if (m.freshness !== "CURRENT") msgs.push("Freshness is " + m.freshness + ": the workspace changed since this build.");
 if (D.truncated) msgs.push("Truncated: " + D.stats.instances_shown + " of " + D.stats.instances_total + " instances shown (shallowest first).");
 if (D.hubs.length) msgs.push(D.hubs.length + " high-fanout signal(s) are listed in the side panel, not drawn.");
+if (m.root) msgs.push("Subtree view of " + m.root + ": only this instance and its descendants were read; fan-out counts uses inside the subtree.");
+if (D.boundary && D.boundary.length) msgs.push(D.boundary.length + " signal(s) declared outside the subtree are listed in the side panel, not drawn.");
 msgs.push(D.note);
 document.getElementById("banner").textContent = msgs.join("  ");
 
@@ -225,7 +228,7 @@ function showNode(n) {
   if (n.ports.length) { side.appendChild(h("h2", "Port associations")); side.appendChild(table(["port", "dir", "actual"], n.ports.map(function (p) { return [p.port, p.dir, p.actual]; }))); }
   var rel = D.edges.filter(function (e) { return e.from === n.id || e.to === n.id; });
   if (rel.length) { side.appendChild(h("h2", "Connections (" + rel.length + ")")); side.appendChild(table(["signal", "to / from"], rel.slice(0, 200).map(function (e) { var o = e.from === n.id ? byId[e.to] : byId[e.from]; return [e.signal, (e.from === n.id ? "-> " : "<- ") + (o ? o.path : "?")]; }))); }
-  hubs();
+  hubs(); boundary();
 }
 function showBundle(bd) {
   clearSide();
@@ -234,12 +237,17 @@ function showBundle(bd) {
   side.appendChild(dl([["from", a && a.path], ["to", b && b.path], ["direction", bd.directed ? "declared port direction" : "mixed / undirected"]]));
   side.appendChild(table(["signal", "port"], bd.items.slice(0, 300).map(function (e) { return [e.signal, e.port]; })));
   side.appendChild(h("p", D.note, "mut"));
-  hubs();
+  hubs(); boundary();
 }
 function hubs() {
   if (!D.hubs.length) return;
   side.appendChild(h("h2", "High-fanout signals (not drawn)"));
   side.appendChild(table(["signal", "instances"], D.hubs.slice(0, 50).map(function (x) { return [x.signal, x.instances]; })));
+}
+function boundary() {
+  if (!D.boundary || !D.boundary.length) return;
+  side.appendChild(h("h2", "Boundary signals (declared outside the subtree, not drawn)"));
+  side.appendChild(table(["signal", "instances in subtree"], D.boundary.slice(0, 50).map(function (x) { return [x.signal, x.instances]; })));
 }
 
 // ---- toolbar

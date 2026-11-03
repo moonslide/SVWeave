@@ -379,10 +379,20 @@ def graph_grp() -> None:
     show_default=True,
     help="Signals used by more instances are listed as hubs, not drawn.",
 )
+@click.option(
+    "--root",
+    default=None,
+    help="Subtree view: read and draw only this instance (path or id) and its descendants.",
+)
 @pass_state
 @_query_flags
 def graph_export_cmd(
-    st: _State, build_id: str, name: str | None, max_instances: int, max_fanout: int
+    st: _State,
+    build_id: str,
+    name: str | None,
+    max_instances: int,
+    max_fanout: int,
+    root: str | None,
 ) -> None:
     """Write .svweave/exports/<name>.html: instance hierarchy plus port-association connections."""
     sess = st.session()
@@ -395,6 +405,7 @@ def graph_export_cmd(
                 name=name,
                 max_instances=max_instances,
                 max_fanout=max_fanout,
+                root=root,
             )
         )
     )

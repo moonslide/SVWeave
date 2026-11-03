@@ -36,6 +36,8 @@ Editing stays disabled during all of this (and in M3 it does not exist at all).
    then validates it with slang and a human approves it. The preview itself never writes.
 8. Draw it: `svweave graph export --build B` writes one self-contained HTML page under
    `.svweave/exports/` (hierarchy plus port-association connections, nothing served, ADR-014).
+   Add `--root INSTANCE` to read and draw only that instance's subtree of the same build (signals
+   declared outside it are listed as boundary signals); on large designs this is much faster.
 
 ```text
 svweave edit prepare --spec spec.json
