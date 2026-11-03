@@ -350,7 +350,7 @@ the tested SHA; later documentation commits are not automatically native-tested.
   hierarchical reference from outside the subtree into it is not counted. It is a view of the same
   build, not a separate compile: a design that does not elaborate as a whole has no subtree either.
 * Measured speed-up of `--root` (`evidence/bench/graph-subtree/`, one 4-CPU host, one synthetic
-  design, not the reference corpus): CLI 3.25 s -> 1.19 s at 10,306 instances and 10.8 s -> 1.29 s
+  design, not the reference corpus): CLI 2.93 s -> 1.33 s at 10,306 instances and 8.43 s -> 1.24 s
   at 41,090 for one cluster; at 90 instances there is no visible saving (Python start-up dominates).
 
 ## 9. Impact and diff impact

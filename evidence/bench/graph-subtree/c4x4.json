@@ -1,0 +1,166 @@
+{
+  "benchmark": "graph-export-subtree-paired",
+  "status": "PASS",
+  "created_at": "20261103T170924Z",
+  "source_identity": {
+    "git_head": "04fddfa8a285db981b0f816ff538f59f6629ab3c",
+    "src_tree_sha256": "5856a0a7091ec8120845b3737bc90f9d610d26e590342c95feb67d81c71766d3"
+  },
+  "toolchain_lock_sha256": "ea20baf9bc2da3cb6b9dc41f0234c67f925ea37c5691b0bfbbb1ff30f86ef5e9",
+  "benchmark_script_sha256": "7ab123a3373a0b493db8db3c8d1b24bf87fa55ab7f187695ec8facb1346fc1a6",
+  "host": {
+    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "logical_cpus": 4,
+    "ram_total_gib": 15.71,
+    "ram_available_gib_at_start": 15.14,
+    "swap_total_gib": 0.0,
+    "os": "Linux-6.18.44-fc-v230-x86_64-with-glibc2.39",
+    "kernel": "6.18.44-fc-v230",
+    "python": "3.12.3",
+    "filesystem": {
+      "mount": "/",
+      "device": "/dev/vda",
+      "fstype": "ext4"
+    },
+    "page_cache": "warm (not dropped: no privilege)",
+    "loadavg_at_start": [
+      0.7109375,
+      0.9208984375,
+      0.74609375
+    ]
+  },
+  "design": {
+    "fixture": "fixtures/language/grf_subtree",
+    "top": "grf_soc",
+    "clusters": 4,
+    "cores": 4,
+    "expected_instances": 90
+  },
+  "runs": 2,
+  "max_fanout": 16,
+  "max_instances": 100000,
+  "limitations": [
+    "one synthetic hand-written design on one host; not the plan 22.3 reference corpus",
+    "page cache warm; the export reads one immutable build that was elaborated once",
+    "no speed threshold: medians and raw samples only"
+  ],
+  "build": {
+    "wall_s": 1.639,
+    "exit": 0,
+    "outcome": "OK",
+    "build_id": "f9621c56c3a92eb111951d6bd2a410779cb5e078b1a8174a7751cf37af6bb909"
+  },
+  "content_checks": {
+    "cluster_subtree": {
+      "root": "grf_soc.g_cl[2].u_cl",
+      "equal_to_full_restricted": true,
+      "differences": []
+    },
+    "core_subtree": {
+      "root": "grf_soc.g_cl[2].u_cl.g_core[2].u_core",
+      "equal_to_full_restricted": true,
+      "differences": []
+    }
+  },
+  "full_instances_total": 90,
+  "results": {
+    "full": {
+      "cli_wall_s": {
+        "median": 1.1735,
+        "raw": [
+          1.1982,
+          1.1488
+        ]
+      },
+      "in_process_s": {
+        "median": 0.0329,
+        "raw": [
+          0.0518,
+          0.0139
+        ]
+      },
+      "bytes": 201506,
+      "sha256": "e8999b3dc6074a290a14bcf0531eb203648c8858fa3f7d0dae1010634b326619",
+      "stats": {
+        "instances_total": 90,
+        "instances_shown": 90,
+        "edges": 424,
+        "hub_signals": 0,
+        "max_instances": 100000,
+        "max_fanout": 16
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-full.html"
+    },
+    "cluster_subtree": {
+      "cli_wall_s": {
+        "median": 1.2322,
+        "raw": [
+          1.2352,
+          1.2291
+        ]
+      },
+      "in_process_s": {
+        "median": 0.01,
+        "raw": [
+          0.0098,
+          0.0103
+        ]
+      },
+      "bytes": 61809,
+      "sha256": "35d4ab0ea00909db21f9fe31457087d5ac14763904dd3f1c9e833dae83f29bbc",
+      "stats": {
+        "instances_total": 22,
+        "instances_shown": 22,
+        "edges": 100,
+        "hub_signals": 0,
+        "max_instances": 100000,
+        "max_fanout": 16,
+        "root": "grf_soc.g_cl[2].u_cl",
+        "boundary_signals": 4
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-cluster_subtree.html"
+    },
+    "core_subtree": {
+      "cli_wall_s": {
+        "median": 1.155,
+        "raw": [
+          1.2597,
+          1.0503
+        ]
+      },
+      "in_process_s": {
+        "median": 0.0071,
+        "raw": [
+          0.0076,
+          0.0065
+        ]
+      },
+      "bytes": 26715,
+      "sha256": "9e48b4b4e2a0a570a01813b1f5c0b46cb06a44444cf8824f97403c77a0fc9b16",
+      "stats": {
+        "instances_total": 5,
+        "instances_shown": 5,
+        "edges": 19,
+        "hub_signals": 0,
+        "max_instances": 100000,
+        "max_fanout": 16,
+        "root": "grf_soc.g_cl[2].u_cl.g_core[2].u_core",
+        "boundary_signals": 4
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-core_subtree.html"
+    }
+  },
+  "speedup_vs_full": {
+    "cluster_subtree": {
+      "cli": 0.95,
+      "in_process": 3.28
+    },
+    "core_subtree": {
+      "cli": 1.02,
+      "in_process": 4.65
+    }
+  }
+}

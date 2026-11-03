@@ -14,7 +14,7 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   and draws only one instance and its descendants of the same build (parent-link closure, indexed
   reads); signals declared outside are listed as boundary signals. Content equals the full page
   restricted to the subtree (GRF-I05 on the new `fixtures/language/grf_subtree` RTL); measured
-  10.8 s -> 1.29 s CLI at 41k instances (`scripts/benchmark_graph_subtree.py`,
+  8.43 s -> 1.24 s CLI at 41k instances (`scripts/benchmark_graph_subtree.py`,
   `evidence/bench/graph-subtree/`).
 * **Impact analysis** (`svweave query impact`, MCP `svw_impact`): what changing a module, port, signal
   or instance touches: instances, dependent and dependency definitions, port connection sites,
