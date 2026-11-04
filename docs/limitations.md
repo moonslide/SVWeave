@@ -355,6 +355,9 @@ the tested SHA; later documentation commits are not automatically native-tested.
   not drawn (headers are not re-expanded, as in `diff-impact`). Per file the diff side matching the
   build's snapshot is used; a file matching neither is mapped approximately (warned). A change to a
   module instantiated everywhere draws most of the design: the view is only as small as the change.
+* `--per-commit` labels a changed module with the commits that touched its lines in the head
+  version; it needs a build of `--diff-head` (otherwise no labels, with a warning), labels every
+  instance of a module alike, and traces at most 200 changed modules and 500 commits.
 * Measured (`evidence/bench/graph-subtree/`, one 4-CPU host, one synthetic design, not the
   reference corpus), CLI at 41,090 instances: full 14.6 s, one cluster subtree 1.70 s, a diff that
   changes one module with 65 instances 1.63 s, a diff that changes a module with 8,192 instances

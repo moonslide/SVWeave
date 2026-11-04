@@ -845,7 +845,19 @@ svweave graph export --build BUILD_ID --diff-base HEAD
 
 # C. commit to commit (reads git blobs only; also works where git filters are configured)
 svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature
+
+# D. several small commits on one page, each changed instance labelled with its commits
+#    (build the --diff-head revision first)
+svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature --per-commit
 ```
+
+With `--per-commit` the page lists the commits of `main..my-feature`; each changed instance
+carries the commits that changed its module (traced with `git log -L` over the module's lines in
+the head version, so a deletion-only commit is found too), and clicking a commit highlights what
+it changed. Labels are per module definition: two instances of one module carry the same
+commits. They need a build of the head revision; otherwise they are left out with a warning.
+Example on a real SoC (C906, several sub-systems changed several times):
+[evidence/c906-per-commit-example](evidence/c906-per-commit-example/README.md).
 
 The envelope's `data.diff` lists the changed definitions with `instances` and `instances_drawn`,
 the changed files with the side used (`old`/`new`; `aligned: false` means an approximate mapping
@@ -1378,7 +1390,7 @@ prints one JSON envelope.
 | `svweave query search --snapshot S --query Q` | graph candidates or marked text fallback (`--scope`, `--no-graph`) |
 | `svweave report --build B` | status report filled from real data; unevaluated gates say so |
 | `svweave evidence import --manifest FILE` | import external evidence (stored `EXTERNAL_DECLARED`) |
-| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R]] [--allow-stale] [--allow-partial]` | write `.svweave/exports/<name>.html`: instance hierarchy plus port-association connections, one self-contained page, nothing served (ADR-014); `--instance` draws only the subtree of instance I; `--diff-base` only the instances a git diff changes |
+| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R [--per-commit]]] [--allow-stale] [--allow-partial]` | write `.svweave/exports/<name>.html`: instance hierarchy plus port-association connections, one self-contained page, nothing served (ADR-014); `--instance` draws only the subtree of instance I; `--diff-base` only the instances a git diff changes |
 | `svweave cache gc [--no-dry-run]` | garbage-collect snapshots; keeps the last 3 and referenced ones; dry run by default |
 | `svweave debug bundle --build B [--out DIR]` | reproduction bundle: hashes, manifest, diagnostics summary, redacted paths |
 | `svweave schema emit [--check] [--out DIR]` | write or verify `schemas/*.schema.json` |

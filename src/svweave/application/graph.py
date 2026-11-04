@@ -239,8 +239,19 @@ def diff_selection(s: Any, definition_ids: set[str], root_row: Any = None) -> di
             kept = {c: ch[: ch.index(common[-1]) + 1] for c, ch in kept.items()}
     marks: dict[str, str] = {c: "changed" for c in kept}
     for ch in kept.values():
+        # walking up from a changed instance: everything below the next CHANGED ancestor is inside
+        # that ancestor (e.g. the UART between a changed baud generator and its changed
+        # sub-system), only what lies above every changed instance is context
+        passed: list[str] = []
         for a in ch[1:]:
-            marks.setdefault(a, "context")
+            if marks.get(a) == "changed":
+                for p in passed:
+                    marks[p] = "inside"
+                break
+            passed.append(a)
+        else:
+            for p in passed:
+                marks.setdefault(p, "context")
     inside = _descendants(s, sorted(kept))
     context = sorted(i for i, m in marks.items() if m == "context")
     counts = {

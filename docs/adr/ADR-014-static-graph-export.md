@@ -82,3 +82,9 @@ git diff changes, on the same immutable build (nothing is recompiled):
   differ from the build.
 * The saving depends on how local the change is: a change to a module instantiated everywhere
   draws most of the design. Measured with `scripts/benchmark_graph_subtree.py`.
+* `--per-commit` (with `--diff-head`): the commits of `base..head` are listed, and each changed
+  module/interface is labelled with the commits that touched its line span in the head version
+  (`git log -s -L<first>,<last>:<file> base..head`, the same hardened git runner). Exact only when
+  the build's snapshot of that file is the head version; otherwise the module is left unlabelled
+  and the envelope warns. Labels are per definition, not per instance. An instance between two
+  changed instances belongs to the outer change (`inside`), never `context`.

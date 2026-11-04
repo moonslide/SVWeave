@@ -573,7 +573,13 @@ svweave graph export --build BUILD_ID --diff-base HEAD
 
 # C. commit 對 commit（只讀 git blob；在設定了 git filter 的環境也能用）
 svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature
+
+# D. 多個小 commit 畫在同一頁，每個被改到的實例標示是哪些 commit 改的
+#    （請先建置 --diff-head 那個版本）
+svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature --per-commit
 ```
+
+加上 `--per-commit` 時，頁面會列出 `main..my-feature` 的所有 commit；每個被改到的實例會標示改過其 module 的 commit（以 `git log -L` 追蹤該 module 在 head 版本中的行，因此只刪除行的 commit 也找得到），點擊某個 commit 即可高亮它改到的部分。標示的單位是 module 定義：同一個 module 的兩個實例會帶相同的 commit。這需要 head 版本的建置；否則不加標示並發出警告。真實 SoC 範例（C906，數個子系統各被修改多次）：[evidence/c906-per-commit-example](evidence/c906-per-commit-example/README.md)。
 
 回應封包的 `data.diff` 會列出：被改到的定義及其 `instances` 與 `instances_drawn`、被改到的檔案及所用的那一側（`old`/`new`；`aligned: false` 代表近似對應，並會附上警告）、不在建置中的檔案，以及不屬於任何 module 的變更（package、class）。加上 `--instance INSTANCE` 可只保留某個實例之下的變更（其他的計入 `outside_root`）。若 diff 觸及不到任何實例（例如沒有修改的工作樹），這是一個答案而不是錯誤：結束碼 0、`data.written: false`、`data.path: null`，`data.diff.nothing_to_draw` 說明原因，且不會寫出頁面。與 `diff-impact` 相同，在此模式下 STALE 的建置不會改變結束碼；若儲存庫設定了 git clean/process filter，與工作樹比較會被拒絕（請改用 C）；partial clone（promisor remote）也會被拒絕，因為讀取它可能觸發下載。
 
@@ -953,7 +959,7 @@ root_mappings:
 | `svweave query search --snapshot S --query Q` | 圖譜候選項，或有標示的純文字備援（`--scope`、`--no-graph`） |
 | `svweave report --build B` | 以真實資料填寫的狀態報告；未評估的關卡會如實標明 |
 | `svweave evidence import --manifest FILE` | 匯入外部證據（以 `EXTERNAL_DECLARED` 儲存） |
-| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R]] [--allow-stale] [--allow-partial]` | 寫出 `.svweave/exports/<name>.html`：實例階層加上連接埠關聯連線，單一自含式頁面，不提供任何服務（ADR-014）；`--instance` 只畫實例 I 的子樹；`--diff-base` 只畫 git diff 改到的實例 |
+| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R [--per-commit]]] [--allow-stale] [--allow-partial]` | 寫出 `.svweave/exports/<name>.html`：實例階層加上連接埠關聯連線，單一自含式頁面，不提供任何服務（ADR-014）；`--instance` 只畫實例 I 的子樹；`--diff-base` 只畫 git diff 改到的實例 |
 | `svweave cache gc [--no-dry-run]` | 對快照做垃圾回收；保留最近 3 個與被參照的快照；預設為試執行（dry run） |
 | `svweave debug bundle --build B [--out DIR]` | 重現用套件：雜湊、manifest、診斷摘要、已遮蔽的路徑 |
 | `svweave schema emit [--check] [--out DIR]` | 寫出或驗證 `schemas/*.schema.json` |

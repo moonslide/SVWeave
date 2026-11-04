@@ -380,3 +380,85 @@ def test_GRF_I11_truncated_diff_view_reports_what_is_really_drawn(tmp_path: Path
     x = env["data"]["diff"]["changed_definitions"][0]
     assert (x["instances"], x["instances_drawn"]) == (3, 0)  # not "3 drawn"
     assert data["stats"]["changed_instances"] == 0
+
+
+# ------------------------------------------------------------------ --per-commit labels
+def _commit_series(root: Path) -> None:
+    """Four small commits on top of the base: grf_reduce twice (once a deletion only), grf_core
+    once, and one commit that changes no RTL."""
+    from tests.integration.test_diff_impact import git
+
+    _edit(root, "grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];")
+    git(root, "commit", "-q", "-am", "C1 reduce: add instead of xor")
+    _edit(root, "grf_core.sv", "grf_stage #(.W(W), .K(3)) u_exec", "grf_stage #(.W(W), .K(5)) u_exec")
+    git(root, "commit", "-q", "-am", "C2 core: exec stage K=5")
+    _edit(root, "grf_reduce.sv", "    else dout <= acc;\n", "")
+    git(root, "commit", "-q", "-am", "C3 reduce: delete the else line")
+    (root / "notes.txt").write_text("not RTL\n")
+    git(root, "add", "notes.txt")
+    git(root, "commit", "-q", "-m", "C4 notes only")
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I12_per_commit_labels_each_changed_instance_with_its_commits(tmp_path: Path) -> None:
+    root = _git_grf(tmp_path)
+    _commit_series(root)
+    bid = _build(root)  # build of the head revision: the new side is exact
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~4",
+                    "--diff-head", "HEAD", "--per-commit")
+    assert code == 0, env.get("error")
+    d = env["data"]["diff"]
+    assert [c["subject"] for c in d["commits"]] == [
+        "C1 reduce: add instead of xor", "C2 core: exec stage K=5",
+        "C3 reduce: delete the else line", "C4 notes only"]
+    assert [c["changes_drawn_definitions"] for c in d["commits"]] == [True, True, True, False]
+    by = {x["qualified_name"]: x["commits"] for x in d["changed_definitions"]}
+    assert by == {"grf_reduce": [0, 2], "grf_core": [1]}  # C3 is a pure deletion, still seen
+    assert any("change no drawn module" in w for w in env["warnings"])
+    data = _page_data(root / env["data"]["path"])
+    for n in data["nodes"]:
+        if n["diff"] == "changed":
+            want = [0, 2] if n["definition"] == "grf_reduce" else [1]
+            assert n["commits"] == want, n["path"]
+        else:
+            assert "commits" not in n
+    assert sum(1 for n in data["nodes"] if n["diff"] == "changed") == 3 + 4  # 3 reducers, 4 cores
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I12b_per_commit_is_not_guessed_without_a_head_build(tmp_path: Path) -> None:
+    root = _git_grf(tmp_path)
+    bid = _build(root)  # build of the BASE revision
+    _commit_series(root)
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~4",
+                    "--diff-head", "HEAD", "--per-commit")
+    assert code == 0
+    assert all(x["commits"] is None for x in env["data"]["diff"]["changed_definitions"])
+    assert any("carry no commit labels" in w for w in env["warnings"])
+    for bad in (["--diff-base", "HEAD", "--per-commit"], ["--per-commit"]):
+        code, e = run(root, "graph", "export", "--build", bid, *bad)
+        assert code == 2 and e["error"]["code"] == "INVALID_CONFIG", bad
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I13_an_instance_between_two_changed_ones_is_inside_not_context(
+        tmp_path: Path) -> None:
+    """A changed module nested in another changed module (a baud generator inside a changed
+    sub-system): the instances between them belong to the outer change, they are not context."""
+    from tests.integration.test_diff_impact import git
+
+    root = _git_grf(tmp_path)
+    _edit(root, "grf_cluster.sv", "logic [CORES*W-1:0] core_bus;",
+          "logic [CORES*W-1:0] core_bus;  // cluster change")
+    _edit(root, "grf_stage.sv", "else q <= d + W'(K);", "else q <= d + W'(K);  // stage change")
+    git(root, "commit", "-q", "-am", "cluster and stage")
+    bid = _build(root)
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~1",
+                    "--diff-head", "HEAD", "--per-commit", "--instance", "grf_soc.g_cl[0].u_cl")
+    assert code == 0, env.get("error")
+    marks = _marks(_page_data(root / env["data"]["path"]))
+    cl = "grf_soc.g_cl[0].u_cl"
+    assert marks[cl] == "changed"
+    assert all(marks[f"{cl}.g_core[{i}].u_core"] == "inside" for i in (0, 1))  # was "context"
+    assert all(m == "changed" for p, m in marks.items() if p.endswith(("u_fetch", "u_wb")))
+    assert "context" not in marks.values()

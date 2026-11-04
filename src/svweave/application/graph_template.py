@@ -64,6 +64,7 @@ td,th{border-bottom:1px solid var(--line);padding:2px 4px;text-align:left;vertic
 .node.changed rect{fill:color-mix(in srgb,var(--bad) 18%,var(--card));stroke:var(--bad);stroke-width:2}
 .node.context rect{stroke-dasharray:3 3;opacity:.75}
 .crow{cursor:pointer}
+td.sha{white-space:nowrap;font-family:ui-monospace,Menlo,monospace}
 .crow:hover td,.crow.on td{background:color-mix(in srgb,var(--acc) 16%,transparent)}
 .crow:focus-visible{outline:2px solid var(--acc)}
 dd{white-space:pre-line}
@@ -197,7 +198,7 @@ function draw() {
     var p = pos[n.id]; if (!p) return;
     var cls = "node" + (n.diff === "changed" ? " changed" : n.diff === "context" ? " context" : "") + (n.top ? " top" : "") + (n.stub ? " stub" : "") + (n.blackbox ? " blackbox" : "") + (sel === n.id ? " sel" : "");
     if (hits) cls += hits[n.id] ? " hit" : " dim";
-    else if (commitSel !== null && n.diff !== "context") cls += (n.commits || []).indexOf(commitSel) >= 0 ? " hit" : " dim";
+    else if (commitSel !== null && n.diff !== "context") cls += commitsOf(n).indexOf(commitSel) >= 0 ? " hit" : " dim";
     var g = el("g", { "class": cls, transform: "translate(" + p.x + "," + p.y + ")", tabindex: "0" });
     g.appendChild(el("rect", { width: NW, height: NH, rx: 6 }));
     g.appendChild(el("text", { x: 8, y: 16 }, trunc(relName(n), 26)));
@@ -265,6 +266,12 @@ function changes() {
   if (D.diff.non_instance_declarations.length) side.appendChild(h("p", "Changed outside any module/interface (not drawn): " + D.diff.non_instance_declarations.join(", "), "mut"));
   commitList();
 }
+function commitsOf(n) {
+  // an unchanged instance inside a changed one belongs to the nearest changed ancestor (or itself)
+  var a = n;
+  while (a && a.diff !== "changed") a = a.parent ? byId[a.parent] : null;
+  return a && a.commits ? a.commits : [];
+}
 function commitList() {
   if (!D.diff || !D.diff.commits) return;
   side.appendChild(h("h2", "Commits (" + D.diff.commits.length + ")"));
@@ -277,7 +284,7 @@ function commitList() {
   D.diff.commits.forEach(function (c) {
     var row = h("tr", undefined, "crow" + (commitSel === c.index ? " on" : ""));
     row.tabIndex = 0;
-    row.appendChild(h("td", c.sha.slice(0, 8)));
+    row.appendChild(h("td", c.sha.slice(0, 8), "sha"));
     row.appendChild(h("td", c.subject));
     row.appendChild(h("td", c.changes_drawn_definitions ? String(counts[c.index] || 0) : "none drawn"));
     function pick() { commitSel = commitSel === c.index ? null : c.index; draw(); clearSide(); changes(); }

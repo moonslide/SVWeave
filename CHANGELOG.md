@@ -16,6 +16,10 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   restricted to the subtree (GRF-I05 on the new `fixtures/language/grf_subtree` RTL); measured
   14.6 s -> 1.70 s CLI for one cluster at 41k instances (`scripts/benchmark_graph_subtree.py`,
   `evidence/bench/graph-subtree/`).
+* **Graph export `--per-commit`**: several small commits on one diff page; each changed instance
+  lists the commits of `--diff-base..--diff-head` that changed its module (`git log -L`, deletions
+  included), with a clickable commit list. Example on the C906 minimal SoC:
+  `evidence/c906-per-commit-example/`.
 * **Security fixes from the council review** (each reproduced before the fix, each with a test
   that fails without it): diff-impact's git no longer reads user/system config, cannot reach a
   transport (a partial clone's lazy fetch ran `remote.<x>.uploadpack` from the repository config
