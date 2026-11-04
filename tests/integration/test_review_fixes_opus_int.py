@@ -197,8 +197,10 @@ def test_OPI_F2_graph_never_connects_two_instances_of_one_module(tmp_path: Path)
     root, bid = lean_ws(tmp_path, {"rtl/g.sv": src}, "top")
     code, env = run(root, "graph", "export", "--build", bid)
     page = (root / env["data"]["path"]).read_text()
-    data = json.loads(re.search(r'<script id="data" type="application/json">(.*?)</script>', page, re.S)
-                      .group(1))
+    from svweave.application.graph_codec import decode  # pages are written as svweave-graph/2
+
+    data = decode(json.loads(re.search(r'<script id="data" type="application/json">(.*?)</script>',
+                                       page, re.S).group(1)))
     path = {n["id"]: n["path"] for n in data["nodes"]}
     pairs = {(path[e["from"]], path[e["to"]]) for e in data["edges"]}
     assert ("top.u1.p", "top.u1.c") in pairs and ("top.u2.p", "top.u2.c") in pairs
