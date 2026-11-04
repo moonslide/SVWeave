@@ -29,6 +29,14 @@ def test_GRF_U02_page_has_one_data_block_a_strict_csp_and_no_network_or_html_sin
         assert sink not in script, sink
     assert not re.search(r'(?:src|href)\s*=\s*["\']?(?:https?:)?//', page)  # no external resource
     assert "@@SVWEAVE_GRAPH_DATA@@" not in page
+    # council review 2: every script element / src / href the viewer creates is behind a guard
+    lines = script.splitlines()
+    for i, ln in enumerate(lines):
+        if 'createElement("script")' in ln or ".src = " in ln:
+            guard = "\n".join(lines[max(0, i - 6):i + 1])
+            assert "safeChunk(" in guard, ln
+        if ".href = " in ln and not ln.rstrip().endswith('.href = "#";'):
+            assert "safeHref(" in "\n".join(lines[max(0, i - 3):i + 1]), ln
 
 
 def test_GRF_U03_subtree_root_and_boundary_text_are_data() -> None:

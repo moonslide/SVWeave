@@ -648,3 +648,126 @@ module gtop; logic z; assign z = 1'b0; drv u_d (.o(gp::v)); snk u_k (.i(gp::v));
         page = _page_data(root / env["data"]["path"])
         assert _edges(page) == _edges(whole), mode
         assert not page.get("boundary"), mode
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_SEC_DIF06_every_diff_entry_point_refuses_a_partial_clone_layout(tmp_path: Path) -> None:
+    """Council review 2: SEC-DIF01 tested the helper only; removing the call in collect_changes
+    passed every test. Here the workspace itself is a promisor (partial-clone) repository."""
+    from tests.integration.test_diff_impact import git
+
+    root = _git_grf(tmp_path)
+    bid = _build(root)
+    git(root, "config", "extensions.partialClone", "origin")
+    git(root, "config", "remote.origin.promisor", "true")
+    for args in (["query", "diff-impact", "--build", bid],
+                 ["graph", "export", "--build", bid, "--diff-base", "HEAD"],
+                 ["graph", "export", "--build", bid, "--diff-base", "HEAD", "--diff-head", "HEAD",
+                  "--per-commit"]):
+        code, env = run(root, *args)
+        assert env["error"]["code"] == "POLICY_DENIED", (args, env["error"])
+        assert env["error"]["details"]["reason"] == "partial_clone_unsupported", args
+
+
+def test_GRF_I19_atlas_files_are_private_and_only_stale_pages_are_removed(tmp_path: Path) -> None:
+    """Council review 2: removal of an earlier cut's pages, and the atlas file modes, untested."""
+    root, bid = _grf(tmp_path, clusters=4, cores=30)
+    code, env = run(root, "graph", "export", "--build", bid, "--split", "--page-budget", "200",
+                    "--name", "atlas")
+    assert code == 0, env.get("error")
+    d = root / env["data"]["directory"]
+    assert stat.S_IMODE(d.stat().st_mode) == 0o700
+    first = sorted(env["data"]["atlas"]["files"])
+    assert len(first) == 4
+    for f in first:
+        assert stat.S_IMODE((d / f).stat().st_mode) == 0o600, f
+    outside = tmp_path / "keep-me.html"
+    outside.write_text("not ours")
+    (d / "p-0123456789.html").write_text("stale page of another cut")
+    (d / "c-0123456789.js").write_text("stale part")
+    (d / "notes.txt").write_text("the user's own file")
+    (d / "p-link000000.html").symlink_to(outside)
+    code, env = run(root, "graph", "export", "--build", bid, "--split", "--page-budget", "5000",
+                    "--name", "atlas")
+    assert code == 0, env.get("error")
+    assert env["data"]["atlas"]["files"] == ["index.html"]  # one page now: the old ones go
+    assert sorted(p.name for p in d.iterdir()) == ["index.html", "notes.txt", "p-link000000.html"]
+    assert outside.read_text() == "not ours" and (d / "p-link000000.html").is_symlink()
+
+
+def test_GRF_I20_the_atlas_planner_opens_subtrees_and_nests_portals() -> None:
+    """Council review 2: the "open" branch of the planner and portals below the index page were
+    never exercised. R -> X0..X2 -> 40 Y each -> 49 leaves each (Y: 50 instances); budget 100:
+    X0 and X1 are opened on the index, X2 no longer fits and is a portal whose page again has
+    portals (Y), so the chain is index -> X2 page -> Y page."""
+    from svweave.application.graph_atlas import INDEX, plan, search_index
+
+    rows: list[dict[str, Any]] = []
+
+    def add(iid: str, parent: str | None, path: str) -> None:
+        rows.append({"instance_id": iid, "parent_id": parent, "path": path, "ord": len(rows)})
+
+    add("R", None, "r")
+    for x in range(3):
+        add(f"X{x}", "R", f"r.x{x}")
+        for y in range(40):
+            add(f"Y{x}_{y}", f"X{x}", f"r.x{x}.y{y}")
+            for leaf in range(49):
+                add(f"L{x}_{y}_{leaf}", f"Y{x}_{y}", f"r.x{x}.y{y}.l{leaf}")
+    pages, size = plan(rows, ["R"], 100)
+    assert size["R"] == len(rows) == 1 + 3 * 40 * 50 + 3
+    index = pages[0]
+    assert index.file == INDEX and index.parent is None
+    assert {"X0", "X1"} <= set(index.members) and not {"X0", "X1"} & set(index.portals)  # opened
+    assert "X2" in index.portals
+    x2 = next(p for p in pages if p.roots == ["X2"])
+    assert x2.portals, "no portal below the index page"
+    for pg in pages[1:]:
+        assert pg.parent is not None and pg.roots[0] in pages[pg.parent].portals
+    assert all(len(p.members) <= 100 for p in pages)
+    # every instance on exactly one page; a portal also as a node of its parent page
+    home: dict[str, int] = {}
+    for i, pg in enumerate(pages):
+        for m in pg.members:
+            if m in pg.portals:
+                continue
+            assert m not in home, m
+            home[m] = i
+    assert set(home) == {r["instance_id"] for r in rows}
+    assert max(len(_chain(pages, i)) for i in range(len(pages))) == 3
+    idx = search_index(rows, pages)
+    assert idx["parent"] == [-1 if p.parent is None else p.parent for p in pages]
+    for i, r in enumerate(rows):
+        assert r["instance_id"] in pages[idx["pg"][i]].members
+
+
+def _chain(pages: list[Any], i: int) -> list[Any]:
+    out = [pages[i]]
+    while out[-1].parent is not None:
+        out.append(pages[out[-1].parent])
+    return out
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I21_per_commit_limits_are_reported(tmp_path: Path,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """Council review 2: the commit-range cap and the traced-definition cap were untested."""
+    import svweave.application.diff_impact as dimp
+    import svweave.application.graph as G
+
+    root = _git_grf(tmp_path)
+    _commit_series(root)
+    bid = _build(root)
+    monkeypatch.setattr(dimp, "MAX_RANGE_COMMITS", 2)
+    monkeypatch.setattr(G, "MAX_RANGE_COMMITS", 2)
+    monkeypatch.setattr(G, "MAX_TRACED_DEFINITIONS", 1)
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~4",
+                    "--diff-head", "HEAD", "--per-commit")
+    assert code == 0, env.get("error")
+    d = env["data"]["diff"]
+    assert [c["subject"] for c in d["commits"]] == [
+        "C1 reduce: add instead of xor", "C2 core: exec stage K=5"]  # the oldest two only
+    assert any("more than 2 commits" in w for w in env["warnings"])
+    assert any("carry no commit labels" in w and "at most 1 definitions" in w
+               for w in env["warnings"])
+    assert sum(1 for x in d["changed_definitions"] if x.get("commits") is not None) == 1
