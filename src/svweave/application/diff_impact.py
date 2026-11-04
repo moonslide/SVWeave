@@ -176,6 +176,7 @@ class FileDiff:
         self.removed = 0
         self.binary = False
         self.hunks: list[tuple[int, int]] = []  # (old_start, old_len)
+        self.new_hunks: list[tuple[int, int]] = []  # (new_start, new_len)
 
     @property
     def path(self) -> str:
@@ -222,6 +223,7 @@ def parse_diff(text: str) -> list[FileDiff]:
                 n = 1 if m2.group(2) is None else int(m2.group(2))
                 d = 1 if m2.group(4) is None else int(m2.group(4))
                 cur.hunks.append((a, n))
+                cur.new_hunks.append((int(m2.group(3)), d))
                 cur.removed += n
                 cur.added += d
                 body = n + d
@@ -282,6 +284,185 @@ def _innermost(rows: list[sqlite3.Row]) -> list[sqlite3.Row]:
     return keep
 
 
+def _new_version(top: Path, path: str, head: str | None) -> bytes | None:
+    """The NEW side of one changed file: the blob at ``head``, else the working-tree file (read
+    only to compare hashes; a path that leaves the repository or is not a regular file is None)."""
+    if head is not None:
+        try:
+            return _git(top, ["cat-file", "blob", f"{head}:{path}"])
+        except SvwError:
+            return None
+    root = os.path.realpath(top)
+    real = os.path.realpath(top / path)
+    if not real.startswith(root + os.sep) or not os.path.isfile(real):
+        return None
+    if os.path.getsize(real) > MAX_DIFF_BYTES:
+        return None
+    with open(real, "rb") as f:
+        return f.read()
+
+
+def collect_changes(
+    s: Any, *, base: str, head: str | None, repo: str | None, new_side: bool = False
+) -> dict[str, Any]:
+    """Read the git diff and attribute its changed ranges to declarations of the build behind
+    session ``s``; shared by :func:`diff_impact` and the graph diff view. ``base``/``head`` must
+    already have passed :func:`check_ref`.
+
+    The OLD-side ranges are mapped onto the snapshot (exact where it equals the base version).
+    With ``new_side`` a file whose snapshot equals the NEW version (a build made after the change)
+    is mapped with its new-side ranges instead, exactly; ``files[].side`` says which side."""
+    repo_dir = Path(repo) if repo else s.ctx.project_root
+    _, real = s.ctx.path_policy.check(str(repo_dir), s.ctx.project_root)
+    top = Path(_git(real, ["rev-parse", "--show-toplevel"]).decode().strip())
+    _git(top, ["rev-parse", "--verify", "-q", base + "^{commit}"])
+    if head is not None:
+        _git(top, ["rev-parse", "--verify", "-q", head + "^{commit}"])
+    else:
+        # Comparing with the WORKING TREE makes git run any clean / process filter the
+        # repository configures (.gitattributes `filter=x` + `filter.x.clean`): a program
+        # chosen by the repository. --no-ext-diff / --no-textconv do not stop that. Refuse,
+        # and point at the commit-to-commit form, which reads blobs only.
+        filters = _git(
+            top, ["config", "--get-regexp", r"^filter\..*\.(clean|process)$"], ok=(0, 1)
+        ).decode("utf-8", "replace").strip()
+        if filters:
+            raise SvwError(
+                ErrorCode.POLICY_DENIED,
+                "the repository configures git clean/process filters, which git would run to "
+                "diff the working tree; commit the change and use --head REF instead",
+                {"reason": "git_filters_configured",
+                 "filters": sorted({ln.split()[0] for ln in filters.splitlines()})[:10]},
+            )
+    diff_args = ["diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames"]
+    diff_args += [base] + ([head] if head else []) + ["--"]
+    # only the project's own subtree: a monorepo around it is none of this tool's business
+    proj = Path(os.path.realpath(s.ctx.project_root))
+    try:
+        rel = proj.relative_to(Path(os.path.realpath(top))).as_posix()
+    except ValueError:
+        rel = "."
+    if rel != ".":
+        diff_args.append(rel)
+    diffs = parse_diff(_git(top, diff_args).decode("utf-8", "replace"))
+
+    snap_dir = snapshots_dir(s.ctx) / str(s.build["snapshot_id"])
+    rec = load_record(snap_dir)
+    by_origin = {os.path.realpath(f.original_path): f for f in rec.files}
+    files_out: list[dict[str, Any]] = []
+    unmapped: list[dict[str, Any]] = []
+    unattributed: list[dict[str, Any]] = []
+    decl_hits: dict[str, dict[str, Any]] = {}
+    decl_rows: dict[str, sqlite3.Row] = {}
+    for fd in diffs:
+        host = os.path.realpath(top / fd.path)
+        sf = by_origin.get(host)
+        counts = {"added": fd.added, "removed": fd.removed}
+        if sf is None:
+            unmapped.append({"path": fd.path, **counts, "reason": "not_in_build_snapshot"})
+            continue
+        entry: dict[str, Any] = {"path": fd.path, "logical_path": sf.logical_path, **counts,
+                                 "role": sf.role, "hunks": len(fd.hunks)}
+        if fd.binary:
+            entry.update(aligned=None, note="binary file")
+            files_out.append(entry)
+            continue
+        src_bytes = (snap_dir / sf.snapshot_path).read_bytes()
+        aligned: bool | None = None
+        if fd.old is not None:
+            try:
+                old = _git(top, ["cat-file", "blob", f"{base}:{fd.old}"])
+                aligned = hashlib.sha256(old).hexdigest() == sf.sha256
+            except SvwError:
+                aligned = False
+        hunks = fd.hunks
+        if new_side:
+            entry["side"] = "old"
+            if aligned is not True and fd.new is not None:
+                now = _new_version(top, fd.new, head)
+                if now is not None and hashlib.sha256(now).hexdigest() == sf.sha256:
+                    aligned, hunks, entry["side"] = True, fd.new_hunks, "new"
+        entry["aligned"] = aligned
+        if aligned is not True:
+            entry["note"] = (
+                "the build's snapshot of this file differs from the base version (or the file "
+                "is new): line mapping is approximate"
+            )
+        if sf.role != "source":
+            entry["note"] = (entry.get("note", "") + " role is " + sf.role + ": files that "
+                             "include it are not re-expanded").strip()
+        files_out.append(entry)
+        for b0, b1, l0, l1 in _ranges(hunks, src_bytes):
+            rows = s.rows(
+                "SELECT * FROM declarations WHERE build_id=? AND file=? "
+                "AND COALESCE(full_start, span_start) < ? AND COALESCE(full_end, span_end) > ?",
+                s.bid,
+                sf.logical_path,
+                b1,
+                b0,
+            )
+            inner = _innermost(rows)
+            if not inner:
+                unattributed.append({"file": sf.logical_path, "lines": [l0, l1]})
+                continue
+            for r in inner:
+                did = str(r["declaration_id"])
+                decl_rows[did] = r
+                h = decl_hits.setdefault(did, {"ranges": 0, "lines": []})
+                h["ranges"] += 1
+                h["lines"].append([l0, l1])
+
+    # --- group twins, attribute to owning definitions
+    groups: dict[tuple[Any, ...], list[sqlite3.Row]] = {}
+    for r in decl_rows.values():
+        groups.setdefault(
+            (r["name"], r["file"], r["span_start"], r["span_end"], r["scope"]), []
+        ).append(r)
+    affected: list[dict[str, Any]] = []
+    non_instance: list[dict[str, Any]] = []
+    by_def: dict[str, dict[str, Any]] = {}
+    for rows in groups.values():
+        twins = _twins(rows) or sorted(rows, key=lambda x: x["declaration_id"])[:1]
+        rep = twins[0]
+        ids = [str(t["declaration_id"]) for t in twins]
+        hit = decl_hits[ids[0]]
+        dto = _decl_dto(rep)
+        item = {
+            "declaration_id": dto["declaration_id"],
+            "symbol_id": dto["symbol_id"],
+            "kind": dto["kind"],
+            "qualified_name": dto["qualified_name"],
+            "location": dto["location"],
+            "changed_ranges": hit["ranges"],
+            "changed_lines": hit["lines"][:20],
+        }
+        owner = (
+            str(rep["declaration_id"])
+            if rep["kind"] in DEFINITION_KINDS
+            else _owner_definition(s, rep)
+        )
+        if owner is None:
+            summ, _, _ = _references_of(s, ids, 1)
+            item["references"] = summ["total"]
+            non_instance.append(item)
+            continue
+        item["owner_definition_id"] = owner
+        affected.append(item)
+        d = by_def.setdefault(owner, {"declarations": 0, "port_changes": []})
+        d["declarations"] += 1
+        if rep["kind"] == "port":
+            pq = ",".join("?" for _ in ids)
+            sites = s.count(
+                f"SELECT COUNT(*) FROM port_bindings WHERE build_id=? AND port_declaration_id IN ({pq})",
+                s.bid,
+                *ids,
+            )
+            d["port_changes"].append({"port": rep["qualified_name"], "connection_sites": sites})
+    return {"top": top, "rel": rel, "diffs": diffs, "files": files_out, "unmapped": unmapped,
+            "unattributed": unattributed, "affected": affected, "non_instance": non_instance,
+            "by_def": by_def}
+
+
 def diff_impact(
     opts: WorkspaceOptions,
     build_id: str,
@@ -300,146 +481,11 @@ def diff_impact(
         raise SvwError(ErrorCode.INVALID_CONFIG, f"depth must be in 1..{MAX_DEPTH}")
     lim = DEFAULT_LIST if limit is None else check_limit(limit)
     with _session(opts, build_id) as s:
-        repo_dir = Path(repo) if repo else s.ctx.project_root
-        _, real = s.ctx.path_policy.check(str(repo_dir), s.ctx.project_root)
-        top = Path(_git(real, ["rev-parse", "--show-toplevel"]).decode().strip())
-        _git(top, ["rev-parse", "--verify", "-q", base + "^{commit}"])
-        if head is not None:
-            _git(top, ["rev-parse", "--verify", "-q", head + "^{commit}"])
-        else:
-            # Comparing with the WORKING TREE makes git run any clean / process filter the
-            # repository configures (.gitattributes `filter=x` + `filter.x.clean`): a program
-            # chosen by the repository. --no-ext-diff / --no-textconv do not stop that. Refuse,
-            # and point at the commit-to-commit form, which reads blobs only.
-            filters = _git(
-                top, ["config", "--get-regexp", r"^filter\..*\.(clean|process)$"], ok=(0, 1)
-            ).decode("utf-8", "replace").strip()
-            if filters:
-                raise SvwError(
-                    ErrorCode.POLICY_DENIED,
-                    "the repository configures git clean/process filters, which git would run to "
-                    "diff the working tree; commit the change and use --head REF instead",
-                    {"reason": "git_filters_configured",
-                     "filters": sorted({ln.split()[0] for ln in filters.splitlines()})[:10]},
-                )
-        diff_args = ["diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames"]
-        diff_args += [base] + ([head] if head else []) + ["--"]
-        # only the project's own subtree: a monorepo around it is none of this tool's business
-        proj = Path(os.path.realpath(s.ctx.project_root))
-        try:
-            rel = proj.relative_to(Path(os.path.realpath(top))).as_posix()
-        except ValueError:
-            rel = "."
-        if rel != ".":
-            diff_args.append(rel)
-        diffs = parse_diff(_git(top, diff_args).decode("utf-8", "replace"))
-
-        snap_dir = snapshots_dir(s.ctx) / str(s.build["snapshot_id"])
-        rec = load_record(snap_dir)
-        by_origin = {os.path.realpath(f.original_path): f for f in rec.files}
+        ch = collect_changes(s, base=base, head=head, repo=repo)
+        top, rel, diffs = ch["top"], ch["rel"], ch["diffs"]
+        files_out, unmapped, unattributed = ch["files"], ch["unmapped"], ch["unattributed"]
+        affected, non_instance, by_def = ch["affected"], ch["non_instance"], ch["by_def"]
         graphs = _definition_graph(s)
-        files_out: list[dict[str, Any]] = []
-        unmapped: list[dict[str, Any]] = []
-        unattributed: list[dict[str, Any]] = []
-        decl_hits: dict[str, dict[str, Any]] = {}
-        decl_rows: dict[str, sqlite3.Row] = {}
-        for fd in diffs:
-            host = os.path.realpath(top / fd.path)
-            sf = by_origin.get(host)
-            counts = {"added": fd.added, "removed": fd.removed}
-            if sf is None:
-                unmapped.append({"path": fd.path, **counts, "reason": "not_in_build_snapshot"})
-                continue
-            entry: dict[str, Any] = {"path": fd.path, "logical_path": sf.logical_path, **counts,
-                                     "role": sf.role, "hunks": len(fd.hunks)}
-            if fd.binary:
-                entry.update(aligned=None, note="binary file")
-                files_out.append(entry)
-                continue
-            src_bytes = (snap_dir / sf.snapshot_path).read_bytes()
-            aligned: bool | None = None
-            if fd.old is not None:
-                try:
-                    old = _git(top, ["cat-file", "blob", f"{base}:{fd.old}"])
-                    aligned = hashlib.sha256(old).hexdigest() == sf.sha256
-                except SvwError:
-                    aligned = False
-            entry["aligned"] = aligned
-            if aligned is not True:
-                entry["note"] = (
-                    "the build's snapshot of this file differs from the base version (or the file "
-                    "is new): line mapping is approximate"
-                )
-            if sf.role != "source":
-                entry["note"] = (entry.get("note", "") + " role is " + sf.role + ": files that "
-                                 "include it are not re-expanded").strip()
-            files_out.append(entry)
-            for b0, b1, l0, l1 in _ranges(fd.hunks, src_bytes):
-                rows = s.rows(
-                    "SELECT * FROM declarations WHERE build_id=? AND file=? "
-                    "AND COALESCE(full_start, span_start) < ? AND COALESCE(full_end, span_end) > ?",
-                    s.bid,
-                    sf.logical_path,
-                    b1,
-                    b0,
-                )
-                inner = _innermost(rows)
-                if not inner:
-                    unattributed.append({"file": sf.logical_path, "lines": [l0, l1]})
-                    continue
-                for r in inner:
-                    did = str(r["declaration_id"])
-                    decl_rows[did] = r
-                    h = decl_hits.setdefault(did, {"ranges": 0, "lines": []})
-                    h["ranges"] += 1
-                    h["lines"].append([l0, l1])
-
-        # --- group twins, attribute to owning definitions
-        groups: dict[tuple[Any, ...], list[sqlite3.Row]] = {}
-        for r in decl_rows.values():
-            groups.setdefault(
-                (r["name"], r["file"], r["span_start"], r["span_end"], r["scope"]), []
-            ).append(r)
-        affected: list[dict[str, Any]] = []
-        non_instance: list[dict[str, Any]] = []
-        by_def: dict[str, dict[str, Any]] = {}
-        for rows in groups.values():
-            twins = _twins(rows) or sorted(rows, key=lambda x: x["declaration_id"])[:1]
-            rep = twins[0]
-            ids = [str(t["declaration_id"]) for t in twins]
-            hit = decl_hits[ids[0]]
-            dto = _decl_dto(rep)
-            item = {
-                "declaration_id": dto["declaration_id"],
-                "symbol_id": dto["symbol_id"],
-                "kind": dto["kind"],
-                "qualified_name": dto["qualified_name"],
-                "location": dto["location"],
-                "changed_ranges": hit["ranges"],
-                "changed_lines": hit["lines"][:20],
-            }
-            owner = (
-                str(rep["declaration_id"])
-                if rep["kind"] in DEFINITION_KINDS
-                else _owner_definition(s, rep)
-            )
-            if owner is None:
-                summ, _, _ = _references_of(s, ids, 1)
-                item["references"] = summ["total"]
-                non_instance.append(item)
-                continue
-            item["owner_definition_id"] = owner
-            affected.append(item)
-            d = by_def.setdefault(owner, {"declarations": 0, "port_changes": []})
-            d["declarations"] += 1
-            if rep["kind"] == "port":
-                pq = ",".join("?" for _ in ids)
-                sites = s.count(
-                    f"SELECT COUNT(*) FROM port_bindings WHERE build_id=? AND port_declaration_id IN ({pq})",
-                    s.bid,
-                    *ids,
-                )
-                d["port_changes"].append({"port": rep["qualified_name"], "connection_sites": sites})
         up, down = graphs
         names = _names(s, set(by_def))
         defs_out: list[dict[str, Any]] = []

@@ -8,10 +8,13 @@ real pyslang worker under mandatory bwrap. Every export afterwards reads that sa
 * ``cli``: wall time of the real CLI in a subprocess (Python start-up included), what a user waits;
 * ``in_process``: wall time of ``graph.export_graph`` only (no interpreter start-up).
 
-Modes run interleaved (full, cluster subtree, core subtree, then reversed on the next trial) so a
-drift of the host affects all of them alike. Each subtree page is also checked against the full
-page (same nodes below the root, same edges among them for signals declared inside the subtree):
-a subtree that is fast but different is reported as FAIL, not as a speed-up.
+Modes run interleaved (full, cluster subtree, core subtree, diff views; reversed on the next
+trial) so a drift of the host affects all of them alike. The two diff views read commit-to-commit
+diffs of the workspace's own git repository (branch ``chg-reduce``: one line of grf_reduce, a
+localized change; branch ``chg-core``: one line of grf_core, a change that reaches most of the
+design) against the build of ``main``. Each subtree page, and one changed instance of each diff
+page, is checked against the full page (same nodes, same edges for signals declared inside): a
+page that is fast but different is reported as FAIL, not as a speed-up.
 
 There is no speed threshold and no qualification claim: the JSON records host, scale, raw samples
 and medians. Nothing is downloaded; the workspace lives in a temporary directory.
@@ -147,6 +150,46 @@ def equivalence(full: dict[str, Any], sub: dict[str, Any], root: str) -> list[st
     return why
 
 
+_KW = {"--root": "root", "--diff-base": "diff_base", "--diff-head": "diff_head"}
+_GIT_ENV = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_AUTHOR_NAME": "bench",
+            "GIT_AUTHOR_EMAIL": "bench@invalid", "GIT_COMMITTER_NAME": "bench",
+            "GIT_COMMITTER_EMAIL": "bench@invalid"}
+
+
+def _git_setup(ws: Path) -> None:
+    """``main`` = the fixture; ``chg-reduce`` / ``chg-core`` = one changed line each. The working
+    tree stays on ``main``, the revision the build is made from."""
+    env = {**os.environ, **_GIT_ENV}
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(ws), *args], check=True, env=env, capture_output=True)
+
+    (ws / ".gitignore").write_text(".svweave/\n")
+    git("init", "-q", "-b", "main")
+    git("add", "-A")
+    git("commit", "-q", "-m", "base")
+    for branch, file, old, new in (
+        ("chg-reduce", "rtl/grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];"),
+        ("chg-core", "rtl/grf_core.sv", ".K(3)) u_exec", ".K(5)) u_exec"),
+    ):
+        git("checkout", "-q", "-b", branch, "main")
+        f = ws / file
+        f.write_text(f.read_text().replace(old, new, 1))
+        git("commit", "-q", "-am", branch)
+    git("checkout", "-q", "main")
+
+
+def _restrict(page: dict[str, Any], root: str) -> dict[str, Any]:
+    """The part of a page at and below ``root``, depth relative to it (for :func:`equivalence`)."""
+    pre = root + "."
+    nodes = [n for n in page["nodes"] if n["path"] == root or n["path"].startswith(pre)]
+    shift = next(n["depth"] for n in nodes if n["path"] == root)
+    ids = {n["id"] for n in nodes}
+    return {"nodes": [{**n, "depth": n["depth"] - shift} for n in nodes],
+            "edges": [e for e in page["edges"] if e["from"] in ids and e["to"] in ids],
+            "hubs": [h for h in page["hubs"] if h["signal"].startswith(pre)]}
+
+
 def _median(xs: list[float]) -> float:
     return statistics.median(xs) if xs else float("nan")
 
@@ -177,13 +220,17 @@ def main() -> int:
         "schema_version": "1.0", "allowed_roots": [str(ws.resolve())], "writable_paths": [],
         "approval_required": True, "network_enabled": False, "editing_enabled": False}))
 
+    _git_setup(ws)
     instances = 1 + a.clusters * (2 + 5 * a.cores) + 1
     mid = a.clusters // 2
     modes: dict[str, list[str]] = {
         "full": [],
         "cluster_subtree": ["--root", f"grf_soc.g_cl[{mid}].u_cl"],
         "core_subtree": ["--root", f"grf_soc.g_cl[{mid}].u_cl.g_core[{a.cores // 2}].u_core"],
+        "diff_reduce": ["--diff-base", "main", "--diff-head", "chg-reduce"],
+        "diff_core": ["--diff-base", "main", "--diff-head", "chg-core"],
     }
+    expect_changed = {"diff_reduce": a.clusters + 1, "diff_core": a.clusters * a.cores}
     report: dict[str, Any] = {
         "benchmark": "graph-export-subtree-paired",
         "status": "RUNNING",
@@ -234,10 +281,10 @@ def main() -> int:
         inproc: dict[str, list[float]] = {m: [] for m in modes}
         for trial in range(a.runs):
             for m in (order if trial % 2 == 0 else order[::-1]):
-                root = modes[m][1] if modes[m] else None
+                kw = {_KW[k]: v for k, v in zip(modes[m][::2], modes[m][1::2], strict=True)}
                 t0 = time.perf_counter()
                 graph.export_graph(opts, bid, f"bench-{trial}", name=f"inproc-{m}",
-                                   max_instances=100000, max_fanout=a.max_fanout, root=root)
+                                   max_instances=100000, max_fanout=a.max_fanout, **kw)
                 inproc[m].append(time.perf_counter() - t0)
 
         full_page = _page(ws / sizes["full"]["path"])
@@ -245,6 +292,14 @@ def main() -> int:
         for m in ("cluster_subtree", "core_subtree"):
             why = equivalence(full_page, _page(ws / sizes[m]["path"]), modes[m][1])
             checks[m] = {"root": modes[m][1], "equal_to_full_restricted": not why, "differences": why}
+        for m, want in expect_changed.items():
+            page = _page(ws / sizes[m]["path"])
+            changed = [n for n in page["nodes"] if n.get("diff") == "changed"]
+            sample = changed[len(changed) // 2]["path"] if changed else ""
+            why = [] if len(changed) == want else [f"{len(changed)} changed instances, expected {want}"]
+            why += equivalence(full_page, _restrict(page, sample), sample) if sample else ["none"]
+            checks[m] = {"changed_instances": len(changed), "sample": sample,
+                         "equal_to_full_restricted": not why, "differences": why}
         report["content_checks"] = checks
         report["full_instances_total"] = sizes["full"]["stats"]["instances_total"]
         report["results"] = {
@@ -259,7 +314,7 @@ def main() -> int:
         f_cli, f_in = _median(cli["full"]), _median(inproc["full"])
         report["speedup_vs_full"] = {
             m: {"cli": round(f_cli / _median(cli[m]), 2), "in_process": round(f_in / _median(inproc[m]), 2)}
-            for m in ("cluster_subtree", "core_subtree")
+            for m in modes if m != "full"
         }
         ok = all(c["equal_to_full_restricted"] for c in checks.values()) and \
             report["full_instances_total"] == instances and not sizes["full"]["truncated"]

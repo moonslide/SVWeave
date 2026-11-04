@@ -202,3 +202,151 @@ def test_GRF_I06_subtree_root_resolution_limits_and_refusals(tmp_path: Path) -> 
         assert code == 2 and e["error"]["code"] == "INVALID_CONFIG", repr(bad)
     pages = list((root / ".svweave" / "exports").iterdir())
     assert pages and all(stat.S_IMODE(p.stat().st_mode) == 0o600 for p in pages)
+
+
+# ------------------------------------------------------------------ diff view (--diff-base)
+# git diff -> changed module/interface definitions -> their instances with subtrees, plus the
+# ancestors that connect them (context). Expectations derived from the grf_subtree RTL.
+def _git_grf(tmp_path: Path, cores: int = 2) -> Path:
+    from tests.integration.helpers import lang_ws
+    from tests.integration.test_diff_impact import git
+
+    w = lang_ws(tmp_path, "grf_subtree", "grf_soc", top_parameters=[
+        {"top": "grf_soc", "name": "CLUSTERS", "value": "2"},
+        {"top": "grf_soc", "name": "CORES", "value": str(cores)},
+    ])
+    (w.root / ".gitignore").write_text(".svweave/\n")
+    git(w.root, "init", "-q", "-b", "main")
+    git(w.root, "add", "-A")
+    git(w.root, "commit", "-q", "-m", "base")
+    return w.root
+
+
+def _build(root: Path) -> str:
+    code, b = run(root, "build", "--profile", "p")
+    assert code == 0 and b["outcome"] == "OK", b
+    return str(b["build_id"])
+
+
+def _edit(root: Path, file: str, old: str, new: str) -> None:
+    p = root / file
+    text = p.read_text()
+    assert text.count(old) == 1
+    p.write_text(text.replace(old, new))
+
+
+def _marks(data: dict[str, Any]) -> dict[str, str]:
+    return {n["path"]: n["diff"] for n in data["nodes"]}
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I07_diff_after_the_build_draws_changed_instances_and_their_ancestors(
+        tmp_path: Path) -> None:
+    root = _git_grf(tmp_path)
+    bid = _build(root)  # build of the base, then the change: old side is exact
+    _edit(root, "grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];")
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD")
+    assert code == 0 and env["outcome"] == "OK" and env["freshness"] == "STALE"  # STALE expected
+    assert env["data"]["path"].startswith(f".svweave/exports/graph-{bid[:12]}-diff-")
+    assert any("diff view" in x for x in env["analysis_coverage"]["limitations"])
+    d = env["data"]["diff"]
+    assert [(x["qualified_name"], x["instances"], x["instances_drawn"])
+            for x in d["changed_definitions"]] == [("grf_reduce", 3, 3)]
+    data = _page_data(root / env["data"]["path"])
+    assert data["meta"]["diff"] == "HEAD -> working tree" and data["root"] == "grf_soc"
+    assert data["diff"]["files"] == [{"path": "grf_reduce.sv", "side": "old", "aligned": True}]
+    cl0, cl1 = "grf_soc.g_cl[0].u_cl", "grf_soc.g_cl[1].u_cl"
+    assert _marks(data) == {"grf_soc": "context", cl0: "context", cl1: "context",
+                            f"{cl0}.u_red": "changed", f"{cl1}.u_red": "changed",
+                            "grf_soc.u_red": "changed"}  # no core, no stage was read
+    by = {n["path"]: n for n in data["nodes"]}
+    assert by[cl0]["children_total"] == 3 and data["stats"]["changed_instances"] == 3
+    e = _edges(data)
+    assert (cl0, f"{cl0}.u_red", f"{cl0}.core_bus", "din") in e  # context -> changed reducer
+    assert (f"{cl0}.u_red", cl0, f"{cl0}.cout", "dout") in e
+    assert ("grf_soc", "grf_soc.u_red", "grf_soc.cluster_bus", "din") in e
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I08_build_after_the_change_maps_the_new_side_and_matches_the_full_page(
+        tmp_path: Path) -> None:
+    root = _git_grf(tmp_path)
+    _edit(root, "grf_core.sv", "grf_stage #(.W(W), .K(3)) u_exec", "grf_stage #(.W(W), .K(5)) u_exec")
+    bid = _build(root)  # build of the CHANGED tree: the new side is exact
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD",
+                    "--max-fanout", "1000")
+    assert code == 0 and env["freshness"] == "CURRENT", env.get("error")
+    data = _page_data(root / env["data"]["path"])
+    assert data["diff"]["files"] == [{"path": "grf_core.sv", "side": "new", "aligned": True}]
+    assert [x["qualified_name"] for x in data["diff"]["changed_definitions"]] == ["grf_core"]
+    marks = _marks(data)
+    cores = sorted(p for p, m in marks.items() if m == "changed")
+    assert cores == [f"grf_soc.g_cl[{c}].u_cl.g_core[{i}].u_core" for c in (0, 1) for i in (0, 1)]
+    assert sorted(p for p, m in marks.items() if m == "context") == [
+        "grf_soc", "grf_soc.g_cl[0].u_cl", "grf_soc.g_cl[1].u_cl"]
+    assert sum(1 for m in marks.values() if m == "inside") == 16  # 4 stages per changed core
+    assert not any(p.endswith("u_red") for p in marks)
+    # inside each changed core the page equals the full export restricted to it
+    code, env = run(root, "graph", "export", "--build", bid, "--max-fanout", "1000",
+                    "--name", "full")
+    full = _page_data(root / env["data"]["path"])
+    fby = {n["path"]: n for n in full["nodes"]}
+    for c in cores:
+        pre = c + "."
+        mine = {x for x in _edges(data) if x[2].startswith(pre)}
+        theirs = {x for x in _edges(full) if x[2].startswith(pre)}
+        assert mine == theirs and len(mine) == 4 * 2 + 3 * 3 + 2, c
+        for n in data["nodes"]:
+            if n["path"].startswith(pre):
+                assert n["ports"] == fby[n["path"]]["ports"]
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I09_root_limits_the_diff_and_commit_to_commit_diffs(tmp_path: Path) -> None:
+    from tests.integration.test_diff_impact import git
+
+    root = _git_grf(tmp_path)
+    bid = _build(root)
+    _edit(root, "grf_core.sv", "grf_stage #(.W(W), .K(3)) u_exec", "grf_stage #(.W(W), .K(5)) u_exec")
+    cl1 = "grf_soc.g_cl[1].u_cl"
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD", "--root", cl1)
+    assert code == 0 and env["data"]["diff"]["outside_root"] == 2
+    assert any("outside the root" in w for w in env["warnings"])
+    data = _page_data(root / env["data"]["path"])
+    assert data["root"] == cl1 and [n["path"] for n in data["nodes"]][0] == cl1
+    assert sorted(p for p, m in _marks(data).items() if m == "changed") == [
+        f"{cl1}.g_core[0].u_core", f"{cl1}.g_core[1].u_core"]
+    git(root, "commit", "-q", "-am", "change")  # commit to commit: blobs only, old side exact
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~1",
+                    "--diff-head", "HEAD", "--name", "c2c")
+    assert code == 0, env.get("error")
+    data = _page_data(root / env["data"]["path"])
+    assert data["meta"]["diff"] == "HEAD~1 -> HEAD"
+    assert data["diff"]["files"] == [{"path": "grf_core.sv", "side": "old", "aligned": True}]
+    assert sum(1 for m in _marks(data).values() if m == "changed") == 4
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I10_diff_view_refusals(tmp_path: Path) -> None:
+    root = _git_grf(tmp_path)
+    bid = _build(root)
+    code, e = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD")
+    assert code == 3 and e["error"]["code"] == "MISSING_INPUT"  # no change at all
+    assert e["error"]["details"]["reason"] == "diff_touches_no_instance"
+    (root / "notes.txt").write_text("not RTL\n")
+    from tests.integration.test_diff_impact import git
+
+    git(root, "add", "notes.txt")
+    code, e = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD")
+    assert code == 3 and e["error"]["details"]["files_not_in_build"] == 1
+    assert e["error"]["details"]["unmapped_files"] == ["notes.txt"]
+    _edit(root, "grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];")
+    core = "grf_soc.g_cl[0].u_cl.g_core[0].u_core"  # a reducer change does not reach a core
+    code, e = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD", "--root", core)
+    assert code == 3 and "under the root" in e["error"]["message"]
+    for bad in (["--diff-head", "HEAD"], ["--diff-base", "-x"], ["--diff-base", "a..b"],
+                ["--diff-base", "HEAD", "--diff-head", "--x"]):
+        code, e = run(root, "graph", "export", "--build", bid, *bad)
+        assert code == 2 and e["error"]["code"] == "INVALID_CONFIG", bad
+    code, e = run(root, "graph", "export", "--build", bid, "--diff-base", "nosuchref")
+    assert code != 0 and e["error"] is not None

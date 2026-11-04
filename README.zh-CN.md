@@ -525,9 +525,10 @@ SVWeave 从不修改客户端的配置。请把类似下面的条目加入你自
 ```bash
 svweave graph export --build BUILD_ID          # writes .svweave/exports/graph-<build>.html
 svweave graph export --build BUILD_ID --root top.u_sub   # 只画该实例及其子孙
+svweave graph export --build BUILD_ID --diff-base HEAD    # 只画 `git diff HEAD` 改到的部分
 ```
 
-在浏览器中打开该文件（`file://`，无需服务器）。它显示该构建展开后的实例树（双击折叠子树，搜索会展开到匹配项，拖动和滚轮用于平移和缩放），并以虚线显示从该构建的直接端口关联推导出的连接：两个实例引用同一个信号声明，方向由所声明的端口方向决定。一条线代表两个节点之间的所有信号；点击它可查看列表。被多于 `--max-fanout` 个实例（默认 16）使用的类时钟信号以枢纽形式列出，不绘制。页面携带该构建的完整性和新鲜度，并在其为 PARTIAL、STALE 或被截断（`--max-instances`，优先保留最浅层）时明确说明。它不是网表。页面没有网络访问（严格 CSP），并把源码文本视为数据。在上述 115k 实例的 SoC 上，导出耗时 27 s，绘制了最浅的 5000 个实例（38 MB）。`--root INSTANCE`（路径或实例 id）只读取并绘制同一构建中该实例的子树：不会重新编译，深度从 root 起算，在子树之外声明的信号（root 的端口所连接的信号）列为边界信号，不绘制。设计依据：`docs/adr/ADR-014-static-graph-export.md`。
+在浏览器中打开该文件（`file://`，无需服务器）。它显示该构建展开后的实例树（双击折叠子树，搜索会展开到匹配项，拖动和滚轮用于平移和缩放），并以虚线显示从该构建的直接端口关联推导出的连接：两个实例引用同一个信号声明，方向由所声明的端口方向决定。一条线代表两个节点之间的所有信号；点击它可查看列表。被多于 `--max-fanout` 个实例（默认 16）使用的类时钟信号以枢纽形式列出，不绘制。页面携带该构建的完整性和新鲜度，并在其为 PARTIAL、STALE 或被截断（`--max-instances`，优先保留最浅层）时明确说明。它不是网表。页面没有网络访问（严格 CSP），并把源码文本视为数据。在上述 115k 实例的 SoC 上，导出耗时 27 s，绘制了最浅的 5000 个实例（38 MB）。`--root INSTANCE`（路径或实例 id）只读取并绘制同一构建中该实例的子树：不会重新编译，深度从 root 起算，在子树之外声明的信号（root 的端口所连接的信号）列为边界信号，不绘制。`--diff-base REF`（可再加 `--diff-head REF`）以与 `svweave query diff-impact` 相同的方式读取 git diff，只绘制被修改的 module/interface 的实例（红框）及其子树，并以其祖先作为上下文。在修改前或修改后构建均可：每个文件使用与构建快照相符的那一侧 diff。对应不到任何实例的变更（package、不在构建中的文件）只列出，不绘制。设计依据：`docs/adr/ADR-014-static-graph-export.md`。
 
 ## 在 Claude Code 和 Codex 中使用 SVWeave
 
@@ -902,7 +903,7 @@ root_mappings:
 | `svweave query search --snapshot S --query Q` | 图候选或带标记的文本回退（`--scope`、`--no-graph`） |
 | `svweave report --build B` | 由真实数据填充的状态报告；未评估的门禁会如实说明 |
 | `svweave evidence import --manifest FILE` | 导入外部证据（存储为 `EXTERNAL_DECLARED`） |
-| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--root I]` | 写出 `.svweave/exports/<name>.html`：实例层次加上端口关联连接，一个自包含页面，不提供任何服务（ADR-014）；`--root` 只绘制实例 I 的子树 |
+| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--root I] [--diff-base R [--diff-head R]]` | 写出 `.svweave/exports/<name>.html`：实例层次加上端口关联连接，一个自包含页面，不提供任何服务（ADR-014）；`--root` 只绘制实例 I 的子树；`--diff-base` 只绘制 git diff 改到的实例 |
 | `svweave cache gc [--no-dry-run]` | 对快照做垃圾回收；保留最近 3 个及被引用的快照；默认为试运行 |
 | `svweave debug bundle --build B [--out DIR]` | 复现包：哈希、清单、诊断摘要、脱敏路径 |
 | `svweave schema emit [--check] [--out DIR]` | 写出或校验 `schemas/*.schema.json` |

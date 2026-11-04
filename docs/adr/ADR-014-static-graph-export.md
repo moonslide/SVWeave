@@ -55,3 +55,25 @@ build id, completeness and freshness on the page are the build's.
   to that subtree.
 * Measured on one host (`scripts/benchmark_graph_subtree.py`, see `docs/limitations.md` §8): the
   saving grows with the design; on a ~90-instance design the CLI time is Python start-up either way.
+
+## Amendment (2026-11-04): diff view, `--diff-base` / `--diff-head`
+`svweave graph export --build B --diff-base REF [--diff-head REF] [--root I]` draws only what a
+git diff changes, on the same immutable build (nothing is recompiled):
+
+* The diff is read exactly like `svweave query diff-impact` (same fixed `git diff -U0` argv, same
+  refusals, same working-tree filter policy) and its changed lines are attributed to the
+  declarations of the build. Per file, the OLD side is mapped when the build's snapshot equals the
+  base version (build first, then edit), else the NEW side when the snapshot equals the changed
+  version (edit, then build); `files[].side` says which. A file that matches neither is mapped
+  approximately and the envelope warns. `diff-impact` itself keeps the old-side mapping only.
+* Every instance of a changed module/interface definition is drawn (`changed`) with its whole
+  subtree (`inside`), plus the ancestors that connect them (`context`) up to `--root` or, without
+  it, up to their lowest common ancestor. Context ancestors show only their drawn children
+  (`children_total` gives the real count) and only connections among drawn instances.
+* Changes that map to no instance (package, class, a file not in the build, a range outside every
+  declaration) are listed and warned about, never drawn; a diff that maps to no instance at all is
+  refused (`MISSING_INPUT`, `diff_touches_no_instance`) instead of writing an empty page.
+* Like `diff-impact`, STALE never changes the exit code in this mode: the workspace is expected to
+  differ from the build.
+* The saving depends on how local the change is: a change to a module instantiated everywhere
+  draws most of the design. Measured with `scripts/benchmark_graph_subtree.py`.

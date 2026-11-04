@@ -754,6 +754,7 @@ stop early.
 ```bash
 svweave graph export --build BUILD_ID          # writes .svweave/exports/graph-<build>.html
 svweave graph export --build BUILD_ID --root top.u_sub   # only that instance and its descendants
+svweave graph export --build BUILD_ID --diff-base HEAD    # only what `git diff HEAD` changes
 ```
 
 Open the file in a browser (`file://`, no server). It shows the elaborated instance tree of that
@@ -768,7 +769,12 @@ CSP) and treats source text as data. On the 115k-instance SoC above the export t
 the 5000 shallowest instances (38 MB). `--root INSTANCE` (a path or an instance id) reads and draws
 only that instance's subtree of the same build: nothing is recompiled, depth is counted from the
 root, and signals declared outside it (what the root's ports connect to) are listed as boundary
-signals instead of being drawn. Rationale: `docs/adr/ADR-014-static-graph-export.md`.
+signals instead of being drawn. `--diff-base REF` (optionally `--diff-head REF`) reads the git
+diff like `svweave query diff-impact` and draws only the instances of the modules/interfaces it
+changes (outlined in red) with their subtrees, plus their ancestors as context. Build before or
+after the edit: the side of the diff that matches the build's snapshot is used, per file. A change
+that maps to no instance (a package, a file outside the build) is listed, not drawn. Rationale:
+`docs/adr/ADR-014-static-graph-export.md`.
 
 ## Using SVWeave with Claude Code and Codex
 
@@ -1284,7 +1290,7 @@ prints one JSON envelope.
 | `svweave query search --snapshot S --query Q` | graph candidates or marked text fallback (`--scope`, `--no-graph`) |
 | `svweave report --build B` | status report filled from real data; unevaluated gates say so |
 | `svweave evidence import --manifest FILE` | import external evidence (stored `EXTERNAL_DECLARED`) |
-| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--root I]` | write `.svweave/exports/<name>.html`: instance hierarchy plus port-association connections, one self-contained page, nothing served (ADR-014); `--root` draws only the subtree of instance I |
+| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--root I] [--diff-base R [--diff-head R]]` | write `.svweave/exports/<name>.html`: instance hierarchy plus port-association connections, one self-contained page, nothing served (ADR-014); `--root` draws only the subtree of instance I; `--diff-base` only the instances a git diff changes |
 | `svweave cache gc [--no-dry-run]` | garbage-collect snapshots; keeps the last 3 and referenced ones; dry run by default |
 | `svweave debug bundle --build B [--out DIR]` | reproduction bundle: hashes, manifest, diagnostics summary, redacted paths |
 | `svweave schema emit [--check] [--out DIR]` | write or verify `schemas/*.schema.json` |

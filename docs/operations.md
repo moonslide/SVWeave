@@ -38,6 +38,8 @@ Editing stays disabled during all of this (and in M3 it does not exist at all).
    `.svweave/exports/` (hierarchy plus port-association connections, nothing served, ADR-014).
    Add `--root INSTANCE` to read and draw only that instance's subtree of the same build (signals
    declared outside it are listed as boundary signals); on large designs this is much faster.
+   Add `--diff-base REF` (and `--diff-head REF`) to draw only the instances whose module or
+   interface the git diff changes, with their subtrees and connecting ancestors.
 
 ```text
 svweave edit prepare --spec spec.json

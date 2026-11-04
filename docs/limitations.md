@@ -349,6 +349,12 @@ the tested SHA; later documentation commits are not automatically native-tested.
   subtree are listed as boundary signals, not drawn; fan-out counts uses inside the subtree, so a
   hierarchical reference from outside the subtree into it is not counted. It is a view of the same
   build, not a separate compile: a design that does not elaborate as a whole has no subtree either.
+* `--diff-base` (diff view) draws the instances of changed module/interface definitions with their
+  subtrees; their ancestors are context and show only drawn children and connections among drawn
+  instances. A change in a package, class, `include`d header or a file outside the build is listed,
+  not drawn (headers are not re-expanded, as in `diff-impact`). Per file the diff side matching the
+  build's snapshot is used; a file matching neither is mapped approximately (warned). A change to a
+  module instantiated everywhere draws most of the design: the view is only as small as the change.
 * Measured speed-up of `--root` (`evidence/bench/graph-subtree/`, one 4-CPU host, one synthetic
   design, not the reference corpus): CLI 2.93 s -> 1.33 s at 10,306 instances and 8.43 s -> 1.24 s
   at 41,090 for one cluster; at 90 instances there is no visible saving (Python start-up dominates).

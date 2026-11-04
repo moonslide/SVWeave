@@ -61,6 +61,8 @@ td,th{border-bottom:1px solid var(--line);padding:2px 4px;text-align:left;vertic
 .node rect{fill:var(--card);stroke:var(--line);stroke-width:1.2}
 .node.top rect{stroke:var(--acc);stroke-width:2}
 .node.stub rect,.node.blackbox rect{stroke-dasharray:4 3;stroke:var(--warn)}
+.node.changed rect{fill:color-mix(in srgb,var(--bad) 18%,var(--card));stroke:var(--bad);stroke-width:2}
+.node.context rect{stroke-dasharray:3 3;opacity:.75}
 .node.sel rect{stroke:var(--acc);stroke-width:3}
 .node.hit rect{fill:color-mix(in srgb,var(--acc) 22%,var(--card))}
 .node.dim{opacity:.35}
@@ -96,7 +98,7 @@ small{color:var(--mut)}
 var D = JSON.parse(document.getElementById("data").textContent);
 var NS = "http://www.w3.org/2000/svg";
 var byId = {}, kids = {}, roots = [];
-D.nodes.forEach(function (n) { byId[n.id] = n; kids[n.id] = []; n.collapsed = n.depth >= 2; });
+D.nodes.forEach(function (n) { byId[n.id] = n; kids[n.id] = []; n.collapsed = D.diff ? n.diff === "inside" || (n.diff === "changed" && n.depth >= 2) : n.depth >= 2; });
 D.nodes.forEach(function (n) { if (n.parent && byId[n.parent]) kids[n.parent].push(n); else roots.push(n); });
 function el(tag, attrs, text) {
   var e = document.createElementNS(NS, tag);
@@ -114,13 +116,15 @@ badge(m.completeness, m.completeness === "COMPLETE" ? "ok" : "warn");
 badge(m.freshness, m.freshness === "CURRENT" ? "ok" : "warn");
 badge("profile " + m.profile);
 badge(m.evidence_kind);
+if (m.diff) badge("diff " + m.diff, "bad");
 if (m.root) badge("subtree " + m.root, "warn");
 var msgs = [];
 if (m.completeness !== "COMPLETE") msgs.push("Analysis is " + m.completeness + ": an absent instance or connection is not proof of absence.");
 if (m.freshness !== "CURRENT") msgs.push("Freshness is " + m.freshness + ": the workspace changed since this build.");
 if (D.truncated) msgs.push("Truncated: " + D.stats.instances_shown + " of " + D.stats.instances_total + " instances shown (shallowest first).");
 if (D.hubs.length) msgs.push(D.hubs.length + " high-fanout signal(s) are listed in the side panel, not drawn.");
-if (m.root) msgs.push("Subtree view of " + m.root + ": only this instance and its descendants were read; fan-out counts uses inside the subtree.");
+if (D.diff) msgs.push("Diff view (" + D.diff.base + " -> " + D.diff.head + "): " + D.stats.changed_instances + " instance(s) of " + D.diff.changed_definitions.length + " changed definition(s) are outlined in red with their subtrees; dashed ancestors are context and show only their drawn children.");
+else if (m.root) msgs.push("Subtree view of " + m.root + ": only this instance and its descendants were read; fan-out counts uses inside the subtree.");
 if (D.boundary && D.boundary.length) msgs.push(D.boundary.length + " signal(s) declared outside the subtree are listed in the side panel, not drawn.");
 msgs.push(D.note);
 document.getElementById("banner").textContent = msgs.join("  ");
@@ -187,7 +191,7 @@ function draw() {
   }
   D.nodes.forEach(function (n) {
     var p = pos[n.id]; if (!p) return;
-    var cls = "node" + (n.top ? " top" : "") + (n.stub ? " stub" : "") + (n.blackbox ? " blackbox" : "") + (sel === n.id ? " sel" : "");
+    var cls = "node" + (n.diff === "changed" ? " changed" : n.diff === "context" ? " context" : "") + (n.top ? " top" : "") + (n.stub ? " stub" : "") + (n.blackbox ? " blackbox" : "") + (sel === n.id ? " sel" : "");
     if (hits) cls += hits[n.id] ? " hit" : " dim";
     var g = el("g", { "class": cls, transform: "translate(" + p.x + "," + p.y + ")", tabindex: "0" });
     g.appendChild(el("rect", { width: NW, height: NH, rx: 6 }));
@@ -223,12 +227,13 @@ function showNode(n) {
   side.appendChild(h("h2", n.name));
   side.appendChild(dl([["path", n.path], ["definition", n.definition], ["top", n.top ? "yes" : ""], ["interface", n.interface ? "yes" : ""],
     ["stub", n.stub ? "yes" : ""], ["blackbox candidate", n.blackbox ? "yes" : ""], ["generate", (n.generate || []).join(" / ")],
-    ["source", n.file ? n.file + (n.line ? ":" + n.line : "") : ""], ["children", kids[n.id].length]]));
+    ["source", n.file ? n.file + (n.line ? ":" + n.line : "") : ""], ["children", kids[n.id].length + (n.children_total !== undefined && n.children_total !== kids[n.id].length ? " drawn of " + n.children_total : "")],
+    ["diff", n.diff === "changed" ? "definition changed by the diff" : n.diff === "context" ? "context (ancestor of a changed instance)" : n.diff === "inside" ? "inside a changed instance" : ""]]));
   if (n.params.length) { side.appendChild(h("h2", "Parameters")); side.appendChild(table(["name", "value", ""], n.params.map(function (p) { return [p.name, p.value, p.overridden ? "overridden" : ""]; }))); }
   if (n.ports.length) { side.appendChild(h("h2", "Port associations")); side.appendChild(table(["port", "dir", "actual"], n.ports.map(function (p) { return [p.port, p.dir, p.actual]; }))); }
   var rel = D.edges.filter(function (e) { return e.from === n.id || e.to === n.id; });
   if (rel.length) { side.appendChild(h("h2", "Connections (" + rel.length + ")")); side.appendChild(table(["signal", "to / from"], rel.slice(0, 200).map(function (e) { var o = e.from === n.id ? byId[e.to] : byId[e.from]; return [e.signal, (e.from === n.id ? "-> " : "<- ") + (o ? o.path : "?")]; }))); }
-  hubs(); boundary();
+  changes(); hubs(); boundary();
 }
 function showBundle(bd) {
   clearSide();
@@ -237,12 +242,21 @@ function showBundle(bd) {
   side.appendChild(dl([["from", a && a.path], ["to", b && b.path], ["direction", bd.directed ? "declared port direction" : "mixed / undirected"]]));
   side.appendChild(table(["signal", "port"], bd.items.slice(0, 300).map(function (e) { return [e.signal, e.port]; })));
   side.appendChild(h("p", D.note, "mut"));
-  hubs(); boundary();
+  changes(); hubs(); boundary();
 }
 function hubs() {
   if (!D.hubs.length) return;
   side.appendChild(h("h2", "High-fanout signals (not drawn)"));
   side.appendChild(table(["signal", "instances"], D.hubs.slice(0, 50).map(function (x) { return [x.signal, x.instances]; })));
+}
+function changes() {
+  if (!D.diff) return;
+  side.appendChild(h("h2", "Changed by the diff (" + D.diff.base + " -> " + D.diff.head + ")"));
+  side.appendChild(table(["definition", "instances drawn / total"], D.diff.changed_definitions.map(function (x) { return [x.qualified_name, x.instances_drawn + " / " + x.instances]; })));
+  var f = D.diff.files.map(function (x) { return [x.path, (x.side || "") + (x.aligned === true ? "" : " (approximate)")]; });
+  if (f.length) side.appendChild(table(["changed file", "mapped side"], f));
+  if (D.diff.unmapped_files.length) side.appendChild(h("p", "Not in this build: " + D.diff.unmapped_files.join(", "), "mut"));
+  if (D.diff.non_instance_declarations.length) side.appendChild(h("p", "Changed outside any module/interface (not drawn): " + D.diff.non_instance_declarations.join(", "), "mut"));
 }
 function boundary() {
   if (!D.boundary || !D.boundary.length) return;
@@ -288,6 +302,7 @@ view.addEventListener("wheel", function (e) {
   tx = px - (px - tx) * (nk / k); ty = py - (py - ty) * (nk / k); k = nk; apply();
 }, { passive: false });
 draw(); fit();
+changes();
 })();
 </script>
 </body>
