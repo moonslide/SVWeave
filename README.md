@@ -822,8 +822,8 @@ collapsed. Reductions are options: `--max-instances N` (shallowest first) and `-
 and `--diff-base` below. The page carries the build's completeness and freshness and says so when
 it is PARTIAL, STALE or truncated. It is not a netlist. The page has no network access (strict
 CSP) and treats source text as data. On the C906 minimal SoC (2,072 instances) the complete page
-has 30,378 connections, 15.8 MB, in about 6 s; above 20,000 instances or 64 MiB the envelope
-warns that a browser may be slow. (Under the former caps, the 115k-instance SoC above drew its
+has 30,378 connections in a 2.0 MB page (compact format); above 20,000 instances or 64 MiB the
+envelope warns that a browser may be slow and points to `--split` / `--lazy`. (Under the former caps, the 115k-instance SoC above drew its
 5000 shallowest instances, 38 MB, in 27 s.) `--instance INSTANCE` (a path or an instance id) reads and draws
 only that instance's subtree of the same build: nothing is recompiled, depth is counted from the
 root, and signals declared outside it (what the root's ports connect to) are listed as boundary
@@ -890,7 +890,12 @@ right part. On 115,562 instances: the single page opens in 10.1 s, the `--split`
 in about 0.55 s, a search result in about 1 s
 ([evidence](evidence/bench/graph-large/README.md)). `--lazy` admits scripts from its own
 directory in the page's CSP (needed for local files; verified in Chromium only); `--split` keeps
-the strict CSP and works in any browser.
+the strict CSP and works in any browser. Every page runs only its own viewer script (the CSP
+names its sha256; no `'unsafe-inline'` script). `--split` and `--lazy` write a directory
+(`--name` names it) and refuse `--max-instances` / `--max-fanout`: their pages together are the
+complete topology, `--page-budget` (at least 100) makes the pages smaller. One exception is said
+on every page: a connection through a signal no instance declares (a package variable) between
+instances on different pages is not drawn.
 
 Exit codes of `graph export`: 0 when the page was written (or there was nothing to draw); like the
 `query` commands, 3 for a PARTIAL build and 5 for a STALE/HISTORICAL one even though the page was
@@ -1683,7 +1688,7 @@ and a benchmark within the plan 22.3 budgets. A gate computed from a step that d
 `NOT_EVALUATED`, never PASS. The release decision is `ACCEPTED_STATIC_PREVIEW` only when every gate
 passes and no blocker is open; otherwise `BLOCKED` with reasons.
 
-**Mutation suite.** `scripts/mutation_suite.py` injects 30 critical mutations (M01–M30, covering plan 20.5
+**Mutation suite.** `scripts/mutation_suite.py` injects 31 critical mutations (M01–M31, covering plan 20.5
 and additional write/workspace-binding/snapshot-reuse safety guards) one at a time into a throwaway copy of the
 repository and runs the mapped tests; a mutation is killed when they fail. `--only M01,M05` selects some; anything
 other than a clean fail (missing patch anchor, timeout, red baseline) is `ERROR`, never killed.

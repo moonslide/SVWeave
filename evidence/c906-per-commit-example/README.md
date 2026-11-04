@@ -59,3 +59,17 @@ sub-systems are dimmed.
 Two defects of the feature were found with this example and fixed before this was recorded: the
 viewer script did not parse (a `\n` escape in the Python template; GRF-U05 now parses it) and an
 instance between two changed instances was marked context instead of inside (GRF-I13).
+
+## Provenance
+
+* SVWeave code: the working tree committed as `9cee280` (figures recorded there); toolchain lock
+  sha256 `ea20baf9bc2da3cb6b9dc41f0234c67f925ea37c5691b0bfbbb1ff30f86ef5e9`.
+* Commands, in the clone: `svweave build --profile soc`;
+  `svweave graph export --build B --name whole` (three times, timed);
+  `svweave graph export --build B --diff-base main --diff-head demo-subsystem-edits --per-commit`
+  (three times, timed); the screenshot with Playwright's Chromium (build 1243, 1.63.0).
+* The page and the screenshot show identifiers of that design (module and instance names, commit
+  subjects of the local DEMO commits), no source text. Its license was not verified for this
+  record; no file of it is redistributed here.
+* The page sizes above are of the format of that commit; the compact format (`0b29f08`) writes
+  the per-commit page in 0.03 MB (`evidence/bench/graph-large/README.md`).

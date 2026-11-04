@@ -10,7 +10,8 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
 * **Graph export** (`svweave graph export`, ADR-014): one self-contained HTML page per build, the
   elaborated instance tree plus connections derived from direct port associations. No server, no
   network (strict CSP), source text embedded as escaped JSON. ADR-009 amended.
-* **Graph export subtree view** (`svweave graph export --root INSTANCE`, ADR-014 amendment): reads
+* **Graph export subtree view** (`svweave graph export --instance INSTANCE`; named `--root` during
+  development, never released under that name; ADR-014 amendment): reads
   and draws only one instance and its descendants of the same build (parent-link closure, indexed
   reads); signals declared outside are listed as boundary signals. Content equals the full page
   restricted to the subtree (GRF-I05 on the new `fixtures/language/grf_subtree` RTL); measured
@@ -21,7 +22,7 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   at most `--page-budget` instances, together exactly the complete topology. 115,562 instances:
   the single page opens in 10.1 s, the --split/--lazy index in about 0.55 s
   (`evidence/bench/graph-large/`). `--lazy` relaxes the CSP to `script-src 'self'` on its page
-  only (ADR-014 amendment).
+  only (ADR-014 amendment). `--split`/`--lazy` refuse `--max-instances`/`--max-fanout`.
 * **Graph export draws the complete topology by default** (behaviour change): no `--max-instances`
   (was 5000) and no `--max-fanout` (was 16) unless given; both are now opt-in reductions. On the
   C906 SoC the default page went from 19,957 connections with 122 signals left out to 30,378
@@ -37,6 +38,18 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   prefixes are pinned. **Breaking:** `$VAR` expansion in filelists now also needs the variable in
   the trusted `policy.json` `environment_allowlist` (a repository `svweave.yaml` could read any
   variable, e.g. a token, and echo it in an error message to the MCP client).
+* **Fixes from the second council review** (each with a test that fails without it):
+  `--per-commit`'s `git log` ran the repository's `gpg.program` for a signed commit when the
+  repository config set `log.showSignature` (reproduced; signature checks, ext-diff and textconv
+  are now off); a symlinked `.svweave/snapshots/<id>/files` (a repository can ship `.svweave/`)
+  made the text search walk e.g. `$HOME`, and a planted `snapshot.json` was trusted: snapshot
+  trees and records are now read without following links and checked against their identity, a
+  reused snapshot or candidate snapshot must hold the captured bytes and record (mutation M31);
+  a read-only sandbox bind of a parent of `$HOME` or of `~/.ssh` is refused; graph pages run
+  only their own hashed viewer script; atlas pages no longer claim completeness and carry their
+  limitations; a hunk past the end of an unaligned file no longer marks the whole file changed;
+  rename preview counts a last line without newline like the edit gate; a BLOCKED build of an
+  unisolated worker stores its isolation. `svweave init` writes `environment_allowlist: []`.
 * **Write-path and record fixes from the council review**: recovery roll-forward decided on the
   first 20 changes only (a display cut), so a foreign dependency edit behind 20 of the
   transaction's own files was not seen and the remaining files were written (now the complete

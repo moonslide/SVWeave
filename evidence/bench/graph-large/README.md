@@ -48,3 +48,21 @@ the Python one does (GRF-C03).
   origins more strictly. `--split` uses plain links and the strict CSP.
 * A subtree under 50 instances is never a page of its own, so a page can exceed the budget; the
   envelope reports oversized pages (none here).
+
+## Provenance
+
+* Code: the working tree that was committed as `b1a6050` (`--lazy`, on top of `584c915` `--split`
+  and `0b29f08` the compact format); the figures were recorded in `9de2705`. Toolchain lock
+  `toolchain.lock.json` sha256 `ea20baf9bc2da3cb6b9dc41f0234c67f925ea37c5691b0bfbbb1ff30f86ef5e9`.
+  Browser: Chromium build 1243 of Playwright 1.63.0 (headless), file:// URLs.
+* Commands (fixture workspace as in `tests/integration/test_graph_export.py::_grf`, with
+  `top_parameters` CLUSTERS=180, CORES=128):
+  `svweave build --profile p`; `svweave graph export --build B --name single`;
+  `svweave graph export --build B --split --name atlas`;
+  `svweave graph export --build B --lazy --name lazy`; then
+  `node browser_measure.js <single.html> <atlas dir> <lazy dir>` (the script beside this file).
+* "about 870 MB" for the uncompacted 115k page is an extrapolation (7.6 KB per instance measured
+  on the C906 page x 115,562), not a written file. Every other figure is measured, a handful of
+  runs on one host, not a qualification benchmark.
+* The CSP figures above predate council review 2, which replaced `'unsafe-inline'` scripts by the
+  viewer script's sha256 on every page; the page contents and sizes are unchanged by it.

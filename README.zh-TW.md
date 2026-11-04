@@ -557,7 +557,7 @@ svweave graph export --build BUILD_ID --instance top.u_sub   # 只畫該實例�
 svweave graph export --build BUILD_ID --diff-base HEAD    # 只畫 `git diff HEAD` 改到的部分
 ```
 
-以瀏覽器開啟該檔案（`file://`，不需要伺服器）。它顯示該單一建置的 elaborated 實例樹（雙擊可收合子樹，搜尋會展開到符合項，拖曳與滾輪可平移與縮放），並以虛線顯示從該建置的直接連接埠關聯推導出的連線：兩個實例參照同一個訊號宣告，方向依宣告的連接埠方向而定。一條線代表兩個節點之間的所有訊號；點擊它可看到清單。**預設頁面就是該建置的完整拓撲**：所有實例與所有訊號都會畫出，只是較深的層級一開始是收合的。縮減是選項：`--max-instances N`（由最淺層優先）與 `--max-fanout N`（被超過 N 個實例使用的訊號列為 hub 而不畫出），和下方的 `--instance`、`--diff-base` 一樣。頁面帶有該建置的完整度與新鮮度，並在其為 PARTIAL、STALE 或被截斷（`--max-instances`，由最淺層優先）時如實說明。它不是 netlist。頁面沒有網路存取（嚴格的 CSP），並把原始碼文字當作資料處理。在上述 115k 個實例的 SoC 上，匯出耗時 27 s，畫出最淺層的 5000 個實例（38 MB）。`--instance INSTANCE`（路徑或實例 id）只讀取並畫出同一建置中該實例的子樹：不會重新編譯，深度從 root 起算，在子樹之外宣告的訊號（root 的連接埠所接到的訊號）會列為邊界訊號，而不會畫出來。`--diff-base REF`（可再加 `--diff-head REF`）以與 `svweave query diff-impact` 相同的方式讀取 git diff，只畫出被改到的 module/interface 的實例（紅框）及其子樹，並以其祖先作為脈絡。在修改前或修改後建置皆可：每個檔案會使用與建置快照相符的那一側 diff。對應不到任何實例的變更（package、不在建置中的檔案）只會列出，不會畫出。設計理由：`docs/adr/ADR-014-static-graph-export.md`。
+以瀏覽器開啟該檔案（`file://`，不需要伺服器）。它顯示該單一建置的 elaborated 實例樹（雙擊可收合子樹，搜尋會展開到符合項，拖曳與滾輪可平移與縮放），並以虛線顯示從該建置的直接連接埠關聯推導出的連線：兩個實例參照同一個訊號宣告，方向依宣告的連接埠方向而定。一條線代表兩個節點之間的所有訊號；點擊它可看到清單。**預設頁面就是該建置的完整拓撲**：所有實例與所有訊號都會畫出，只是較深的層級一開始是收合的。縮減是選項：`--max-instances N`（由最淺層優先）與 `--max-fanout N`（被超過 N 個實例使用的訊號列為 hub 而不畫出），和下方的 `--instance`、`--diff-base` 一樣。頁面帶有該建置的完整度與新鮮度，並在其為 PARTIAL、STALE 或被截斷（`--max-instances`，由最淺層優先）時如實說明。它不是 netlist。頁面沒有網路存取（嚴格的 CSP），並把原始碼文字當作資料處理。在 C906 minimal SoC（2,072 個實例）上，完整頁面有 30,378 條連線，以精簡格式寫成 2.0 MB；超過 20,000 個實例或 64 MiB 時，envelope 會警告瀏覽器可能變慢，並建議改用 `--split` / `--lazy`。（在舊的預設上限下，上述 115k 實例的 SoC 只畫出最淺層的 5000 個實例，38 MB，耗時 27 秒。）`--instance INSTANCE`（路徑或實例 id）只讀取並畫出同一建置中該實例的子樹：不會重新編譯，深度從 root 起算，在子樹之外宣告的訊號（root 的連接埠所接到的訊號）會列為邊界訊號，而不會畫出來。`--diff-base REF`（可再加 `--diff-head REF`）以與 `svweave query diff-impact` 相同的方式讀取 git diff，只畫出被改到的 module/interface 的實例（紅框）及其子樹，並以其祖先作為脈絡。在修改前或修改後建置皆可：每個檔案會使用與建置快照相符的那一側 diff。對應不到任何實例的變更（package、不在建置中的檔案）只會列出，不會畫出。設計理由：`docs/adr/ADR-014-static-graph-export.md`。
 
 **從 git diff 到頁面。** 建置就是「編譯」；頁面只讀取 diff 觸及的那一部分。兩種順序都可以：
 
@@ -590,7 +590,7 @@ svweave graph export --build BUILD_ID --split   # 互相連結的多頁：.svwea
 svweave graph export --build BUILD_ID --lazy    # 單一頁面，打開時才載入其他部分
 ```
 
-放不下的子樹會成為「入口節點」：它在上一層頁面上是一個節點（帶著自己的連接埠連線），可開啟它那一部分（`--split`：連到它的頁面；`--lazy`：雙擊即在同一張圖中載入）。索引頁可搜尋整個設計的所有實例，並開啟正確的部分。在 115,562 個實例上：單一頁面開啟需 10.1 秒，`--split` 或 `--lazy` 的索引頁約 0.55 秒，開啟一筆搜尋結果約 1 秒（[量測證據](evidence/bench/graph-large/README.md)）。`--lazy` 的頁面 CSP 允許載入同一目錄的腳本（讀取本機檔案所必需；僅在 Chromium 驗證）；`--split` 維持嚴格的 CSP，任何瀏覽器都能用。
+放不下的子樹會成為「入口節點」：它在上一層頁面上是一個節點（帶著自己的連接埠連線），可開啟它那一部分（`--split`：連到它的頁面；`--lazy`：雙擊即在同一張圖中載入）。索引頁可搜尋整個設計的所有實例，並開啟正確的部分。在 115,562 個實例上：單一頁面開啟需 10.1 秒，`--split` 或 `--lazy` 的索引頁約 0.55 秒，開啟一筆搜尋結果約 1 秒（[量測證據](evidence/bench/graph-large/README.md)）。`--lazy` 的頁面 CSP 允許載入同一目錄的腳本（讀取本機檔案所必需；僅在 Chromium 驗證）；`--split` 維持嚴格的 CSP，任何瀏覽器都能用。每個頁面只會執行它自己的檢視器腳本（CSP 寫明其 sha256，沒有 `'unsafe-inline'` 的腳本）。`--split` 與 `--lazy` 寫出一個目錄（由 `--name` 命名），並拒絕 `--max-instances` / `--max-fanout`：它們的頁面合起來就是完整拓撲，要讓頁面變小請用 `--page-budget`（至少 100）。每頁都會註明唯一的例外：透過沒有任何實例宣告的訊號（例如 package 變數）、連接位於不同頁面之實例的連線不會畫出。
 
 `graph export` 的結束碼：寫出頁面（或沒有東西可畫）時為 0；與 `query` 指令相同，PARTIAL 的建置為 3、STALE/HISTORICAL 為 5（頁面仍會寫出，並在頁面上註明），除非加上 `--allow-partial` / `--allow-stale`；使用 `--diff-base` 時，STALE 不會改變結束碼。`--max-instances` 截斷繪圖時 `pagination.truncated` 為 true。
 
@@ -1142,7 +1142,7 @@ SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest tests/acceptance  # end-to
 
 **關卡（Gates）。** `scripts/qualify.py` 依實際結果計算 G0 至 G5，並寫入 `.svweave/qualification/report.{json,md}`：G0 為 lock 已驗證、後端探測與沙箱測試；G1 為 manifest、快照、設定與路徑政策；G2 為語意測試套件（真實的 pyslang 與 UVM）；G3 為後端測試套件與 MCP 契約；G4 為編輯安全性與所有關鍵變異；G5 為每個 P0 測試套件都沒有 FAIL、BLOCKED 與 SKIP、驗收測試、至少 85% 述句與 80% 分支的覆蓋率、文件檢查，以及在計畫 22.3 預算之內的基準測試。由未執行的步驟所算出的關卡為 `NOT_EVALUATED`，絕不是 PASS。只有在每個關卡都通過且沒有任何開放的阻擋條件時，發行決定才會是 `ACCEPTED_STATIC_PREVIEW`；否則為 `BLOCKED` 並附上原因。
 
-**變異測試套件（Mutation suite）。** `scripts/mutation_suite.py` 一次一個地把 30 個關鍵變異（M01–M30，涵蓋計畫 20.5 及額外的寫入／工作區綁定／快照重用安全防護）注入到儲存庫的拋棄式副本中，並執行對應的測試；當這些測試失敗時，該變異即被殺死（killed）。`--only M01,M05` 可選擇其中幾個；任何不是乾淨失敗的結果（缺少 patch 錨點、逾時、基準（baseline）為紅燈）都是 `ERROR`，絕不算被殺死。
+**變異測試套件（Mutation suite）。** `scripts/mutation_suite.py` 一次一個地把 31 個關鍵變異（M01–M31，涵蓋計畫 20.5 及額外的寫入／工作區綁定／快照重用安全防護）注入到儲存庫的拋棄式副本中，並執行對應的測試；當這些測試失敗時，該變異即被殺死（killed）。`--only M01,M05` 可選擇其中幾個；任何不是乾淨失敗的結果（缺少 patch 錨點、逾時、基準（baseline）為紅燈）都是 `ERROR`，絕不算被殺死。
 
 **基準測試（Benchmark）。** `scripts/gen_corpus.py` 寫出確定性的合成語料，`scripts/benchmark.py` 記錄主機、語料與原始計時（`evidence/bench/`），然後與計畫 22.3 的預算比較。參考語料為 scale 1.0：約 500 個檔案與 100,000 行；縮小規模的執行會被如此標示。
 
