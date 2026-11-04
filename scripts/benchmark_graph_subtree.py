@@ -114,7 +114,9 @@ def _page(path: Path) -> dict[str, Any]:
     m = _DATA.search(path.read_text())
     if not m:
         raise SystemExit(f"no data block in {path}")
-    data: dict[str, Any] = json.loads(m.group(1))
+    from svweave.application.graph_codec import decode
+
+    data: dict[str, Any] = decode(json.loads(m.group(1)))
     return data
 
 

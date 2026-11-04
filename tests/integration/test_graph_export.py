@@ -19,7 +19,11 @@ pytestmark = pytest.mark.integration
 def _page_data(path: Path) -> dict[str, Any]:
     m = re.search(r'<script id="data" type="application/json">(.*?)</script>', path.read_text(), re.S)
     assert m
-    data: dict[str, Any] = json.loads(m.group(1))
+    from svweave.application.graph_codec import FORMAT, decode
+
+    raw = json.loads(m.group(1))
+    assert raw.get("format") == FORMAT  # pages are written compact (svweave-graph/2)
+    data: dict[str, Any] = decode(raw)
     return data
 
 

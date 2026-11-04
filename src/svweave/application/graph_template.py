@@ -100,7 +100,44 @@ small{color:var(--mut)}
 <script>
 "use strict";
 (function () {
-var D = JSON.parse(document.getElementById("data").textContent);
+// codec-begin: svweave-graph/2 decoder; graph_codec.decode is its Python twin (tests compare them)
+function decodePage(R) {
+  if (R.format !== "svweave-graph/2") return R;
+  var s = R.s, n = R.n, sg = R.sg, full = {}, paths = [], nodes = [], i;
+  var g = n.g || {}, pa = n.pa || {}, po = n.po || {}, df = n.diff || {}, cm = n.commits || {}, ct = n.children_total || {};
+  n.full.forEach(function (x) { full[x] = 1; });
+  function sigPath(k) { var o = sg[k]; return o[0] >= 0 ? paths[o[0]] + "." + s[o[1]] : String(s[o[1]]); }
+  function lazyPorts(node, raw) {
+    var cache = null;
+    Object.defineProperty(node, "ports", { enumerable: true, get: function () {
+      if (!cache) cache = raw.map(function (x) { return { port: s[x[0]], dir: s[x[1]], actual: s[x[2]], kind: s[x[3]], signals: x[4].map(sigPath), supported: !!x[5] }; });
+      return cache;
+    } });
+  }
+  for (i = 0; i < n.id.length; i++) {
+    var p = n.p[i], f = n.f[i], k = String(i);
+    paths.push(full[i] ? s[n.r[i]] : paths[p] + "." + s[n.r[i]]);
+    var node = { id: n.id[i], parent: p >= 0 ? n.id[p] : null, path: paths[i], name: s[n.nm[i]],
+      definition: s[n.d[i]], depth: n.dp[i], top: !!(f & 1), "interface": !!(f & 2), stub: !!(f & 4), blackbox: !!(f & 8),
+      generate: (g[k] || []).map(function (x) { return s[x]; }),
+      params: (pa[k] || []).map(function (x) { return { name: s[x[0]], value: s[x[1]], overridden: !!x[2] }; }),
+      file: s[n.fl[i]], line: n.ln[i] };
+    lazyPorts(node, po[k] || []);
+    if (k in df) node.diff = df[k];
+    if (k in cm) node.commits = cm[k];
+    if (k in ct) node.children_total = ct[k];
+    nodes.push(node);
+  }
+  var edges = [];
+  R.e.forEach(function (grp) { grp[2].forEach(function (it) { edges.push({ from: n.id[grp[0]], to: n.id[grp[1]], signal: sigPath(it[0]), port: s[it[1]], directed: !!it[2] }); }); });
+  var out = {};
+  Object.keys(R).forEach(function (key) { if (["format", "s", "n", "sg", "e"].indexOf(key) < 0) out[key] = R[key]; });
+  out.nodes = nodes;
+  out.edges = edges;
+  return out;
+}
+// codec-end
+var D = decodePage(JSON.parse(document.getElementById("data").textContent));
 var NS = "http://www.w3.org/2000/svg";
 var byId = {}, kids = {}, roots = [];
 D.nodes.forEach(function (n) { byId[n.id] = n; kids[n.id] = []; n.collapsed = D.diff ? n.diff === "inside" || (n.diff === "changed" && n.depth >= 2) : n.depth >= 2; });

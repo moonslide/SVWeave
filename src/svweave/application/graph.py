@@ -29,6 +29,7 @@ from svweave.application.diff_impact import (
     commits_in_range,
     commits_touching,
 )
+from svweave.application.graph_codec import encode as encode_page
 from svweave.application.graph_template import render_html
 from svweave.application.impact import _names
 from svweave.application.options import WorkspaceOptions
@@ -709,7 +710,7 @@ def export_graph(
             meta["root"] = str(root_row["path"])
         if diff is not None:
             meta["diff"] = f"{diff['base']} -> {diff['head']}"
-        page = render_html({"meta": meta, **model})
+        page = render_html(encode_page({"meta": meta, **model}))
         data = page.encode("utf-8")
         exports = ensure_private_dir(s.ctx.state_dir, EXPORT_DIR)
         write_under(exports, fname, data)
