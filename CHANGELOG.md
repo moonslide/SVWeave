@@ -16,6 +16,10 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   restricted to the subtree (GRF-I05 on the new `fixtures/language/grf_subtree` RTL); measured
   8.43 s -> 1.24 s CLI at 41k instances (`scripts/benchmark_graph_subtree.py`,
   `evidence/bench/graph-subtree/`).
+* **Installer `--skip-uvm`** (`scripts/bootstrap_locked.py`): where the network denies GitHub source
+  archives, install everything except the pinned UVM library; reported as `skipped`/`verified:
+  false` with a warning, never as PASS (`--verify-only`, gate G0, still fails without it). A failed
+  archive download now names the component, the path to put the locked file and its sha256.
 * **Impact analysis** (`svweave query impact`, MCP `svw_impact`): what changing a module, port, signal
   or instance touches: instances, dependent and dependency definitions, port connection sites,
   references. A port and its implicit net are one entity.

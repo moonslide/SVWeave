@@ -68,6 +68,37 @@ Pinned components (details and hashes: `toolchain.lock.json`):
 | MCP Python SDK | 2.3.0 |
 | Accellera UVM (`uvm-core`) | 2020.3.1 |
 
+### When a locked archive cannot be downloaded (for example UVM)
+
+Some networks allow GitHub *release* downloads but deny GitHub *source archives*
+(`github.com/<owner>/<repo>/archive/...`, `codeload.github.com`). The pinned UVM library is such
+an archive, and every other download is a release asset or a PyPI wheel, so on such a host the
+installer stops at `uvm_core` (before the venv is created) with an error that names the component,
+the file it expects and its locked sha256:
+
+```text
+uvm_core: download of https://github.com/accellera-official/uvm-core/archive/refs/tags/2020.3.1.tar.gz
+failed (HTTP Error 403: Forbidden). Put the locked file at <toolchain>/downloads/uvm_core-2020.3.1.tar.gz
+(sha256 f55bdbc0...) and re-run: it is verified, never trusted; or re-run with --skip-uvm ...
+```
+
+Choose one; none of them changes the lock:
+
+1. **Supply the file.** Download that URL on a machine that can, copy it to the path in the message
+   (or into `--artifact-dir`) and re-run. It is used only if its sha256 equals the lock.
+2. **Allow the host.** Where the network policy is yours to change (for a Claude Code cloud
+   environment: the environment's network access settings), allow `github.com` source archives
+   and `codeload.github.com`, then re-run.
+3. **Install without UVM.** `--skip-uvm` installs everything else. The JSON report lists `uvm_core` as
+   `"skipped": true, "verified": false` with a warning. The UVM profiles and the UVM integration tests
+   cannot run (under `SVWEAVE_REQUIRE_BACKENDS=1` their skip is an ERROR, never a pass), and
+   `--verify-only` without the flag, which `scripts/qualify.py` runs for gate G0, still reports the
+   library as missing: a skipped component is never a PASS.
+
+```bash
+python3.12 scripts/bootstrap_locked.py --create-venv --skip-uvm   # everything except the UVM library
+```
+
 The `svweave` command lives in the venv. Either `source .venv/bin/activate` once per shell or call
 `.venv/bin/svweave`; the examples elsewhere in the documentation write plain `svweave`.
 
