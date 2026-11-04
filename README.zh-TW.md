@@ -61,6 +61,12 @@
 
 ## 狀態
 
+### Council review 修正與已驗證的執行（2026-11-04）
+
+六位專家對整個程式碼庫進行審查，發現了包括一個 **High** 在內的多個問題：diff-impact 執行 git 時會套用儲存庫自己的設定，因此當 partial clone 的設定指定了 `remote.<x>.uploadpack`，`svw_diff_impact`（或 `graph export --diff-base`）在讀取缺少的 blob 時，就會在主機上執行該指令。這已修正（不讀取使用者／系統設定、禁止任何傳輸協定、拒絕 partial clone、逾時確實生效），同時修正的還有：透過 `svweave.yaml` 洩漏環境變數秘密（**不相容變更：** filelist 中的 `$VAR` 現在也必須列在可信的 `policy.json` 的 `environment_allowlist` 中）、只檢查 20 筆變更的 roll-forward 關卡（新增 mutation M30）、沒有 sandbox 的 build 不留紀錄、rename 行數被減半，以及數個介面缺陷。每一項都先重現過；每個修正都有一個在舊程式碼上會失敗的測試。
+
+在 `a3777ff`、於一個 4 CPU 的雲端 session 中驗證（不是 CI），`SVWEAVE_REQUIRE_BACKENDS=1`：unit + contract 1737 通過、0 失敗、4 個 BLOCKED（該主機無法執行）；fault injection 20、整合測試 219（0 skip）、acceptance 12 全數通過；關鍵 mutation **30/30 KILLED**。第一次執行曾抓到這些修正中的一個回歸，該紀錄也一併保留。細節、指令、JUnit 檔案以及未修正的項目：[evidence/council-review-2026-11-04](evidence/council-review-2026-11-04/README.md)。這不是 `scripts/qualify.py` 的資格認定執行。
+
 ### 圖譜子樹與 git diff 檢視（2026-11-04）
 
 `svweave graph export` 現在可以只畫出建置的一部分，而不必重新編譯：
@@ -68,7 +74,7 @@
 - `--instance INSTANCE`：只畫一個實例及其子孫，只從建置中讀出這些資料列。
 - `--diff-base REF [--diff-head REF]`：只畫 `git diff` 改到的 module/interface 的實例（紅框），連同其子樹，以及連接它們的祖先（虛線框，作為脈絡）。在修改前或修改後建置皆可；每個檔案會對應與建置快照相符的那一側 diff。
 
-在分支 `claude/partial-compile-html-1eyxxd` 的 `c641509`、於一個 4 CPU 的雲端 session 中驗證（不是 CI 執行）：unit + contract **1731 通過、0 失敗**；在 `SVWEAVE_REQUIRE_BACKENDS=1` 下以真實的 pyslang、codebase-memory-mcp、Serena 與 UVM 執行整合測試 **214 通過、0 skip**。新測試使用手寫 RTL `fixtures/language/grf_subtree`，並以完整頁面逐一核對每個子樹頁面，以及 diff 頁面中被改到的實例。
+在分支 `claude/partial-compile-html-1eyxxd` 的 `c641509`、於一個 4 CPU 的雲端 session 中驗證（不是 CI 執行）：unit + contract **1731 通過、0 失敗**；在 `SVWEAVE_REQUIRE_BACKENDS=1` 下以真實的 pyslang、codebase-memory-mcp、Serena 與 UVM 執行整合測試 **214 通過、0 skip**。該次執行沒有保留任何檔案；之後程式碼的已記錄執行，是上面的 council review 執行。新測試使用手寫 RTL `fixtures/language/grf_subtree`，並以完整頁面逐一核對每個子樹頁面，以及 diff 頁面中被改到的實例。
 
 以 `scripts/benchmark_graph_subtree.py` 在該主機上量測，41,090 個實例，CLI 實際耗時（[量測證據](evidence/bench/graph-subtree/README.md)）：
 

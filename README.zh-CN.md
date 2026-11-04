@@ -61,6 +61,12 @@
 
 ## 状态
 
+### Council review 修复与已验证的运行（2026-11-04）
+
+六位专家对整个代码库进行审查，发现了包括一个 **High** 在内的多个问题：diff-impact 运行 git 时会套用仓库自身的配置，因此当 partial clone 的配置指定了 `remote.<x>.uploadpack`，`svw_diff_impact`（或 `graph export --diff-base`）在读取缺失的 blob 时，就会在主机上执行该命令。这已修复（不读取用户／系统配置、禁止任何传输协议、拒绝 partial clone、超时确实生效），同时修复的还有：通过 `svweave.yaml` 泄露环境变量秘密（**不兼容变更：** filelist 中的 `$VAR` 现在也必须列在受信的 `policy.json` 的 `environment_allowlist` 中）、只检查 20 条变更的 roll-forward 关卡（新增 mutation M30）、没有 sandbox 的构建不留记录、rename 行数被减半，以及若干接口缺陷。每一项都先重现过；每个修复都有一个在旧代码上会失败的测试。
+
+在 `a3777ff`、于一个 4 CPU 的云端 session 中验证（不是 CI），`SVWEAVE_REQUIRE_BACKENDS=1`：unit + contract 1737 通过、0 失败、4 个 BLOCKED（该主机无法执行）；fault injection 20、集成测试 219（0 skip）、acceptance 12 全部通过；关键 mutation **30/30 KILLED**。第一次运行曾发现这些修复中的一个回归，该记录也一并保留。细节、命令、JUnit 文件以及未修复的项目：[evidence/council-review-2026-11-04](evidence/council-review-2026-11-04/README.md)。这不是 `scripts/qualify.py` 的资格认定运行。
+
 ### 图的子树与 git diff 视图（2026-11-04）
 
 `svweave graph export` 现在可以只绘制构建的一部分，而无需重新编译：
@@ -68,7 +74,7 @@
 - `--instance INSTANCE`：只绘制一个实例及其子孙，只从构建中读取这些数据行。
 - `--diff-base REF [--diff-head REF]`：只绘制 `git diff` 修改到的 module/interface 的实例（红框），连同其子树，以及连接它们的祖先（虚线框，作为上下文）。在修改前或修改后构建均可；每个文件对应与构建快照相符的那一侧 diff。
 
-在分支 `claude/partial-compile-html-1eyxxd` 的 `c641509`、于一个 4 CPU 的云端 session 中验证（不是 CI 运行）：unit + contract **1731 通过、0 失败**；在 `SVWEAVE_REQUIRE_BACKENDS=1` 下使用真实的 pyslang、codebase-memory-mcp、Serena 和 UVM 运行集成测试 **214 通过、0 skip**。新测试使用手写 RTL `fixtures/language/grf_subtree`，并以完整页面逐一核对每个子树页面，以及 diff 页面中被修改的实例。
+在分支 `claude/partial-compile-html-1eyxxd` 的 `c641509`、于一个 4 CPU 的云端 session 中验证（不是 CI 运行）：unit + contract **1731 通过、0 失败**；在 `SVWEAVE_REQUIRE_BACKENDS=1` 下使用真实的 pyslang、codebase-memory-mcp、Serena 和 UVM 运行集成测试 **214 通过、0 skip**。该次运行没有保留任何文件；之后代码的已记录运行，是上面的 council review 运行。新测试使用手写 RTL `fixtures/language/grf_subtree`，并以完整页面逐一核对每个子树页面，以及 diff 页面中被修改的实例。
 
 使用 `scripts/benchmark_graph_subtree.py` 在该主机上测量，41,090 个实例，CLI 实际耗时（[测量证据](evidence/bench/graph-subtree/README.md)）：
 

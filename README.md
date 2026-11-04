@@ -74,6 +74,25 @@ compare-and-set write (TB4). Dashed lines are trust boundaries TB1 to TB4.*
 
 ## Status
 
+### Council review fixes and verified run (2026-11-04)
+
+A six-specialist review of the whole codebase found, among others, one **High** issue:
+diff-impact's git honoured the repository's own config, so a partial clone whose config names
+`remote.<x>.uploadpack` ran that command on the host when `svw_diff_impact` (or
+`graph export --diff-base`) read a missing blob. It is fixed (no user/system config, no transport,
+partial clones refused, an enforced timeout), together with an environment-secret leak through
+`svweave.yaml` (**breaking:** `$VAR` in filelists now also needs the variable in the trusted
+`policy.json` `environment_allowlist`), a roll-forward gate that looked at only 20 changes (new
+mutation M30), unrecorded no-sandbox builds, a halved rename line count and several interface
+defects. Each was reproduced first; each fix has a test that fails without it.
+
+Verified at `a3777ff` in one 4-CPU cloud session (not CI), `SVWEAVE_REQUIRE_BACKENDS=1`:
+unit + contract 1737 passed, 0 failed, 4 BLOCKED (not executable on that host); fault injection
+20, integration 219 (0 skipped), acceptance 12 passed; critical mutations **30/30 KILLED**. A first
+run had caught a regression in these fixes and is kept. Details, commands, JUnit files and what
+was left unfixed: [evidence/council-review-2026-11-04](evidence/council-review-2026-11-04/README.md).
+Not a `scripts/qualify.py` qualification run.
+
 ### Graph subtree and git-diff views (2026-11-04)
 
 `svweave graph export` can now draw part of a build instead of all of it, without recompiling:
@@ -86,6 +105,8 @@ compare-and-set write (TB4). Dashed lines are trust boundaries TB1 to TB4.*
 Verified on branch `claude/partial-compile-html-1eyxxd` at `c641509`, in one 4-CPU cloud session
 (not a CI run): unit + contract **1731 passed, 0 failed**; integration with real pyslang,
 codebase-memory-mcp, Serena and UVM under `SVWEAVE_REQUIRE_BACKENDS=1` **214 passed, 0 skipped**.
+No artifacts of that run were kept; the recorded run of the code that followed is the council
+review run above.
 New tests use the hand-written RTL `fixtures/language/grf_subtree` and check every subtree page,
 and the changed instances of diff pages, against the full page.
 

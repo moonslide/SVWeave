@@ -1,4 +1,4 @@
-[mut] svweave imported (python -I) from: /home/user/SVWeave/.svweave/mutation/repo/src/svweave/__init__.py
+[mut] svweave imported (python -I) from: ${REPO}/.svweave/mutation/repo/src/svweave/__init__.py
 [mut] baseline for M01: rc=0 ['...........                                                              [100%]']
 [mut] M01 KILLED: remove the header hash from the snapshot inventory (headers hash to a constant)
 [mut] baseline for M02: rc=0 ['....                                                                     [100%]']
@@ -56,4 +56,4 @@
 [mut] M29 KILLED: publish an incremental snapshot after source or lookup inventory changed during materialization
 [mut] baseline for M30: rc=0 ['.                                                                        [100%]']
 [mut] M30 KILLED: roll-forward decides on a display-truncated change list (first 20 changes only)
-[mut] killed 27/30; survived=[] errors=['M05', 'M06', 'M08']; wrote /home/user/SVWeave/evidence/mutation/2026-11-04.json
+[mut] killed 27/30; survived=[] errors=['M05', 'M06', 'M08']; wrote ${REPO}/evidence/mutation/2026-11-04.json
