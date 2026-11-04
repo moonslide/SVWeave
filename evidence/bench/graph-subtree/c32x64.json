@@ -1,21 +1,21 @@
 {
   "benchmark": "graph-export-subtree-paired",
   "status": "PASS",
-  "created_at": "20261103T170933Z",
+  "created_at": "20261104T022504Z",
   "source_identity": {
-    "git_head": "04fddfa8a285db981b0f816ff538f59f6629ab3c",
-    "src_tree_sha256": "5856a0a7091ec8120845b3737bc90f9d610d26e590342c95feb67d81c71766d3"
+    "git_head": "ffaf3b4592d60a2137e81c4f85dd1ea9371ce060",
+    "src_tree_sha256": "2b88ad488597f1f0e4e87e7bbe68fc4de606f0e454c82b739fd427150335282d"
   },
   "toolchain_lock_sha256": "ea20baf9bc2da3cb6b9dc41f0234c67f925ea37c5691b0bfbbb1ff30f86ef5e9",
-  "benchmark_script_sha256": "7ab123a3373a0b493db8db3c8d1b24bf87fa55ab7f187695ec8facb1346fc1a6",
+  "benchmark_script_sha256": "b70c61e4c80c689dad1b88c287c3ab4ac1be7f0463b5aed851466bbe87b4237c",
   "host": {
-    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.80GHz",
     "logical_cpus": 4,
     "ram_total_gib": 15.71,
-    "ram_available_gib_at_start": 15.01,
+    "ram_available_gib_at_start": 15.18,
     "swap_total_gib": 0.0,
-    "os": "Linux-6.18.44-fc-v230-x86_64-with-glibc2.39",
-    "kernel": "6.18.44-fc-v230",
+    "os": "Linux-6.18.44-fc-v233-x86_64-with-glibc2.39",
+    "kernel": "6.18.44-fc-v233",
     "python": "3.12.3",
     "filesystem": {
       "mount": "/",
@@ -24,9 +24,9 @@
     },
     "page_cache": "warm (not dropped: no privilege)",
     "loadavg_at_start": [
-      0.755859375,
-      0.923828125,
-      0.7490234375
+      0.55517578125,
+      0.29296875,
+      0.125
     ]
   },
   "design": {
@@ -45,7 +45,7 @@
     "no speed threshold: medians and raw samples only"
   ],
   "build": {
-    "wall_s": 11.869,
+    "wall_s": 17.674,
     "exit": 0,
     "outcome": "OK",
     "build_id": "5af8c6f284c6bb98acf4d3d73d0d9b949eadd58c5a770f64cdff2b543178ca29"
@@ -60,33 +60,45 @@
       "root": "grf_soc.g_cl[16].u_cl.g_core[32].u_core",
       "equal_to_full_restricted": true,
       "differences": []
+    },
+    "diff_reduce": {
+      "changed_instances": 33,
+      "sample": "grf_soc.g_cl[16].u_cl.u_red",
+      "equal_to_full_restricted": true,
+      "differences": []
+    },
+    "diff_core": {
+      "changed_instances": 2048,
+      "sample": "grf_soc.g_cl[16].u_cl.g_core[0].u_core",
+      "equal_to_full_restricted": true,
+      "differences": []
     }
   },
   "full_instances_total": 10306,
   "results": {
     "full": {
       "cli_wall_s": {
-        "median": 2.9268,
+        "median": 3.9055,
         "raw": [
-          3.2637,
-          2.5893,
-          2.9653,
-          2.694,
-          2.9268
+          3.8545,
+          4.297,
+          3.9148,
+          3.9055,
+          3.8488
         ]
       },
       "in_process_s": {
-        "median": 1.5635,
+        "median": 2.0554,
         "raw": [
-          1.5999,
-          1.734,
-          1.5635,
-          1.5508,
-          1.5529
+          2.0349,
+          1.938,
+          2.16,
+          2.0699,
+          2.0554
         ]
       },
-      "bytes": 19410648,
-      "sha256": "ef91f01671fe9a0a248c57847186fc345f324a842f0dfa5456f88a93477f7f8d",
+      "bytes": 19412493,
+      "sha256": "d4d25241d7a34701f7a268d5b13a9b590c4ddba4678009be042d4fc7b5d9a56e",
       "stats": {
         "instances_total": 10306,
         "instances_shown": 10306,
@@ -100,27 +112,27 @@
     },
     "cluster_subtree": {
       "cli_wall_s": {
-        "median": 1.3314,
+        "median": 1.6443,
         "raw": [
-          1.3511,
-          0.966,
-          1.3314,
-          1.3351,
-          0.9797
+          1.5277,
+          1.5292,
+          1.6594,
+          1.7303,
+          1.6443
         ]
       },
       "in_process_s": {
-        "median": 0.0393,
+        "median": 0.0826,
         "raw": [
-          0.0328,
-          0.029,
-          0.048,
-          0.0393,
-          0.0422
+          0.0513,
+          0.0566,
+          0.0826,
+          0.1356,
+          0.122
         ]
       },
-      "bytes": 624137,
-      "sha256": "b7f2a7d99337ec20aab28f2d3364f23a04ef3d9ca01d085995a115fdd5748f2b",
+      "bytes": 625982,
+      "sha256": "e7fa8191764e42717f14032cbb34c69c52c38d230d068e4a2e71452773f8924a",
       "stats": {
         "instances_total": 322,
         "instances_shown": 322,
@@ -128,35 +140,35 @@
         "hub_signals": 4,
         "max_instances": 100000,
         "max_fanout": 16,
-        "root": "grf_soc.g_cl[16].u_cl",
-        "boundary_signals": 4
+        "boundary_signals": 4,
+        "root": "grf_soc.g_cl[16].u_cl"
       },
       "truncated": false,
       "path": ".svweave/exports/bench-cluster_subtree.html"
     },
     "core_subtree": {
       "cli_wall_s": {
-        "median": 1.2127,
+        "median": 1.6316,
         "raw": [
-          1.1869,
-          1.2778,
-          1.2127,
-          1.1542,
-          1.321
+          1.5135,
+          1.6316,
+          1.6503,
+          1.7394,
+          1.4986
         ]
       },
       "in_process_s": {
-        "median": 0.007,
+        "median": 0.0096,
         "raw": [
-          0.0056,
-          0.0051,
-          0.0072,
-          0.007,
-          0.0094
+          0.008,
+          0.0083,
+          0.0097,
+          0.0096,
+          0.0097
         ]
       },
-      "bytes": 26810,
-      "sha256": "4f25f7b06f0ff4019c1a0bff9e9f7390cee5f288378c91a92cfd3630bd9356f8",
+      "bytes": 28655,
+      "sha256": "75000edbf23ea04b72215890e67dbef22813b0434e05b8d7b4969cb979afd16a",
       "stats": {
         "instances_total": 5,
         "instances_shown": 5,
@@ -164,21 +176,103 @@
         "hub_signals": 0,
         "max_instances": 100000,
         "max_fanout": 16,
-        "root": "grf_soc.g_cl[16].u_cl.g_core[32].u_core",
-        "boundary_signals": 4
+        "boundary_signals": 4,
+        "root": "grf_soc.g_cl[16].u_cl.g_core[32].u_core"
       },
       "truncated": false,
       "path": ".svweave/exports/bench-core_subtree.html"
+    },
+    "diff_reduce": {
+      "cli_wall_s": {
+        "median": 1.6754,
+        "raw": [
+          1.5781,
+          1.7122,
+          1.8177,
+          1.6251,
+          1.6754
+        ]
+      },
+      "in_process_s": {
+        "median": 0.0563,
+        "raw": [
+          0.0511,
+          0.054,
+          0.0667,
+          0.0563,
+          0.0696
+        ]
+      },
+      "bytes": 110086,
+      "sha256": "2834e2a1b5f224418554de61fc4eaa192e23f898dfe4f1ca8483ce34427fa159",
+      "stats": {
+        "instances_total": 66,
+        "instances_shown": 66,
+        "edges": 129,
+        "hub_signals": 4,
+        "max_instances": 100000,
+        "max_fanout": 16,
+        "boundary_signals": 0,
+        "root": "grf_soc",
+        "changed_instances": 33
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-diff_reduce.html"
+    },
+    "diff_core": {
+      "cli_wall_s": {
+        "median": 4.4005,
+        "raw": [
+          4.4921,
+          4.4005,
+          4.5037,
+          4.1704,
+          4.1743
+        ]
+      },
+      "in_process_s": {
+        "median": 2.4024,
+        "raw": [
+          2.4024,
+          2.2987,
+          2.787,
+          2.3506,
+          2.4436
+        ]
+      },
+      "bytes": 19541843,
+      "sha256": "1623431d3d4434bdf118ed4e91d569d7492cebf0e88bdaaac4d386701da7c6f8",
+      "stats": {
+        "instances_total": 10273,
+        "instances_shown": 10273,
+        "edges": 38912,
+        "hub_signals": 132,
+        "max_instances": 100000,
+        "max_fanout": 16,
+        "boundary_signals": 0,
+        "root": "grf_soc",
+        "changed_instances": 2048
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-diff_core.html"
     }
   },
   "speedup_vs_full": {
     "cluster_subtree": {
-      "cli": 2.2,
-      "in_process": 39.77
+      "cli": 2.38,
+      "in_process": 24.88
     },
     "core_subtree": {
-      "cli": 2.41,
-      "in_process": 224.32
+      "cli": 2.39,
+      "in_process": 213.38
+    },
+    "diff_reduce": {
+      "cli": 2.33,
+      "in_process": 36.48
+    },
+    "diff_core": {
+      "cli": 0.89,
+      "in_process": 0.86
     }
   }
 }

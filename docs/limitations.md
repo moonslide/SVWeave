@@ -355,9 +355,11 @@ the tested SHA; later documentation commits are not automatically native-tested.
   not drawn (headers are not re-expanded, as in `diff-impact`). Per file the diff side matching the
   build's snapshot is used; a file matching neither is mapped approximately (warned). A change to a
   module instantiated everywhere draws most of the design: the view is only as small as the change.
-* Measured speed-up of `--root` (`evidence/bench/graph-subtree/`, one 4-CPU host, one synthetic
-  design, not the reference corpus): CLI 2.93 s -> 1.33 s at 10,306 instances and 8.43 s -> 1.24 s
-  at 41,090 for one cluster; at 90 instances there is no visible saving (Python start-up dominates).
+* Measured (`evidence/bench/graph-subtree/`, one 4-CPU host, one synthetic design, not the
+  reference corpus), CLI at 41,090 instances: full 14.6 s, one cluster subtree 1.70 s, a diff that
+  changes one module with 65 instances 1.63 s, a diff that changes a module with 8,192 instances
+  15.7 s (slower than the full export). At 90 instances no mode shows a visible saving (Python
+  start-up dominates).
 
 ## 9. Impact and diff impact
 
