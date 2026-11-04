@@ -377,6 +377,8 @@ def graph_export(
     diff_base: str | None = None,
     diff_head: str | None = None,
     per_commit: bool = False,
+    split: bool = False,
+    page_budget: int | None = None,
 ) -> Envelope:
     clean_text(name=name, instance=instance, diff_base=diff_base, diff_head=diff_head)
     return graph.export_graph(
@@ -390,6 +392,8 @@ def graph_export(
         diff_base=diff_base,
         diff_head=diff_head,
         per_commit=per_commit,
+        split=split,
+        page_budget=page_budget,
     )
 
 

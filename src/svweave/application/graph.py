@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import bisect
 import hashlib
+import os
 import re
 from collections import defaultdict
 from collections.abc import Callable, Iterator
@@ -29,6 +30,9 @@ from svweave.application.diff_impact import (
     commits_in_range,
     commits_touching,
 )
+from svweave.application.graph_atlas import DEFAULT_PAGE_BUDGET, MIN_PORTAL
+from svweave.application.graph_atlas import INDEX as ATLAS_INDEX
+from svweave.application.graph_atlas import build_pages as build_atlas_pages
 from svweave.application.graph_codec import encode as encode_page
 from svweave.application.graph_template import render_html
 from svweave.application.impact import _names
@@ -64,6 +68,11 @@ DIFF_VIEW_NOTE = (
     "diff view: instances of the definitions the git diff changes are drawn with their whole "
     "subtrees; their ancestors are context only and show only their drawn children and the "
     "connections among drawn instances"
+)
+ATLAS_NOTE = (
+    "atlas: the topology is split into linked pages; a portal node is drawn on its parent page "
+    "with its own port associations and opens the page of its subtree; together the pages are "
+    "the complete topology"
 )
 SUBTREE_NOTE = (
     "subtree view: only the root instance and its descendants were read; fan-out counts uses "
@@ -286,6 +295,7 @@ def build_model(
     max_fanout: int | None,
     root_row: Any = None,
     selection: dict[str, Any] | None = None,
+    region_rows: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Graph model of the build behind session ``s``. Pure function of the stored rows.
 
@@ -296,8 +306,10 @@ def build_model(
 
     With ``selection`` (from :func:`diff_selection`) exactly its rows are read and drawn, under
     the same rules, and every node carries its ``diff`` mark."""
-    partial = root_row is not None or selection is not None
-    if selection is not None:
+    partial = root_row is not None or selection is not None or region_rows is not None
+    if region_rows is not None:  # one page of an atlas (graph_atlas): exactly these instances
+        rows, bindings, kinds = _load_rows(s, region_rows)
+    elif selection is not None:
         rows, bindings, kinds = _load_rows(s, selection["rows"])
     elif root_row is not None:
         rows, bindings, kinds = _load_subtree(s, root_row)
@@ -609,6 +621,70 @@ def _diff_view(
     return diff, sel, warns
 
 
+def _export_atlas(
+    s: Any,
+    request_id: str,
+    *,
+    root_row: Any,
+    name: str | None,
+    instance: str | None,
+    budget: int,
+    max_instances: int | None,
+    max_fanout: int | None,
+) -> Envelope:
+    """--split: the complete topology (or one --instance subtree) as linked pages of at most
+    ``budget`` instances in one directory; ``index.html`` is the top page (graph_atlas)."""
+    stem = "graph-" + s.bid[:12] + "-atlas"
+    if root_row is not None:
+        stem += "-" + hashlib.sha256(str(root_row["path"]).encode()).hexdigest()[:10]
+    dirname = name or stem
+    if not _SAFE_NAME.fullmatch(dirname) or dirname.startswith("."):
+        raise SvwError(ErrorCode.INVALID_CONFIG, "name must match [A-Za-z0-9._-]+ (no path)")
+    start = [root_row] if root_row is not None else s.rows(
+        "SELECT * FROM instances WHERE build_id=? AND parent_id IS NULL ORDER BY ord", s.bid)
+    meta = {
+        "build_id": s.bid,
+        "snapshot_id": str(s.build["snapshot_id"]),
+        "profile": str(s.build["profile"]),
+        "completeness": str(s.build["completeness"]),
+        "freshness": s.fresh().value,
+        "evidence_kind": "HDL_STATIC_RESOLVED",
+        "workspace_id": str(s.build["workspace_id"]),
+    }
+    files, summary = build_atlas_pages(
+        s, start, budget=budget, meta=meta,
+        model_of=lambda region: build_model(
+            s, max_instances=max_instances, max_fanout=max_fanout, region_rows=region),
+    )
+    exports = ensure_private_dir(s.ctx.state_dir, EXPORT_DIR)
+    out = ensure_private_dir(exports, dirname)
+    for entry in os.scandir(out):  # pages of an earlier, different cut must not linger
+        if entry.is_file(follow_symlinks=False) and entry.name.startswith("p-") \
+                and entry.name.endswith(".html") and entry.name not in files:
+            os.unlink(entry.path)
+    for fname, data in files.items():
+        write_under(out, fname, data)
+    warns: list[str] = []
+    if summary["oversized_pages"]:
+        warns.append(f"{summary['oversized_pages']} page(s) hold more than {budget} instances: "
+                     f"subtrees under {MIN_PORTAL} instances are never split off")
+    return build_envelope(
+        s.ctx, s.db, s.build, request_id,
+        {
+            "path": f".svweave/{EXPORT_DIR}/{dirname}/{ATLAS_INDEX}",
+            "directory": f".svweave/{EXPORT_DIR}/{dirname}",
+            "written": True,
+            "served": False,
+            "root": str(root_row["path"]) if root_row is not None else None,
+            "atlas": {**summary, "files": sorted(files)[:200]},
+            "note": GRAPH_NOTE,
+        },
+        warnings=warns,
+        extra_limits=_gap_limits(s) + [GRAPH_NOTE, ATLAS_NOTE],
+        freshness=s.fresh(),
+    )
+
+
 def export_graph(
     opts: WorkspaceOptions,
     build_id: str,
@@ -621,7 +697,18 @@ def export_graph(
     diff_base: str | None = None,
     diff_head: str | None = None,
     per_commit: bool = False,
+    split: bool = False,
+    page_budget: int | None = None,
 ) -> Envelope:
+    if page_budget is not None and not split:
+        raise SvwError(ErrorCode.INVALID_CONFIG, "page_budget needs split")
+    if split and diff_base is not None:
+        raise SvwError(ErrorCode.INVALID_CONFIG,
+                       "split applies to the complete topology or an --instance subtree, not to "
+                       "a diff view (a diff page is small already)")
+    if page_budget is not None and (not isinstance(page_budget, int)
+                                    or isinstance(page_budget, bool) or page_budget < 100):
+        raise SvwError(ErrorCode.INVALID_CONFIG, "page_budget must be at least 100 instances")
     if per_commit and (diff_base is None or diff_head is None):
         raise SvwError(
             ErrorCode.INVALID_CONFIG,
@@ -644,6 +731,12 @@ def export_graph(
         raise SvwError(ErrorCode.INVALID_CONFIG, "max_fanout must be at least 2 (omit: no hubs)")
     with _session(opts, build_id) as s:
         root_row = resolve_root(s, instance) if instance is not None else None
+        if split:
+            return _export_atlas(
+                s, request_id, root_row=root_row, name=name, instance=instance,
+                budget=page_budget or DEFAULT_PAGE_BUDGET, max_instances=max_instances,
+                max_fanout=max_fanout,
+            )
         diff: dict[str, Any] | None = None
         warns: list[str] = []
         if diff_base is not None:

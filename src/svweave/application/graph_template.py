@@ -63,6 +63,9 @@ td,th{border-bottom:1px solid var(--line);padding:2px 4px;text-align:left;vertic
 .node.stub rect,.node.blackbox rect{stroke-dasharray:4 3;stroke:var(--warn)}
 .node.changed rect{fill:color-mix(in srgb,var(--bad) 18%,var(--card));stroke:var(--bad);stroke-width:2}
 .node.context rect{stroke-dasharray:3 3;opacity:.75}
+.node.portal rect{stroke:var(--acc);stroke-width:2.5;stroke-dasharray:8 3}
+#crumbs a{color:var(--acc)}
+.portal-link{display:inline-block;margin:6px 0;font-weight:600;color:var(--acc)}
 .crow{cursor:pointer}
 td.sha{white-space:nowrap;font-family:ui-monospace,Menlo,monospace}
 .crow:hover td,.crow.on td{background:color-mix(in srgb,var(--acc) 16%,transparent)}
@@ -104,7 +107,7 @@ small{color:var(--mut)}
 function decodePage(R) {
   if (R.format !== "svweave-graph/2") return R;
   var s = R.s, n = R.n, sg = R.sg, full = {}, paths = [], nodes = [], i;
-  var g = n.g || {}, pa = n.pa || {}, po = n.po || {}, df = n.diff || {}, cm = n.commits || {}, ct = n.children_total || {};
+  var g = n.g || {}, pa = n.pa || {}, po = n.po || {}, df = n.diff || {}, cm = n.commits || {}, ct = n.children_total || {}, pt = n.portal || {};
   n.full.forEach(function (x) { full[x] = 1; });
   function sigPath(k) { var o = sg[k]; return o[0] >= 0 ? paths[o[0]] + "." + s[o[1]] : String(s[o[1]]); }
   function lazyPorts(node, raw) {
@@ -126,6 +129,7 @@ function decodePage(R) {
     if (k in df) node.diff = df[k];
     if (k in cm) node.commits = cm[k];
     if (k in ct) node.children_total = ct[k];
+    if (k in pt) node.portal = pt[k];
     nodes.push(node);
   }
   var edges = [];
@@ -159,6 +163,22 @@ badge(m.freshness, m.freshness === "CURRENT" ? "ok" : "warn");
 badge("profile " + m.profile);
 badge(m.evidence_kind);
 if (m.diff) badge("diff " + m.diff, "bad");
+// atlas links are data: only our own file names are ever used as an href
+function safeHref(x) {
+  if (x === "index.html") return true;
+  return typeof x === "string" && x.length === 17 && x.indexOf("p-") === 0 && x.slice(12) === ".html" && /^[0-9a-f]+$/.test(x.slice(2, 12));
+}
+if (m.atlas) {
+  var crumbs = h("span", undefined, "badge");
+  crumbs.id = "crumbs";
+  crumbs.appendChild(document.createTextNode("page " + m.atlas.page + " of " + m.atlas.pages + ": "));
+  m.atlas.crumbs.forEach(function (c, i) {
+    if (i) crumbs.appendChild(document.createTextNode(" / "));
+    if (i < m.atlas.crumbs.length - 1 && safeHref(c[1])) { var a = h("a", c[0]); a.href = c[1]; crumbs.appendChild(a); }
+    else crumbs.appendChild(document.createTextNode(c[0]));
+  });
+  meta.appendChild(crumbs);
+}
 if (m.root) badge("subtree " + m.root, "warn");
 var msgs = [];
 if (m.completeness !== "COMPLETE") msgs.push("Analysis is " + m.completeness + ": an absent instance or connection is not proof of absence.");
@@ -234,7 +254,7 @@ function draw() {
   }
   D.nodes.forEach(function (n) {
     var p = pos[n.id]; if (!p) return;
-    var cls = "node" + (n.diff === "changed" ? " changed" : n.diff === "context" ? " context" : "") + (n.top ? " top" : "") + (n.stub ? " stub" : "") + (n.blackbox ? " blackbox" : "") + (sel === n.id ? " sel" : "");
+    var cls = "node" + (n.portal ? " portal" : "") + (n.diff === "changed" ? " changed" : n.diff === "context" ? " context" : "") + (n.top ? " top" : "") + (n.stub ? " stub" : "") + (n.blackbox ? " blackbox" : "") + (sel === n.id ? " sel" : "");
     if (hits) cls += hits[n.id] ? " hit" : " dim";
     else if (commitSel !== null && n.diff !== "context") cls += commitsOf(n).indexOf(commitSel) >= 0 ? " hit" : " dim";
     var g = el("g", { "class": cls, transform: "translate(" + p.x + "," + p.y + ")", tabindex: "0" });
@@ -242,6 +262,7 @@ function draw() {
     g.appendChild(el("text", { x: 8, y: 16 }, trunc(relName(n), 26)));
     var sub = n.definition || "", ck = kids[n.id].length;
     if (ck && n.collapsed) sub += "  [+" + ck + "]";
+    if (n.portal) sub += "  -> page of " + n.portal.instances;
     g.appendChild(el("text", { x: 8, y: 30, "class": "sub" }, trunc(sub, 32)));
     g.appendChild(el("title", {}, n.path));
     g.addEventListener("click", function (ev) { ev.stopPropagation(); sel = n.id; selEdge = null; showNode(n); draw(); });
@@ -269,6 +290,11 @@ function table(head, rows) {
 function showNode(n) {
   clearSide();
   side.appendChild(h("h2", n.name));
+  if (n.portal && safeHref(n.portal.href)) {
+    var pl = h("a", "Open the page of this subtree (" + n.portal.instances + " instances)", "portal-link");
+    pl.href = n.portal.href;
+    side.appendChild(pl);
+  }
   side.appendChild(dl([["path", n.path], ["definition", n.definition], ["top", n.top ? "yes" : ""], ["interface", n.interface ? "yes" : ""],
     ["stub", n.stub ? "yes" : ""], ["blackbox candidate", n.blackbox ? "yes" : ""], ["generate", (n.generate || []).join(" / ")],
     ["source", n.file ? n.file + (n.line ? ":" + n.line : "") : ""], ["children", kids[n.id].length + (n.children_total !== undefined && n.children_total !== kids[n.id].length ? " drawn of " + n.children_total : "")],
@@ -355,7 +381,41 @@ document.getElementById("q").addEventListener("input", function () {
     }
   });
   draw();
+  atlasSearch(q);
 });
+// on the index page of an atlas: find any instance of the whole design, on whichever page
+var A = D.atlas_search, atlasPaths = null;
+function atlasSearch(q) {
+  if (!A) return;
+  if (!atlasPaths) {
+    atlasPaths = [];
+    for (var i = 0; i < A.p.length; i++) atlasPaths.push(A.p[i] >= 0 ? atlasPaths[A.p[i]] + "." + A.s[A.r[i]] : A.s[A.r[i]]);
+  }
+  clearSide();
+  if (!q) { changes(); return; }
+  var found = [];
+  for (var j = 0; j < atlasPaths.length && found.length < 50; j++) if (atlasPaths[j].toLowerCase().indexOf(q) >= 0) found.push(j);
+  side.appendChild(h("h2", "Whole design (" + atlasPaths.length + " instances): " + (found.length >= 50 ? "first 50 matches" : found.length + " match(es)")));
+  found.forEach(function (j) {
+    var file = A.pages[A.pg[j]];
+    if (!safeHref(file)) return;
+    var a = h("a", atlasPaths[j]);
+    a.href = file + "#f=" + encodeURIComponent(atlasPaths[j]);
+    var row = h("div"); row.appendChild(a); side.appendChild(row);
+  });
+}
+// arriving from a search result: open the tree down to that instance and select it
+function focusFromHash() {
+  var hsh = location.hash || "";
+  if (hsh.indexOf("#f=") !== 0) return;
+  var want = "";
+  try { want = decodeURIComponent(hsh.slice(3)); } catch (err) { return; }
+  var hit = D.nodes.filter(function (n) { return n.path === want; })[0];
+  if (!hit) return;
+  var a = hit.parent ? byId[hit.parent] : null;
+  while (a) { a.collapsed = false; a = a.parent ? byId[a.parent] : null; }
+  sel = hit.id; draw(); showNode(hit);
+}
 
 // ---- pan / zoom
 var view = document.getElementById("view"), svg = document.getElementById("svg");
@@ -377,6 +437,7 @@ view.addEventListener("wheel", function (e) {
 }, { passive: false });
 draw(); fit();
 changes();
+focusFromHash();
 })();
 </script>
 </body>

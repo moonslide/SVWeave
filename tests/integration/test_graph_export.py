@@ -490,3 +490,75 @@ def test_GRF_I14_the_default_page_is_the_complete_topology(tmp_path: Path) -> No
     code, env = run(root, "graph", "export", "--build", bid, "--max-fanout", "16", "--name", "r")
     assert code == 0 and f"{cl}.clk" in {h["signal"] for h in _page_data(
         root / env["data"]["path"])["hubs"]}  # the reduction still works when asked for
+
+
+# ------------------------------------------------------------------ --split atlas
+def test_GRF_I15_the_atlas_pages_together_are_exactly_the_complete_topology(
+        tmp_path: Path) -> None:
+    root, bid = _grf(tmp_path, clusters=4, cores=30)  # 1 + 4 * (2 + 150) + 1 = 610 instances
+    code, env = run(root, "graph", "export", "--build", bid, "--name", "whole")
+    whole = _page_data(root / env["data"]["path"])
+    code, env = run(root, "graph", "export", "--build", bid, "--split", "--page-budget", "200",
+                    "--name", "atlas")
+    assert code == 0, env.get("error")
+    a = env["data"]["atlas"]
+    assert env["data"]["path"] == ".svweave/exports/atlas/index.html"
+    # the index takes cluster 0 whole (1 + 4 portal-or-cluster nodes + reducer + 151 = 157);
+    # clusters 1..3 (152 each) no longer fit and become pages of their own
+    assert a["pages"] == 4 and a["budget"] == 200 and a["oversized_pages"] == 0
+    assert a["largest_page"] <= 200
+    d = root / env["data"]["directory"]
+    pages = {f: _page_data(d / f) for f in a["files"]}
+    index = pages["index.html"]
+    portals = [n for n in index["nodes"] if "portal" in n]
+    assert sorted(n["path"] for n in portals) == [f"grf_soc.g_cl[{c}].u_cl" for c in (1, 2, 3)]
+    assert len(index["nodes"]) == 157
+    for p in portals:  # every portal opens an existing page whose root it is
+        sub = pages[p["portal"]["href"]]
+        assert sub["meta"]["root"] == p["path"] and p["portal"]["instances"] == 152
+        assert sub["meta"]["atlas"]["crumbs"][0] == ["index", "index.html"]
+        assert [n["path"] for n in sub["nodes"] if n["parent"] is None] == [p["path"]]
+    # nodes: every instance on exactly one page, a portal counted on its own page
+    seen: dict[str, dict[str, Any]] = {}
+    for pg in pages.values():
+        for n in pg["nodes"]:
+            if "portal" in n:
+                continue
+            assert n["path"] not in seen, n["path"]
+            seen[n["path"]] = n
+    wnodes = {n["path"]: n for n in whole["nodes"]}
+    assert set(seen) == set(wnodes) and len(seen) == 610
+    for path, n in seen.items():
+        assert n["ports"] == wnodes[path]["ports"] and n["params"] == wnodes[path]["params"]
+    # edges: the union over all pages is the complete page's edge set, nothing twice
+    union: list[tuple[str, str, str, str]] = []
+    for pg in pages.values():
+        union += sorted(_edges(pg))
+    assert len(union) == len(set(union)) and set(union) == _edges(whole)
+    # the index page's search covers every instance and points at the page that shows it
+    srch = index["atlas_search"]
+    paths: list[str] = []
+    for i in range(len(srch["p"])):
+        rel = srch["s"][srch["r"][i]]
+        paths.append(paths[srch["p"][i]] + "." + rel if srch["p"][i] >= 0 else rel)
+    assert sorted(paths) == sorted(wnodes)
+    for i, path in enumerate(paths):
+        on = pages[srch["pages"][srch["pg"][i]]]
+        assert path in {n["path"] for n in on["nodes"] if "portal" not in n}
+
+
+def test_GRF_I16_atlas_refusals_and_a_subtree_atlas(tmp_path: Path) -> None:
+    root, bid = _grf(tmp_path, clusters=4, cores=30)
+    for bad in (["--split", "--diff-base", "HEAD"], ["--page-budget", "500"],
+                ["--split", "--page-budget", "10"], ["--split", "--name", "../x"]):
+        code, e = run(root, "graph", "export", "--build", bid, *bad)
+        assert code == 2 and e["error"]["code"] == "INVALID_CONFIG", bad
+    code, env = run(root, "graph", "export", "--build", bid, "--split", "--instance",
+                    "grf_soc.g_cl[1].u_cl", "--page-budget", "100", "--name", "sub")
+    assert code == 0, env.get("error")
+    # 152 instances: the 30 cores (5 each) are below MIN_PORTAL, so one oversized page, said so
+    assert env["data"]["atlas"]["pages"] == 1 and env["data"]["atlas"]["oversized_pages"] == 1
+    assert any("never split off" in w for w in env["warnings"])
+    index = _page_data(root / env["data"]["path"])
+    assert [n["path"] for n in index["nodes"]][0] == "grf_soc.g_cl[1].u_cl"
+    assert len(index["nodes"]) == 152

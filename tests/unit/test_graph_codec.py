@@ -38,7 +38,8 @@ def sample() -> dict[str, Any]:
                       "supported": False}])
     c = _node("c", "a", "\\esc.aped ", depth=1, name=HOSTILE, diff="context",
               children_total=7)  # a path that does not extend its parent's
-    d = _node("d", None, "other_top", blackbox=True, interface=True)
+    d = _node("d", None, "other_top", blackbox=True, interface=True,
+              portal={"href": "p-0123456789.html", "instances": 42})
     return {
         "meta": {"build_id": "f" * 64, "root": HOSTILE},
         "nodes": [a, b, c, d],

@@ -27,7 +27,7 @@ FORMAT = "svweave-graph/2"
 _FLAGS = (("top", 1), ("interface", 2), ("stub", 4), ("blackbox", 8))
 _NODE_KEYS = ("id", "parent", "path", "name", "definition", "depth", "top", "interface",
               "stub", "blackbox", "generate", "params", "file", "line", "ports")
-_OPTIONAL = ("diff", "commits", "children_total")
+_OPTIONAL = ("diff", "commits", "children_total", "portal")
 
 
 class _Table:

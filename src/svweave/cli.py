@@ -401,6 +401,15 @@ def graph_grp() -> None:
     help="Diff view: label each changed instance with the commits of --diff-base..--diff-head "
     "that changed its module (build the --diff-head revision).",
 )
+@click.option(
+    "--split",
+    is_flag=True,
+    help="Write the complete topology as linked pages (a directory with index.html), each of at "
+    "most --page-budget instances; for SoCs too large for one page.",
+)
+@click.option(
+    "--page-budget", type=int, default=None, help="Instances per page with --split (default 5000)."
+)
 @pass_state
 @_query_flags
 def graph_export_cmd(
@@ -413,6 +422,8 @@ def graph_export_cmd(
     diff_base: str | None,
     diff_head: str | None,
     per_commit: bool,
+    split: bool,
+    page_budget: int | None,
 ) -> None:
     """Write .svweave/exports/<name>.html: instance hierarchy plus port-association connections."""
     if diff_base is not None and st.query_policy is not None:
@@ -432,6 +443,8 @@ def graph_export_cmd(
                 diff_base=diff_base,
                 diff_head=diff_head,
                 per_commit=per_commit,
+                split=split,
+                page_budget=page_budget,
             )
         )
     )
