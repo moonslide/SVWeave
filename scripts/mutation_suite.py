@@ -396,8 +396,8 @@ MUTATIONS: list[Mutation] = [
         "M30", "roll-forward decides on a display-truncated change list (first 20 changes only)",
         "A3 (beyond 20.5); council review 2026-11-04",
         [Patch("src/svweave/application/edit.py",
-               "        changed = [c.model_dump() for c in res.changed]\n",
-               "        changed = [c.model_dump() for c in res.changed][:20]  # " + MARK + ":M30\n")],
+               "        changed = stale.all_changes if isinstance(stale, _StaleError) else stale.details[\"changed\"]\n",
+               "        changed = stale.details[\"changed\"]  # " + MARK + ":M30\n")],
         ["tests/fault_injection/test_recover_gates.py::"
          "test_a3_a_foreign_change_behind_twenty_own_changes_is_still_refused"],
     ),

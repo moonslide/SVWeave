@@ -221,19 +221,30 @@ def _base_rec(ctx: WorkspaceContext, sid: str) -> tuple[SnapshotRecord, Path]:
     return load_record(d), d
 
 
+class _StaleError(SvwError):
+    """The freshness refusal. ``details`` shows at most 20 changes; ``all_changes`` (never
+    serialized) keeps the complete list for gates that must judge every change."""
+
+    all_changes: list[dict[str, Any]]
+
+
 def _stale(ctx: WorkspaceContext, rec: SnapshotRecord) -> SvwError | None:
     res = check_freshness(ctx, rec)
     if res.freshness == "CURRENT":
         return None
-    return SvwError(
+    changes = [c.model_dump() for c in res.changed]
+    err = _StaleError(
         ErrorCode.STALE_SNAPSHOT,
         "the workspace changed since the base snapshot (sources or dependencies)",
         {
             "reason": "workspace_changed",
             "snapshot_id": rec.snapshot_id,
-            "changed": [c.model_dump() for c in res.changed[:20]],
+            "changed": changes[:20],
+            "changed_total": len(changes),
         },
     )
+    err.all_changes = changes
+    return err
 
 
 # ------------------------------------------------------------------------------ freezing
@@ -1070,12 +1081,12 @@ def check_inputs_unchanged(
     own = tolerate or {}
     for sid in sorted(s for s in sids if s):
         r, _ = _base_rec(ctx, sid)
-        res = check_freshness(ctx, r)
-        if res.freshness == "CURRENT":
+        stale = _stale(ctx, r)  # the one freshness seam (tests disable it to reach the CAS)
+        if stale is None:
             continue
-        # decide on the COMPLETE change list: a display-truncated list could hide a foreign
-        # change behind the transaction's own applied files (roll-forward would then write)
-        changed = [c.model_dump() for c in res.changed]
+        # decide on the COMPLETE change list: the displayed list is cut at 20 and could hide a
+        # foreign change behind the transaction's own applied files (roll-forward would write)
+        changed = stale.all_changes if isinstance(stale, _StaleError) else stale.details["changed"]
         foreign = [
             c for c in changed
             if not (
@@ -1089,7 +1100,7 @@ def check_inputs_unchanged(
                 ErrorCode.EDIT_CONFLICT,
                 "the workspace changed since validation (a source or dependency was edited); "
                 "nothing was written",
-                {"reason": "workspace_changed", "snapshot_id": r.snapshot_id,
+                {"reason": "workspace_changed", **stale.details,
                  "changed": shown[:20], "changed_total": len(shown)})
 
 
