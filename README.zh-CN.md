@@ -583,6 +583,15 @@ svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature --
 
 响应信封的 `data.diff` 会列出：被修改的定义及其 `instances` 与 `instances_drawn`、被修改的文件及所用的那一侧（`old`/`new`；`aligned: false` 表示近似对应，并附带警告）、不在构建中的文件，以及不属于任何 module 的变更（package、class）。加上 `--instance INSTANCE` 可只保留某个实例之下的变更（其他的计入 `outside_root`）。若 diff 触及不到任何实例（例如没有修改的工作树），这是一个答案而不是错误：退出码 0、`data.written: false`、`data.path: null`，`data.diff.nothing_to_draw` 说明原因，且不会写出页面。与 `diff-impact` 相同，在此模式下 STALE 的构建不会改变退出码；若仓库配置了 git clean/process filter，与工作树比较会被拒绝（请改用 C）；partial clone（promisor remote）也会被拒绝，因为读取它可能触发下载。
 
+**非常大的 SoC。** 页面以精简且无损的格式写出（`svweave-graph/2`：在 C906 SoC 上比原来小 8 倍），但十万级实例 SoC 的完整拓扑仍是约 40 MB、需约 10 秒才能打开的单一页面。有两种输出可把它切成每份至多 `--page-budget` 个实例的部分（默认 5000）；所有部分合起来恰好就是完整拓扑：
+
+```bash
+svweave graph export --build BUILD_ID --split   # 互相链接的多页：.svweave/exports/<name>/index.html
+svweave graph export --build BUILD_ID --lazy    # 单一页面，打开时才加载其他部分
+```
+
+放不下的子树会成为“入口节点”：它在上一层页面上是一个节点（带着自己的端口连接），可打开它那一部分（`--split`：链接到它的页面；`--lazy`：双击即在同一张图中加载）。索引页可搜索整个设计的所有实例，并打开正确的部分。在 115,562 个实例上：单一页面打开需 10.1 秒，`--split` 或 `--lazy` 的索引页约 0.55 秒，打开一条搜索结果约 1 秒（[测量证据](evidence/bench/graph-large/README.md)）。`--lazy` 的页面 CSP 允许加载同一目录的脚本（读取本地文件所必需；仅在 Chromium 验证）；`--split` 保持严格的 CSP，任何浏览器都能用。
+
 `graph export` 的退出码：写出页面（或没有东西可画）时为 0；与 `query` 命令相同，PARTIAL 的构建为 3、STALE/HISTORICAL 为 5（页面仍会写出，并在页面上注明），除非加上 `--allow-partial` / `--allow-stale`；使用 `--diff-base` 时，STALE 不会改变退出码。`--max-instances` 截断绘图时 `pagination.truncated` 为 true。
 
 ## 在 Claude Code 和 Codex 中使用 SVWeave
@@ -959,7 +968,7 @@ root_mappings:
 | `svweave query search --snapshot S --query Q` | 图候选或带标记的文本回退（`--scope`、`--no-graph`） |
 | `svweave report --build B` | 由真实数据填充的状态报告；未评估的门禁会如实说明 |
 | `svweave evidence import --manifest FILE` | 导入外部证据（存储为 `EXTERNAL_DECLARED`） |
-| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R [--per-commit]]] [--allow-stale] [--allow-partial]` | 写出 `.svweave/exports/<name>.html`：实例层次加上端口关联连接，一个自包含页面，不提供任何服务（ADR-014）；`--instance` 只绘制实例 I 的子树；`--diff-base` 只绘制 git diff 改到的实例 |
+| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R [--per-commit]]] [--split \| --lazy [--page-budget N]] [--allow-stale] [--allow-partial]` | 写出 `.svweave/exports/<name>.html`：实例层次加上端口关联连接，一个自包含页面，不提供任何服务（ADR-014）；`--instance` 只绘制实例 I 的子树；`--diff-base` 只绘制 git diff 改到的实例 |
 | `svweave cache gc [--no-dry-run]` | 对快照做垃圾回收；保留最近 3 个及被引用的快照；默认为试运行 |
 | `svweave debug bundle --build B [--out DIR]` | 复现包：哈希、清单、诊断摘要、脱敏路径 |
 | `svweave schema emit [--check] [--out DIR]` | 写出或校验 `schemas/*.schema.json` |

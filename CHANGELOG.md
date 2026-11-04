@@ -16,6 +16,12 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   restricted to the subtree (GRF-I05 on the new `fixtures/language/grf_subtree` RTL); measured
   14.6 s -> 1.70 s CLI for one cluster at 41k instances (`scripts/benchmark_graph_subtree.py`,
   `evidence/bench/graph-subtree/`).
+* **Large SoC pages**: graph pages use a compact lossless format (`svweave-graph/2`, 8x smaller on
+  the C906 SoC); `--split` writes linked pages and `--lazy` one page that loads its parts, each part
+  at most `--page-budget` instances, together exactly the complete topology. 115,562 instances:
+  the single page opens in 10.1 s, the --split/--lazy index in about 0.55 s
+  (`evidence/bench/graph-large/`). `--lazy` relaxes the CSP to `script-src 'self'` on its page
+  only (ADR-014 amendment).
 * **Graph export draws the complete topology by default** (behaviour change): no `--max-instances`
   (was 5000) and no `--max-fanout` (was 16) unless given; both are now opt-in reductions. On the
   C906 SoC the default page went from 19,957 connections with 122 signals left out to 30,378

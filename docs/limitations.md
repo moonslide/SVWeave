@@ -358,6 +358,13 @@ the tested SHA; later documentation commits are not automatically native-tested.
   not drawn (headers are not re-expanded, as in `diff-impact`). Per file the diff side matching the
   build's snapshot is used; a file matching neither is mapped approximately (warned). A change to a
   module instantiated everywhere draws most of the design: the view is only as small as the change.
+* `--split` / `--lazy` cut the topology into parts of at most `--page-budget` instances; a
+  subtree under 50 instances is never a part of its own, so a part can exceed the budget (the
+  envelope reports it). `--lazy` loads its parts with `<script src>`, which on file:// needs
+  `script-src 'self'` in that page's CSP; it is verified in Chromium only (Firefox applies a
+  stricter file:// origin). Data files are only loaded by the names the page checks
+  (`c-<10 hex>.js`); there is no integrity check of them (SRI does not work on file://), they sit
+  in the same private directory as the page.
 * `--per-commit` labels a changed module with the commits that touched its lines in the head
   version; it needs a build of `--diff-head` (otherwise no labels, with a warning), labels every
   instance of a module alike, and traces at most 200 changed modules and 500 commits.

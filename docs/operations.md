@@ -40,6 +40,8 @@ Editing stays disabled during all of this (and in M3 it does not exist at all).
    declared outside it are listed as boundary signals); on large designs this is much faster.
    Add `--diff-base REF` (and `--diff-head REF`) to draw only the instances whose module or
    interface the git diff changes, with their subtrees and connecting ancestors.
+   For a very large SoC add `--split` (linked pages) or `--lazy` (one page that loads its parts),
+   each part at most `--page-budget` instances (default 5000).
 
 ```text
 svweave edit prepare --spec spec.json

@@ -873,6 +873,25 @@ no page is written. As with `diff-impact`, a STALE build does not change the exi
 comparing with the working tree is refused when the repository configures git clean/process filters
 (use form C); a partial clone (promisor remote) is refused because reading it could fetch.
 
+**Very large SoCs.** Pages are written in a compact, lossless format (`svweave-graph/2`: on the
+C906 SoC 8x smaller than before), but the complete topology of a 100k-instance SoC is still a
+40 MB page that takes about 10 s to open. Two outputs cut it into parts of at most
+`--page-budget` instances (default 5000); together the parts are exactly the complete topology:
+
+```bash
+svweave graph export --build BUILD_ID --split   # linked pages: .svweave/exports/<name>/index.html
+svweave graph export --build BUILD_ID --lazy    # one page that loads the other parts when opened
+```
+
+A subtree that does not fit becomes a portal: one node on its parent page, with its own port
+connections, that opens its part (`--split`: a link to its page; `--lazy`: double-click loads it
+into the same drawing). The index page searches every instance of the design and opens the
+right part. On 115,562 instances: the single page opens in 10.1 s, the `--split` or `--lazy` index
+in about 0.55 s, a search result in about 1 s
+([evidence](evidence/bench/graph-large/README.md)). `--lazy` admits scripts from its own
+directory in the page's CSP (needed for local files; verified in Chromium only); `--split` keeps
+the strict CSP and works in any browser.
+
 Exit codes of `graph export`: 0 when the page was written (or there was nothing to draw); like the
 `query` commands, 3 for a PARTIAL build and 5 for a STALE/HISTORICAL one even though the page was
 written (the page says so too), unless `--allow-partial` / `--allow-stale` is given; with
@@ -1394,7 +1413,7 @@ prints one JSON envelope.
 | `svweave query search --snapshot S --query Q` | graph candidates or marked text fallback (`--scope`, `--no-graph`) |
 | `svweave report --build B` | status report filled from real data; unevaluated gates say so |
 | `svweave evidence import --manifest FILE` | import external evidence (stored `EXTERNAL_DECLARED`) |
-| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R [--per-commit]]] [--allow-stale] [--allow-partial]` | write `.svweave/exports/<name>.html`: instance hierarchy plus port-association connections, one self-contained page, nothing served (ADR-014); `--instance` draws only the subtree of instance I; `--diff-base` only the instances a git diff changes |
+| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R [--per-commit]]] [--split \| --lazy [--page-budget N]] [--allow-stale] [--allow-partial]` | write `.svweave/exports/<name>.html`: instance hierarchy plus port-association connections, one self-contained page, nothing served (ADR-014); `--instance` draws only the subtree of instance I; `--diff-base` only the instances a git diff changes |
 | `svweave cache gc [--no-dry-run]` | garbage-collect snapshots; keeps the last 3 and referenced ones; dry run by default |
 | `svweave debug bundle --build B [--out DIR]` | reproduction bundle: hashes, manifest, diagnostics summary, redacted paths |
 | `svweave schema emit [--check] [--out DIR]` | write or verify `schemas/*.schema.json` |
