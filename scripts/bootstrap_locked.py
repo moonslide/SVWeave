@@ -38,6 +38,13 @@ first installed into the Serena venv from a local directory (``--no-index --requ
 ``uv sync --frozen --no-dev --no-build-isolation`` builds with exactly those; a missing build
 dependency is a build error, never a download. The exact sync removes them again afterwards.
 
+UVM: ``--skip-uvm`` skips ONLY the pinned ``uvm_core`` archive (e.g. where the network policy denies
+GitHub source archives). It is never silent: the report marks ``uvm_core`` ``skipped`` and
+``verified: false`` and adds a warning; the UVM profiles and UVM tests cannot run, and
+``--verify-only`` without the flag (what ``scripts/qualify.py`` runs) still fails. A locked archive
+can always be supplied by hand instead: put the file where the error message says (the artifact dir)
+and re-run; it is used only if its sha256 equals the lock.
+
 Every downloaded archive/wheel is verified against the lock before use; extracted binaries are
 verified again. Archives with absolute or parent-traversing members are rejected. Any mismatch
 aborts with a non-zero exit code (no silent fallback).
@@ -54,12 +61,15 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.error
 import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 ARCHIVES = ("slang", "verible", "codebase_memory_mcp", "uvm_core")
 WHEELS = ("pyslang", "mcp_sdk")
+#: archives a run may skip, only on explicit request (--skip-uvm), and always reported as skipped
+SKIPPABLE = {"uvm_core": "--skip-uvm"}
 
 
 class LockError(RuntimeError):
@@ -131,6 +141,17 @@ def rel_to_toolchain(path_in_lock: str, toolchain: Path) -> Path:
     return REPO / p
 
 
+def fetch_archive(name: str, url: str, dl: Path, want: str) -> Path:
+    """``download`` with an error that names the component and how to supply the file by hand."""
+    try:
+        return download(url, dl, want)
+    except (urllib.error.URLError, TimeoutError) as e:
+        hint = f"; or re-run with {SKIPPABLE[name]} to install without it" if name in SKIPPABLE else ""
+        raise LockError(
+            f"{name}: download of {url} failed ({e}). Put the locked file at {dl} "
+            f"(sha256 {want}) and re-run: it is verified, never trusted{hint}") from e
+
+
 def install_archive(name: str, c: dict, toolchain: Path, verify_only: bool, report: dict,
                     artifact_dir: Path | None = None, fetch_only: bool = False,
                     extract_on_fetch: bool = False) -> dict:
@@ -143,7 +164,7 @@ def install_archive(name: str, c: dict, toolchain: Path, verify_only: bool, repo
     entry: dict = {"source_url": url}
     report["components"][name] = entry
     if fetch_only and not extract_on_fetch:
-        download(url, dl, want)
+        fetch_archive(name, url, dl, want)
         entry["cached"] = True
         return entry
     if verify_only:
@@ -151,7 +172,7 @@ def install_archive(name: str, c: dict, toolchain: Path, verify_only: bool, repo
         if dl.exists():
             entry["download_sha256_ok"] = sha256(dl) == want
     else:
-        download(url, dl, want)  # refuses a wrong sha256 before the archive is opened
+        fetch_archive(name, url, dl, want)  # refuses a wrong sha256 before the archive is opened
         safe_extract(dl, inst, int(c.get("archive_strip_components", 0)))
         entry["installed_to"] = str(inst)
         if fetch_only:
@@ -172,8 +193,19 @@ def install_archive(name: str, c: dict, toolchain: Path, verify_only: bool, repo
 
 
 def install_archives(lock: dict, toolchain: Path, verify_only: bool, report: dict,
-                     artifact_dir: Path | None = None, fetch_only: bool = False) -> None:
+                     artifact_dir: Path | None = None, fetch_only: bool = False,
+                     skip: frozenset[str] = frozenset()) -> None:
     for name in ARCHIVES:
+        if name in skip:
+            if name not in SKIPPABLE:
+                raise LockError(f"{name} cannot be skipped")
+            report["components"][name] = {"source_url": lock["components"][name]["source_url"],
+                                          "skipped": True, "verified": False}
+            msg = (f"{name}: skipped ({SKIPPABLE[name]}): not downloaded, installed or verified; "
+                   "the UVM profiles and UVM tests cannot run and this toolchain is not lock-complete")
+            report.setdefault("warnings", []).append(msg)
+            print(f"WARNING: {msg}", file=sys.stderr)
+            continue
         install_archive(name, lock["components"][name], toolchain, verify_only, report, artifact_dir, fetch_only)
 
 
@@ -463,6 +495,8 @@ def main() -> int:
                     help="base interpreter of the venvs created here (default: python3.12 on PATH, else this one)")
     ap.add_argument("--no-venv", action="store_true", help="skip wheel install/check in the gateway venv")
     ap.add_argument("--skip-serena", action="store_true")
+    ap.add_argument("--skip-uvm", action="store_true",
+                    help="do not install the pinned UVM library (reported as skipped, never as verified)")
     ap.add_argument("--verify-only", action="store_true")
     ap.add_argument("--offline", action="store_true", help="NO network: cached, hash-verified artifacts only")
     ap.add_argument("--fetch-only", action="store_true", help="online: only fill the artifact cache, install nothing")
@@ -504,7 +538,8 @@ def main() -> int:
                 f"uv: --uv {uv_override} is NOT verified against toolchain.lock.json (pinned uv "
                 f"{lock['uv']['version']} not used); everything it installs depends on that binary")
             print(f"WARNING: {report['warnings'][-1]}", file=sys.stderr)
-        install_archives(lock, toolchain, a.verify_only, report, art, a.fetch_only)
+        install_archives(lock, toolchain, a.verify_only, report, art, a.fetch_only,
+                         frozenset({"uvm_core"}) if a.skip_uvm else frozenset())
         install_wheels(lock, toolchain, a.verify_only,
                        None if a.no_venv else venv_python, uv, report, art, a.fetch_only,
                        venv_dir if a.create_venv else None, a.python)

@@ -339,3 +339,58 @@ def test_relative_python_is_made_absolute_because_the_serena_sync_runs_in_its_ch
     assert bs.base_python("runtime/python/bin/python3") == str(tmp_path / "runtime/python/bin/python3")
     assert bs.base_python("python3.12") == "python3.12"  # a bare name stays a PATH lookup for uv
 
+
+
+# ------------------------------------------------------------------ --skip-uvm and download failures
+def test_skip_uvm_installs_the_rest_and_reports_uvm_skipped_never_verified(tmp_path: Path) -> None:
+    lp, art, _ = _fake_toolchain(tmp_path)
+    (art / "uvm_core-uvm_core.tar.gz").unlink()  # as if the download were denied
+    rc, rep, out = _run_main(tmp_path, lp, art, "--no-venv")
+    assert rc == 2 and any("uvm_core" in e for e in rep["errors"]), out  # without the flag: fails
+    rc, rep, out = _run_main(tmp_path, lp, art, "--no-venv", "--skip-uvm")
+    assert rc == 0 and rep["ok"] is True, out
+    assert rep["components"]["uvm_core"] == {"source_url": "https://example.invalid/uvm_core.tar.gz",
+                                             "skipped": True, "verified": False}
+    assert any(w.startswith("uvm_core: skipped (--skip-uvm)") for w in rep["warnings"])
+    assert "WARNING: uvm_core: skipped" in out
+    tc = tmp_path / "tc"
+    assert not (tc / "uvm_core").exists() and (tc / "slang" / "slang").is_file()
+    assert rep["components"]["slang"]["binary_sha256_ok"] is True
+    # the check qualify.py runs (no flag) still reports the gap
+    rc, rep, out = _run_main(tmp_path, lp, art, "--no-venv", "--verify-only")
+    assert rc == 2 and any("uvm_core" in e and "missing" in e for e in rep["errors"]), out
+
+
+def test_only_listed_archives_can_be_skipped(tmp_path: Path) -> None:
+    bs = load()
+    lock = {"components": {n: {"source_url": "https://example.invalid/x"} for n in bs.ARCHIVES}}
+    with pytest.raises(bs.LockError, match="slang cannot be skipped"):
+        bs.install_archives(lock, tmp_path, False, {"components": {}}, skip=frozenset({"slang"}))
+    assert set(bs.SKIPPABLE) == {"uvm_core"}
+
+
+def test_denied_download_names_the_component_and_where_to_put_the_file(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.error
+
+    bs = load()
+
+    def denied(url: str, timeout: int = 0) -> None:
+        raise urllib.error.HTTPError(url, 403, "Forbidden", None, None)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(bs.urllib.request, "urlopen", denied)
+    c = {"source_url": "https://example.invalid/uvm-core/2020.3.1.tar.gz", "artifact_sha256": "a" * 64,
+         "install_dir": ".toolchain/uvm-core"}
+    for fetch_only in (False, True):
+        with pytest.raises(bs.LockError) as e:
+            bs.install_archive("uvm_core", c, tmp_path / "tc", False, {"components": {}, "errors": []},
+                               tmp_path / "art", fetch_only)
+        msg = str(e.value)
+        assert msg.startswith("uvm_core: download of https://example.invalid/") and "403" in msg
+        assert str(tmp_path / "art" / "uvm_core-2020.3.1.tar.gz") in msg and "a" * 64 in msg
+        assert "--skip-uvm" in msg
+    assert not (tmp_path / "tc" / "uvm-core").exists()
+    with pytest.raises(bs.LockError) as e:  # a component that cannot be skipped gets no such hint
+        bs.install_archive("slang", {**c, "binary": "x", "binary_sha256": "b"}, tmp_path / "tc", False,
+                           {"components": {}, "errors": []}, tmp_path / "art")
+    assert "--skip" not in str(e.value)

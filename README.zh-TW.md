@@ -524,9 +524,11 @@ SVWeave 絕不會修改用戶端的設定。請在你自己的用戶端加入類
 
 ```bash
 svweave graph export --build BUILD_ID          # writes .svweave/exports/graph-<build>.html
+svweave graph export --build BUILD_ID --root top.u_sub   # 只畫該實例及其子孫
+svweave graph export --build BUILD_ID --diff-base HEAD    # 只畫 `git diff HEAD` 改到的部分
 ```
 
-以瀏覽器開啟該檔案（`file://`，不需要伺服器）。它顯示該單一建置的 elaborated 實例樹（雙擊可收合子樹，搜尋會展開到符合項，拖曳與滾輪可平移與縮放），並以虛線顯示從該建置的直接連接埠關聯推導出的連線：兩個實例參照同一個訊號宣告，方向依宣告的連接埠方向而定。一條線代表兩個節點之間的所有訊號；點擊它可看到清單。被超過 `--max-fanout` 個實例（預設 16）使用的類時脈訊號會被列為 hub，而不會畫出來。頁面帶有該建置的完整度與新鮮度，並在其為 PARTIAL、STALE 或被截斷（`--max-instances`，由最淺層優先）時如實說明。它不是 netlist。頁面沒有網路存取（嚴格的 CSP），並把原始碼文字當作資料處理。在上述 115k 個實例的 SoC 上，匯出耗時 27 s，畫出最淺層的 5000 個實例（38 MB）。設計理由：`docs/adr/ADR-014-static-graph-export.md`。
+以瀏覽器開啟該檔案（`file://`，不需要伺服器）。它顯示該單一建置的 elaborated 實例樹（雙擊可收合子樹，搜尋會展開到符合項，拖曳與滾輪可平移與縮放），並以虛線顯示從該建置的直接連接埠關聯推導出的連線：兩個實例參照同一個訊號宣告，方向依宣告的連接埠方向而定。一條線代表兩個節點之間的所有訊號；點擊它可看到清單。被超過 `--max-fanout` 個實例（預設 16）使用的類時脈訊號會被列為 hub，而不會畫出來。頁面帶有該建置的完整度與新鮮度，並在其為 PARTIAL、STALE 或被截斷（`--max-instances`，由最淺層優先）時如實說明。它不是 netlist。頁面沒有網路存取（嚴格的 CSP），並把原始碼文字當作資料處理。在上述 115k 個實例的 SoC 上，匯出耗時 27 s，畫出最淺層的 5000 個實例（38 MB）。`--root INSTANCE`（路徑或實例 id）只讀取並畫出同一建置中該實例的子樹：不會重新編譯，深度從 root 起算，在子樹之外宣告的訊號（root 的連接埠所接到的訊號）會列為邊界訊號，而不會畫出來。`--diff-base REF`（可再加 `--diff-head REF`）以與 `svweave query diff-impact` 相同的方式讀取 git diff，只畫出被改到的 module/interface 的實例（紅框）及其子樹，並以其祖先作為脈絡。在修改前或修改後建置皆可：每個檔案會使用與建置快照相符的那一側 diff。對應不到任何實例的變更（package、不在建置中的檔案）只會列出，不會畫出。設計理由：`docs/adr/ADR-014-static-graph-export.md`。
 
 ## 在 Claude Code 與 Codex 中使用 SVWeave
 
@@ -901,7 +903,7 @@ root_mappings:
 | `svweave query search --snapshot S --query Q` | 圖譜候選項，或有標示的純文字備援（`--scope`、`--no-graph`） |
 | `svweave report --build B` | 以真實資料填寫的狀態報告；未評估的關卡會如實標明 |
 | `svweave evidence import --manifest FILE` | 匯入外部證據（以 `EXTERNAL_DECLARED` 儲存） |
-| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N]` | 寫出 `.svweave/exports/<name>.html`：實例階層加上連接埠關聯連線，單一自含式頁面，不提供任何服務（ADR-014） |
+| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--root I] [--diff-base R [--diff-head R]]` | 寫出 `.svweave/exports/<name>.html`：實例階層加上連接埠關聯連線，單一自含式頁面，不提供任何服務（ADR-014）；`--root` 只畫實例 I 的子樹；`--diff-base` 只畫 git diff 改到的實例 |
 | `svweave cache gc [--no-dry-run]` | 對快照做垃圾回收；保留最近 3 個與被參照的快照；預設為試執行（dry run） |
 | `svweave debug bundle --build B [--out DIR]` | 重現用套件：雜湊、manifest、診斷摘要、已遮蔽的路徑 |
 | `svweave schema emit [--check] [--out DIR]` | 寫出或驗證 `schemas/*.schema.json` |

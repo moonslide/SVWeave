@@ -379,12 +379,36 @@ def graph_grp() -> None:
     show_default=True,
     help="Signals used by more instances are listed as hubs, not drawn.",
 )
+@click.option(
+    "--root",
+    default=None,
+    help="Subtree view: read and draw only this instance (path or id) and its descendants.",
+)
+@click.option(
+    "--diff-base",
+    default=None,
+    help="Diff view: draw only the instances whose module/interface `git diff BASE` changes, "
+    "with their subtrees and connecting ancestors (STALE then never changes the exit code).",
+)
+@click.option(
+    "--diff-head", default=None, help="Diff view: git revision of the change (default: working tree)."
+)
 @pass_state
 @_query_flags
 def graph_export_cmd(
-    st: _State, build_id: str, name: str | None, max_instances: int, max_fanout: int
+    st: _State,
+    build_id: str,
+    name: str | None,
+    max_instances: int,
+    max_fanout: int,
+    root: str | None,
+    diff_base: str | None,
+    diff_head: str | None,
 ) -> None:
     """Write .svweave/exports/<name>.html: instance hierarchy plus port-association connections."""
+    if diff_base is not None and st.query_policy is not None:
+        # like diff-impact: the workspace is expected to differ from the build
+        st.query_policy = (True, st.query_policy[1])
     sess = st.session()
     st.emit(
         st.run(
@@ -395,6 +419,9 @@ def graph_export_cmd(
                 name=name,
                 max_instances=max_instances,
                 max_fanout=max_fanout,
+                root=root,
+                diff_base=diff_base,
+                diff_head=diff_head,
             )
         )
     )

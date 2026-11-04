@@ -373,8 +373,11 @@ def graph_export(
     name: str | None = None,
     max_instances: int = graph.DEFAULT_MAX_INSTANCES,
     max_fanout: int = graph.DEFAULT_MAX_FANOUT,
+    root: str | None = None,
+    diff_base: str | None = None,
+    diff_head: str | None = None,
 ) -> Envelope:
-    clean_text(name=name)
+    clean_text(name=name, root=root, diff_base=diff_base, diff_head=diff_head)
     return graph.export_graph(
         session.opts,
         build_id,
@@ -382,6 +385,9 @@ def graph_export(
         name=name,
         max_instances=max_instances,
         max_fanout=max_fanout,
+        root=root,
+        diff_base=diff_base,
+        diff_head=diff_head,
     )
 
 

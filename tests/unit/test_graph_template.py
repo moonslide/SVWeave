@@ -29,3 +29,27 @@ def test_GRF_U02_page_has_one_data_block_a_strict_csp_and_no_network_or_html_sin
         assert sink not in script, sink
     assert not re.search(r'(?:src|href)\s*=\s*["\']?(?:https?:)?//', page)  # no external resource
     assert "@@SVWEAVE_GRAPH_DATA@@" not in page
+
+
+def test_GRF_U03_subtree_root_and_boundary_text_are_data() -> None:
+    page = render_html({"nodes": [], "edges": [], "hubs": [], "root": HOSTILE,
+                        "boundary": [{"signal": HOSTILE, "instances": 1}],
+                        "meta": {"root": HOSTILE}})
+    assert page.count("</script>") == 2 and "<script>alert" not in page
+    data = json.loads(re.search(r'<script id="data" type="application/json">(.*?)</script>',
+                                page, re.S).group(1))  # type: ignore[union-attr]
+    assert data["meta"]["root"] == HOSTILE and data["boundary"][0]["signal"] == HOSTILE
+    script = page.split("<script>")[1]
+    assert "function boundary()" in script and "innerHTML" not in script
+
+
+def test_GRF_U04_diff_view_text_is_data_and_marks_are_rendered() -> None:
+    page = render_html({"nodes": [{"id": "a", "path": HOSTILE, "diff": "changed"}], "edges": [],
+                        "hubs": [], "boundary": [], "stats": {"changed_instances": 1},
+                        "diff": {"base": HOSTILE, "head": "working tree", "files": [],
+                                 "changed_definitions": [{"qualified_name": HOSTILE}],
+                                 "unmapped_files": [HOSTILE], "non_instance_declarations": []},
+                        "meta": {"diff": HOSTILE}})
+    assert page.count("</script>") == 2 and "<script>alert" not in page
+    script = page.split("<script>")[1]
+    assert "function changes()" in script and ".node.changed rect" in page and "innerHTML" not in script

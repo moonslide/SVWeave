@@ -1,0 +1,248 @@
+{
+  "benchmark": "graph-export-subtree-paired",
+  "status": "PASS",
+  "created_at": "20261104T022444Z",
+  "source_identity": {
+    "git_head": "ffaf3b4592d60a2137e81c4f85dd1ea9371ce060",
+    "src_tree_sha256": "2b88ad488597f1f0e4e87e7bbe68fc4de606f0e454c82b739fd427150335282d"
+  },
+  "toolchain_lock_sha256": "ea20baf9bc2da3cb6b9dc41f0234c67f925ea37c5691b0bfbbb1ff30f86ef5e9",
+  "benchmark_script_sha256": "b70c61e4c80c689dad1b88c287c3ab4ac1be7f0463b5aed851466bbe87b4237c",
+  "host": {
+    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+    "logical_cpus": 4,
+    "ram_total_gib": 15.71,
+    "ram_available_gib_at_start": 15.21,
+    "swap_total_gib": 0.0,
+    "os": "Linux-6.18.44-fc-v233-x86_64-with-glibc2.39",
+    "kernel": "6.18.44-fc-v233",
+    "python": "3.12.3",
+    "filesystem": {
+      "mount": "/",
+      "device": "/dev/vda",
+      "fstype": "ext4"
+    },
+    "page_cache": "warm (not dropped: no privilege)",
+    "loadavg_at_start": [
+      0.37744140625,
+      0.2431640625,
+      0.10546875
+    ]
+  },
+  "design": {
+    "fixture": "fixtures/language/grf_subtree",
+    "top": "grf_soc",
+    "clusters": 4,
+    "cores": 4,
+    "expected_instances": 90
+  },
+  "runs": 2,
+  "max_fanout": 16,
+  "max_instances": 100000,
+  "limitations": [
+    "one synthetic hand-written design on one host; not the plan 22.3 reference corpus",
+    "page cache warm; the export reads one immutable build that was elaborated once",
+    "no speed threshold: medians and raw samples only"
+  ],
+  "build": {
+    "wall_s": 2.135,
+    "exit": 0,
+    "outcome": "OK",
+    "build_id": "f9621c56c3a92eb111951d6bd2a410779cb5e078b1a8174a7751cf37af6bb909"
+  },
+  "content_checks": {
+    "cluster_subtree": {
+      "root": "grf_soc.g_cl[2].u_cl",
+      "equal_to_full_restricted": true,
+      "differences": []
+    },
+    "core_subtree": {
+      "root": "grf_soc.g_cl[2].u_cl.g_core[2].u_core",
+      "equal_to_full_restricted": true,
+      "differences": []
+    },
+    "diff_reduce": {
+      "changed_instances": 5,
+      "sample": "grf_soc.g_cl[2].u_cl.u_red",
+      "equal_to_full_restricted": true,
+      "differences": []
+    },
+    "diff_core": {
+      "changed_instances": 16,
+      "sample": "grf_soc.g_cl[2].u_cl.g_core[0].u_core",
+      "equal_to_full_restricted": true,
+      "differences": []
+    }
+  },
+  "full_instances_total": 90,
+  "results": {
+    "full": {
+      "cli_wall_s": {
+        "median": 1.6404,
+        "raw": [
+          1.6476,
+          1.6331
+        ]
+      },
+      "in_process_s": {
+        "median": 0.0484,
+        "raw": [
+          0.0803,
+          0.0164
+        ]
+      },
+      "bytes": 203351,
+      "sha256": "f1b1f33d4d23307081ac09dde1caac3c38c8b59392a003b60c2607e13a6db0c8",
+      "stats": {
+        "instances_total": 90,
+        "instances_shown": 90,
+        "edges": 424,
+        "hub_signals": 0,
+        "max_instances": 100000,
+        "max_fanout": 16
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-full.html"
+    },
+    "cluster_subtree": {
+      "cli_wall_s": {
+        "median": 1.5828,
+        "raw": [
+          1.674,
+          1.4917
+        ]
+      },
+      "in_process_s": {
+        "median": 0.0099,
+        "raw": [
+          0.0101,
+          0.0097
+        ]
+      },
+      "bytes": 63654,
+      "sha256": "2886d242505d546e986c8f4731a5ee1e3fd175b1f6cbef6fd2146b61304b59c5",
+      "stats": {
+        "instances_total": 22,
+        "instances_shown": 22,
+        "edges": 100,
+        "hub_signals": 0,
+        "max_instances": 100000,
+        "max_fanout": 16,
+        "boundary_signals": 4,
+        "root": "grf_soc.g_cl[2].u_cl"
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-cluster_subtree.html"
+    },
+    "core_subtree": {
+      "cli_wall_s": {
+        "median": 1.6089,
+        "raw": [
+          1.7282,
+          1.4896
+        ]
+      },
+      "in_process_s": {
+        "median": 0.0075,
+        "raw": [
+          0.0074,
+          0.0076
+        ]
+      },
+      "bytes": 28560,
+      "sha256": "4cf9bf9115df87432dfb2a9c8e7be218fae5282228b3c2e3689afc294e985d72",
+      "stats": {
+        "instances_total": 5,
+        "instances_shown": 5,
+        "edges": 19,
+        "hub_signals": 0,
+        "max_instances": 100000,
+        "max_fanout": 16,
+        "boundary_signals": 4,
+        "root": "grf_soc.g_cl[2].u_cl.g_core[2].u_core"
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-core_subtree.html"
+    },
+    "diff_reduce": {
+      "cli_wall_s": {
+        "median": 1.5962,
+        "raw": [
+          1.6721,
+          1.5204
+        ]
+      },
+      "in_process_s": {
+        "median": 0.0215,
+        "raw": [
+          0.022,
+          0.0209
+        ]
+      },
+      "bytes": 36815,
+      "sha256": "88eb2e38d6ed07b733a7108e99fad0533f2907a4a0253b30975763ee7f17b9e6",
+      "stats": {
+        "instances_total": 10,
+        "instances_shown": 10,
+        "edges": 40,
+        "hub_signals": 0,
+        "max_instances": 100000,
+        "max_fanout": 16,
+        "boundary_signals": 0,
+        "root": "grf_soc",
+        "changed_instances": 5
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-diff_reduce.html"
+    },
+    "diff_core": {
+      "cli_wall_s": {
+        "median": 1.5499,
+        "raw": [
+          1.5555,
+          1.5443
+        ]
+      },
+      "in_process_s": {
+        "median": 0.0306,
+        "raw": [
+          0.0305,
+          0.0307
+        ]
+      },
+      "bytes": 191895,
+      "sha256": "fb4af02d226d51fa60f3fcc65029b178a4c73f836cebff9eddb8b1656bd52209",
+      "stats": {
+        "instances_total": 85,
+        "instances_shown": 85,
+        "edges": 384,
+        "hub_signals": 0,
+        "max_instances": 100000,
+        "max_fanout": 16,
+        "boundary_signals": 0,
+        "root": "grf_soc",
+        "changed_instances": 16
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-diff_core.html"
+    }
+  },
+  "speedup_vs_full": {
+    "cluster_subtree": {
+      "cli": 1.04,
+      "in_process": 4.9
+    },
+    "core_subtree": {
+      "cli": 1.02,
+      "in_process": 6.45
+    },
+    "diff_reduce": {
+      "cli": 1.03,
+      "in_process": 2.25
+    },
+    "diff_core": {
+      "cli": 1.06,
+      "in_process": 1.58
+    }
+  }
+}

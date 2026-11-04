@@ -33,3 +33,47 @@ an inline viewer (SVG, vanilla JS, no library). It is opened from disk by the us
 * It is not a netlist: no driver/load analysis, no bit level, no cross-hierarchy dataflow, no
   `tran`/`alias`. This is the same direct-association guarantee as `svweave query connections`.
 * An interactive local server remains out of scope until a later ADR.
+
+## Amendment (2026-11-03): subtree view, `--root`
+`svweave graph export --build B --root INSTANCE` writes the same kind of page for ONE instance and
+its descendants (a path or an instance id; an unknown or ambiguous name is refused, never guessed).
+It is a view of the same immutable build, not a new compile: nothing is re-elaborated and the
+build id, completeness and freshness on the page are the build's.
+
+* Only the subtree is read: the descendants are the closure of the stored `parent_id` links
+  (indexed), their port bindings come by primary key and declaration kinds only for the
+  declarations those bindings reference. A path-prefix match is never used to decide membership.
+* Depth (collapse, `--max-instances` shallowest first) is relative to the root; the root has no
+  drawn parent.
+* A signal declared outside the subtree (the root's own port actuals, a hierarchical reference)
+  has no drawn owner, so it is listed as a **boundary** signal (with the number of subtree
+  instances that use it) instead of being drawn. The envelope warns and the page says so.
+* Fan-out counts the uses inside the subtree. For a signal declared inside the subtree this equals
+  the whole-build count unless an instance outside the subtree reaches it by a hierarchical
+  reference in a port actual (not counted). Tests `GRF-I05` check, for every instance of the
+  `grf_subtree` fixture as root, that nodes, ports, edges and hubs equal the full page restricted
+  to that subtree.
+* Measured on one host (`scripts/benchmark_graph_subtree.py`, see `docs/limitations.md` §8): the
+  saving grows with the design; on a ~90-instance design the CLI time is Python start-up either way.
+
+## Amendment (2026-11-04): diff view, `--diff-base` / `--diff-head`
+`svweave graph export --build B --diff-base REF [--diff-head REF] [--root I]` draws only what a
+git diff changes, on the same immutable build (nothing is recompiled):
+
+* The diff is read exactly like `svweave query diff-impact` (same fixed `git diff -U0` argv, same
+  refusals, same working-tree filter policy) and its changed lines are attributed to the
+  declarations of the build. Per file, the OLD side is mapped when the build's snapshot equals the
+  base version (build first, then edit), else the NEW side when the snapshot equals the changed
+  version (edit, then build); `files[].side` says which. A file that matches neither is mapped
+  approximately and the envelope warns. `diff-impact` itself keeps the old-side mapping only.
+* Every instance of a changed module/interface definition is drawn (`changed`) with its whole
+  subtree (`inside`), plus the ancestors that connect them (`context`) up to `--root` or, without
+  it, up to their lowest common ancestor. Context ancestors show only their drawn children
+  (`children_total` gives the real count) and only connections among drawn instances.
+* Changes that map to no instance (package, class, a file not in the build, a range outside every
+  declaration) are listed and warned about, never drawn; a diff that maps to no instance at all is
+  refused (`MISSING_INPUT`, `diff_touches_no_instance`) instead of writing an empty page.
+* Like `diff-impact`, STALE never changes the exit code in this mode: the workspace is expected to
+  differ from the build.
+* The saving depends on how local the change is: a change to a module instantiated everywhere
+  draws most of the design. Measured with `scripts/benchmark_graph_subtree.py`.

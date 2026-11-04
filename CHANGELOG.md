@@ -10,6 +10,21 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
 * **Graph export** (`svweave graph export`, ADR-014): one self-contained HTML page per build, the
   elaborated instance tree plus connections derived from direct port associations. No server, no
   network (strict CSP), source text embedded as escaped JSON. ADR-009 amended.
+* **Graph export subtree view** (`svweave graph export --root INSTANCE`, ADR-014 amendment): reads
+  and draws only one instance and its descendants of the same build (parent-link closure, indexed
+  reads); signals declared outside are listed as boundary signals. Content equals the full page
+  restricted to the subtree (GRF-I05 on the new `fixtures/language/grf_subtree` RTL); measured
+  14.6 s -> 1.70 s CLI for one cluster at 41k instances (`scripts/benchmark_graph_subtree.py`,
+  `evidence/bench/graph-subtree/`).
+* **Graph export diff view** (`svweave graph export --diff-base REF [--diff-head REF]`, ADR-014
+  amendment): only the instances of the modules/interfaces a git diff changes, with subtrees and
+  connecting ancestors; per file the diff side matching the build's snapshot is mapped, so building
+  before or after the edit is exact. 14.6 s -> 1.63 s CLI at 41k instances for a one-module
+  change with 65 instances; no saving when the changed module is instantiated almost everywhere.
+* **Installer `--skip-uvm`** (`scripts/bootstrap_locked.py`): where the network denies GitHub source
+  archives, install everything except the pinned UVM library; reported as `skipped`/`verified:
+  false` with a warning, never as PASS (`--verify-only`, gate G0, still fails without it). A failed
+  archive download now names the component, the path to put the locked file and its sha256.
 * **Impact analysis** (`svweave query impact`, MCP `svw_impact`): what changing a module, port, signal
   or instance touches: instances, dependent and dependency definitions, port connection sites,
   references. A port and its implicit net are one entity.

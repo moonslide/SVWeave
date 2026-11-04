@@ -1,0 +1,258 @@
+{
+  "benchmark": "graph-export-subtree-paired",
+  "status": "PASS",
+  "created_at": "20261104T022653Z",
+  "source_identity": {
+    "git_head": "862cd1b8ad1f57dd6d4040bf69bd899dee5d7f3a",
+    "src_tree_sha256": "2b88ad488597f1f0e4e87e7bbe68fc4de606f0e454c82b739fd427150335282d"
+  },
+  "toolchain_lock_sha256": "ea20baf9bc2da3cb6b9dc41f0234c67f925ea37c5691b0bfbbb1ff30f86ef5e9",
+  "benchmark_script_sha256": "b70c61e4c80c689dad1b88c287c3ab4ac1be7f0463b5aed851466bbe87b4237c",
+  "host": {
+    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+    "logical_cpus": 4,
+    "ram_total_gib": 15.71,
+    "ram_available_gib_at_start": 15.18,
+    "swap_total_gib": 0.0,
+    "os": "Linux-6.18.44-fc-v233-x86_64-with-glibc2.39",
+    "kernel": "6.18.44-fc-v233",
+    "python": "3.12.3",
+    "filesystem": {
+      "mount": "/",
+      "device": "/dev/vda",
+      "fstype": "ext4"
+    },
+    "page_cache": "warm (not dropped: no privilege)",
+    "loadavg_at_start": [
+      0.93212890625,
+      0.51513671875,
+      0.2275390625
+    ]
+  },
+  "design": {
+    "fixture": "fixtures/language/grf_subtree",
+    "top": "grf_soc",
+    "clusters": 64,
+    "cores": 128,
+    "expected_instances": 41090
+  },
+  "runs": 3,
+  "max_fanout": 16,
+  "max_instances": 100000,
+  "limitations": [
+    "one synthetic hand-written design on one host; not the plan 22.3 reference corpus",
+    "page cache warm; the export reads one immutable build that was elaborated once",
+    "no speed threshold: medians and raw samples only"
+  ],
+  "build": {
+    "wall_s": 71.159,
+    "exit": 0,
+    "outcome": "OK",
+    "build_id": "9b338f0cc0e73360c2016a7cd616dc3e7dddc5e28a1ffa905a1d59e3aea1140f"
+  },
+  "content_checks": {
+    "cluster_subtree": {
+      "root": "grf_soc.g_cl[32].u_cl",
+      "equal_to_full_restricted": true,
+      "differences": []
+    },
+    "core_subtree": {
+      "root": "grf_soc.g_cl[32].u_cl.g_core[64].u_core",
+      "equal_to_full_restricted": true,
+      "differences": []
+    },
+    "diff_reduce": {
+      "changed_instances": 65,
+      "sample": "grf_soc.g_cl[32].u_cl.u_red",
+      "equal_to_full_restricted": true,
+      "differences": []
+    },
+    "diff_core": {
+      "changed_instances": 8192,
+      "sample": "grf_soc.g_cl[32].u_cl.g_core[0].u_core",
+      "equal_to_full_restricted": true,
+      "differences": []
+    }
+  },
+  "full_instances_total": 41090,
+  "results": {
+    "full": {
+      "cli_wall_s": {
+        "median": 14.6099,
+        "raw": [
+          12.4585,
+          14.9372,
+          14.6099
+        ]
+      },
+      "in_process_s": {
+        "median": 10.1013,
+        "raw": [
+          13.0886,
+          10.1013,
+          9.9403
+        ]
+      },
+      "bytes": 77597903,
+      "sha256": "1048e90af63e83c4f0b9dea2bdab7db7fded92914ac06f32e06cb2159bd66730",
+      "stats": {
+        "instances_total": 41090,
+        "instances_shown": 41090,
+        "edges": 155713,
+        "hub_signals": 260,
+        "max_instances": 100000,
+        "max_fanout": 16
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-full.html"
+    },
+    "cluster_subtree": {
+      "cli_wall_s": {
+        "median": 1.6967,
+        "raw": [
+          1.695,
+          1.6967,
+          1.7993
+        ]
+      },
+      "in_process_s": {
+        "median": 0.1128,
+        "raw": [
+          0.1128,
+          0.1032,
+          0.1188
+        ]
+      },
+      "bytes": 1232128,
+      "sha256": "9c9e3187522e361f34df112c8925a2d4101d6757b56a0c71a4ade183a6e37888",
+      "stats": {
+        "instances_total": 642,
+        "instances_shown": 642,
+        "edges": 2433,
+        "hub_signals": 4,
+        "max_instances": 100000,
+        "max_fanout": 16,
+        "boundary_signals": 4,
+        "root": "grf_soc.g_cl[32].u_cl"
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-cluster_subtree.html"
+    },
+    "core_subtree": {
+      "cli_wall_s": {
+        "median": 1.5636,
+        "raw": [
+          1.504,
+          1.5636,
+          1.5969
+        ]
+      },
+      "in_process_s": {
+        "median": 0.0113,
+        "raw": [
+          0.0113,
+          0.0083,
+          0.013
+        ]
+      },
+      "bytes": 28655,
+      "sha256": "1020edfbe8072f4aa177bfb8e7798f4e898f9476d5ed6cdc477299c941608c72",
+      "stats": {
+        "instances_total": 5,
+        "instances_shown": 5,
+        "edges": 19,
+        "hub_signals": 0,
+        "max_instances": 100000,
+        "max_fanout": 16,
+        "boundary_signals": 4,
+        "root": "grf_soc.g_cl[32].u_cl.g_core[64].u_core"
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-core_subtree.html"
+    },
+    "diff_reduce": {
+      "cli_wall_s": {
+        "median": 1.6282,
+        "raw": [
+          1.6282,
+          1.7655,
+          1.6164
+        ]
+      },
+      "in_process_s": {
+        "median": 0.1495,
+        "raw": [
+          0.1495,
+          0.1347,
+          0.1585
+        ]
+      },
+      "bytes": 199305,
+      "sha256": "ca340bb449ee7e6e770f71dba4feab7d5f2b92436a4febbda7e1153b09e2f033",
+      "stats": {
+        "instances_total": 130,
+        "instances_shown": 130,
+        "edges": 257,
+        "hub_signals": 4,
+        "max_instances": 100000,
+        "max_fanout": 16,
+        "boundary_signals": 0,
+        "root": "grf_soc",
+        "changed_instances": 65
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-diff_reduce.html"
+    },
+    "diff_core": {
+      "cli_wall_s": {
+        "median": 15.7268,
+        "raw": [
+          16.7716,
+          15.7268,
+          15.4748
+        ]
+      },
+      "in_process_s": {
+        "median": 11.4486,
+        "raw": [
+          11.256,
+          11.4804,
+          11.4486
+        ]
+      },
+      "bytes": 78188789,
+      "sha256": "811358e82a1c61d706350f0dbdd413c8734dc1f1fe293c223ff2309cead447d8",
+      "stats": {
+        "instances_total": 41025,
+        "instances_shown": 41025,
+        "edges": 155648,
+        "hub_signals": 260,
+        "max_instances": 100000,
+        "max_fanout": 16,
+        "boundary_signals": 0,
+        "root": "grf_soc",
+        "changed_instances": 8192
+      },
+      "truncated": false,
+      "path": ".svweave/exports/bench-diff_core.html"
+    }
+  },
+  "speedup_vs_full": {
+    "cluster_subtree": {
+      "cli": 8.61,
+      "in_process": 89.59
+    },
+    "core_subtree": {
+      "cli": 9.34,
+      "in_process": 895.11
+    },
+    "diff_reduce": {
+      "cli": 8.97,
+      "in_process": 67.59
+    },
+    "diff_core": {
+      "cli": 0.93,
+      "in_process": 0.88
+    }
+  }
+}

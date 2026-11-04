@@ -17,11 +17,14 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import defaultdict
+from collections.abc import Callable, Iterator
 from typing import Any
 
+from svweave.application.diff_impact import DIFF_NOTE, check_ref, collect_changes
 from svweave.application.graph_template import render_html
+from svweave.application.impact import _names
 from svweave.application.options import WorkspaceOptions
-from svweave.application.queries import _gap_limits, _session
+from svweave.application.queries import _gap_limits, _resolve_instance, _session
 from svweave.application.semantic_common import build_envelope
 from svweave.domain.envelope import Envelope
 from svweave.domain.errors import ErrorCode, SvwError
@@ -32,6 +35,8 @@ EXPORT_DIR = "exports"
 DEFAULT_MAX_INSTANCES = 5000
 DEFAULT_MAX_FANOUT = 16
 MAX_PORTS_PER_INSTANCE = 200
+# bound for one ``IN (...)`` list (SQLite's default host-parameter limit is far above this)
+_SQL_CHUNK = 900
 # declaration kinds that name a signal; parameters, genvars and the like are never connectivity
 _SIGNAL_KINDS = frozenset({"net", "variable", "port"})
 
@@ -40,6 +45,15 @@ _SAFE_NAME = re.compile(r"[A-Za-z0-9._-]{1,120}")
 GRAPH_NOTE = (
     "connection edges are derived from direct port associations: two instances share a signal "
     "declaration; direction is the declared port direction, not a driver/load analysis; not a netlist"
+)
+DIFF_VIEW_NOTE = (
+    "diff view: instances of the definitions the git diff changes are drawn with their whole "
+    "subtrees; their ancestors are context only and show only their drawn children and the "
+    "connections among drawn instances"
+)
+SUBTREE_NOTE = (
+    "subtree view: only the root instance and its descendants were read; fan-out counts uses "
+    "inside the subtree, and signals declared outside it are listed as boundary signals, not drawn"
 )
 
 
@@ -70,9 +84,200 @@ def _owner_instance(sig_path: str, by_path: dict[str, str]) -> tuple[str, str] |
             return sig_path[:end], iid
 
 
-def build_model(s: Any, *, max_instances: int, max_fanout: int) -> dict[str, Any]:
-    """Graph model of the build behind session ``s``. Pure function of the stored rows."""
+def _ord(r: Any) -> tuple[int, int]:
+    """Sort key matching SQLite ``ORDER BY ord`` (NULL first) for rows sorted in Python."""
+    o = r["ord"]
+    return (0, 0) if o is None else (1, int(o))
+
+
+def _chunks(items: list[str]) -> Iterator[list[str]]:
+    for i in range(0, len(items), _SQL_CHUNK):
+        yield items[i : i + _SQL_CHUNK]
+
+
+def _rows_in(s: Any, sql: str, ids: list[str]) -> list[Any]:
+    """``sql`` has one ``{}`` for an ``IN (...)`` list; run it per chunk of ``ids``."""
+    out: list[Any] = []
+    for part in _chunks(ids):
+        out.extend(s.rows(sql.format(",".join("?" * len(part))), s.bid, *part))
+    return out
+
+
+def _load_full(s: Any) -> tuple[list[Any], list[Any], Callable[[list[Any]], dict[str, str]]]:
     rows = s.rows("SELECT * FROM instances WHERE build_id=? ORDER BY ord", s.bid)
+    bindings = s.rows("SELECT * FROM port_bindings WHERE build_id=? ORDER BY ord", s.bid)
+
+    def kinds(_refs: list[Any]) -> dict[str, str]:
+        decl_kind: dict[str, str] = {}
+        for d in s.rows("SELECT declaration_id, kind FROM declarations WHERE build_id=?", s.bid):
+            decl_kind[d["declaration_id"]] = d["kind"]
+        return decl_kind
+
+    return rows, bindings, kinds
+
+
+def resolve_root(s: Any, root: str) -> Any:
+    """The instance row named by ``root`` (exact path first: indexed; else the shared resolver,
+    which also accepts an instance id or a hierarchical path and refuses an ambiguous name)."""
+    rows = s.rows("SELECT * FROM instances WHERE build_id=? AND path=?", s.bid, root)
+    if len(rows) == 1:
+        return rows[0]
+    try:
+        return _resolve_instance(s, root)
+    except SvwError as e:
+        if e.code == ErrorCode.MISSING_INPUT and str(s.build["completeness"]) != "COMPLETE":
+            raise SvwError(
+                ErrorCode.MISSING_INPUT,
+                f"unknown instance {root!r} in a {s.build['completeness']} build: absence from a "
+                "build that is not COMPLETE is not proof that the instance does not exist",
+                {"reason": "instance_missing", "instance": root},
+            ) from e
+        raise
+
+
+def _load_subtree(
+    s: Any, root_row: Any
+) -> tuple[list[Any], list[Any], Callable[[list[Any]], dict[str, str]]]:
+    """Only the rows of ``root_row`` and its descendants. The subtree is the closure of the stored
+    ``parent_id`` links (indexed), never a path-prefix guess; port bindings come by primary key and
+    declaration kinds only for the declarations those bindings reference."""
+    return _load_rows(s, [root_row, *_descendants(s, [str(root_row["instance_id"])])])
+
+
+def _descendants(s: Any, ids: list[str]) -> list[Any]:
+    """Rows of every descendant of the instances ``ids`` (closure of the parent_id links)."""
+    out: list[Any] = []
+    level = ids
+    while level:
+        nxt = _rows_in(
+            s, "SELECT * FROM instances WHERE build_id=? AND parent_id IN ({})", level
+        )
+        out.extend(nxt)
+        level = [str(r["instance_id"]) for r in nxt]
+    return out
+
+
+def _load_rows(
+    s: Any, rows: list[Any]
+) -> tuple[list[Any], list[Any], Callable[[list[Any]], dict[str, str]]]:
+    """Port bindings (by primary key) and, lazily, the kinds of the declarations they reference,
+    for exactly the instance ``rows``."""
+    rows = sorted({str(r["instance_id"]): r for r in rows}.values(), key=_ord)
+    bindings = _rows_in(
+        s,
+        "SELECT * FROM port_bindings WHERE build_id=? AND instance_id IN ({})",
+        [str(r["instance_id"]) for r in rows],
+    )
+    bindings.sort(key=lambda b: (_ord(b), b["instance_id"], b["formal_port"]))
+
+    def kinds(refs: list[Any]) -> dict[str, str]:
+        ids = sorted(
+            {str(x.get("declaration_id")) for x in refs if isinstance(x, dict)}
+        )
+        return {
+            d["declaration_id"]: d["kind"]
+            for d in _rows_in(
+                s,
+                "SELECT declaration_id, kind FROM declarations WHERE build_id=? "
+                "AND declaration_id IN ({})",
+                ids,
+            )
+        }
+
+    return rows, bindings, kinds
+
+
+def diff_selection(s: Any, definition_ids: set[str], root_row: Any = None) -> dict[str, Any]:
+    """The instances a diff view draws: every instance of a changed definition (``changed``) with
+    its whole subtree (``inside``), plus the ancestors that connect them (``context``) up to
+    ``root_row`` or, without one, up to their lowest common ancestor. Instances of a changed
+    definition outside ``root_row`` are counted, not drawn. Everything is read by index: the
+    changed instances by definition, ancestors by id, descendants by parent_id."""
+    changed = _rows_in(
+        s,
+        "SELECT * FROM instances WHERE build_id=? AND definition_declaration_id IN ({})",
+        sorted(definition_ids),
+    )
+    known: dict[str, Any] = {str(r["instance_id"]): r for r in changed}
+    todo = {str(r["parent_id"]) for r in changed if r["parent_id"] is not None} - set(known)
+    while todo:  # ancestor rows, one level per round
+        got = _rows_in(s, "SELECT * FROM instances WHERE build_id=? AND instance_id IN ({})",
+                       sorted(todo))
+        known.update({str(r["instance_id"]): r for r in got})
+        todo = {str(r["parent_id"]) for r in got if r["parent_id"] is not None} - set(known)
+
+    def chain(iid: str) -> list[str]:  # the instance, then its ancestors up to its top
+        out = [iid]
+        while (pid := known[out[-1]]["parent_id"]) is not None and str(pid) in known:
+            out.append(str(pid))
+        return out
+
+    chains = {str(r["instance_id"]): chain(str(r["instance_id"])) for r in changed}
+    if root_row is not None:
+        rid = str(root_row["instance_id"])
+        known[rid] = root_row
+        kept = {c: ch[: ch.index(rid) + 1] for c, ch in chains.items() if rid in ch}
+        stop: Any = root_row
+    else:
+        kept = dict(chains)
+        common: list[str] = []
+        downs = [ch[::-1] for ch in kept.values()]  # top first
+        for level in zip(*downs, strict=False):
+            if len(set(level)) != 1:
+                break
+            common.append(level[0])
+        stop = known[common[-1]] if common else None
+        if common:
+            kept = {c: ch[: ch.index(common[-1]) + 1] for c, ch in kept.items()}
+    marks: dict[str, str] = {c: "changed" for c in kept}
+    for ch in kept.values():
+        for a in ch[1:]:
+            marks.setdefault(a, "context")
+    inside = _descendants(s, sorted(kept))
+    context = sorted(i for i, m in marks.items() if m == "context")
+    counts = {
+        str(r["parent_id"]): int(r["n"])
+        for r in _rows_in(
+            s,
+            "SELECT parent_id, COUNT(*) AS n FROM instances WHERE build_id=? AND parent_id IN ({}) "
+            "GROUP BY parent_id",
+            context,
+        )
+    }
+    return {
+        "rows": [known[i] for i in marks] + inside,
+        "marks": marks,
+        "children_total": counts,
+        "root_row": stop,
+        "changed_total": len(changed),
+        "outside_root": len(chains) - len(kept),
+    }
+
+
+def build_model(
+    s: Any,
+    *,
+    max_instances: int,
+    max_fanout: int,
+    root_row: Any = None,
+    selection: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Graph model of the build behind session ``s``. Pure function of the stored rows.
+
+    With ``root_row`` only that instance and its descendants are read and drawn (subtree view):
+    depth is relative to the root, fan-out counts the uses inside the subtree, and a signal
+    declared outside the subtree (the root's own port actuals, a hierarchical reference) is
+    listed under ``boundary`` instead of being drawn: its owner is not on the page.
+
+    With ``selection`` (from :func:`diff_selection`) exactly its rows are read and drawn, under
+    the same rules, and every node carries its ``diff`` mark."""
+    partial = root_row is not None or selection is not None
+    if selection is not None:
+        rows, bindings, kinds = _load_rows(s, selection["rows"])
+    elif root_row is not None:
+        rows, bindings, kinds = _load_subtree(s, root_row)
+    else:
+        rows, bindings, kinds = _load_full(s)
     total = len(rows)
     depth: dict[str, int] = {}
     for r in rows:  # ord is pre-order, so a parent is always seen before its children
@@ -84,15 +289,13 @@ def build_model(s: Any, *, max_instances: int, max_fanout: int) -> dict[str, Any
     by_path = {r["path"]: r["instance_id"] for r in rows}
     path_by_id = {r["instance_id"]: r["path"] for r in rows}
 
-    decl_kind: dict[str, str] = {}
-    for d in s.rows("SELECT declaration_id, kind FROM declarations WHERE build_id=?", s.bid):
-        decl_kind[d["declaration_id"]] = d["kind"]
+    parsed = [(b, loads(b["referenced_symbols"]) or []) for b in bindings]
+    decl_kind = kinds([x for _, refs in parsed for x in refs])
 
     ports: dict[str, list[dict[str, Any]]] = defaultdict(list)
     members: dict[str, dict[str, Any]] = {}
-    for b in s.rows("SELECT * FROM port_bindings WHERE build_id=? ORDER BY ord", s.bid):
+    for b, refs in parsed:
         iid = b["instance_id"]
-        refs = loads(b["referenced_symbols"]) or []
         sigs = [
             x
             for x in refs
@@ -117,8 +320,12 @@ def build_model(s: Any, *, max_instances: int, max_fanout: int) -> dict[str, Any
 
     edges: list[dict[str, Any]] = []
     hubs: list[dict[str, Any]] = []
+    boundary: list[dict[str, Any]] = []
     for m in members.values():
         users = {iid for iid, _, _ in m["uses"]}
+        if partial and _owner_instance(m["path"], by_path) is None:
+            boundary.append({"signal": m["path"], "instances": len(users)})
+            continue
         if len(users) > max_fanout:
             hubs.append({"signal": m["path"], "instances": len(users)})
             continue
@@ -196,7 +403,7 @@ def build_model(s: Any, *, max_instances: int, max_fanout: int) -> dict[str, Any
                 "ports": ports.get(iid, []),
             }
         )
-    return {
+    model: dict[str, Any] = {
         "nodes": nodes,
         "edges": uniq,
         "hubs": sorted(hubs, key=lambda h: (-h["instances"], h["signal"])),
@@ -211,6 +418,100 @@ def build_model(s: Any, *, max_instances: int, max_fanout: int) -> dict[str, Any
         "truncated": total > len(nodes),
         "note": GRAPH_NOTE,
     }
+    if partial:
+        model["boundary"] = sorted(boundary, key=lambda h: (-h["instances"], h["signal"]))
+        model["stats"]["boundary_signals"] = len(boundary)
+    if root_row is not None:
+        model["root"] = str(root_row["path"])
+        model["stats"]["root"] = str(root_row["path"])
+    if selection is not None:
+        marks, total_kids = selection["marks"], selection["children_total"]
+        for n in nodes:
+            n["diff"] = marks.get(n["id"], "inside")
+            if n["id"] in total_kids:
+                n["children_total"] = total_kids[n["id"]]
+        model["stats"]["changed_instances"] = sum(1 for n in nodes if n["diff"] == "changed")
+    return model
+
+
+def _diff_view(
+    s: Any, base: str, head: str | None, root_row: Any
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """git diff -> changed definitions -> the instances to draw (:func:`diff_selection`)."""
+    ch = collect_changes(s, base=base, head=head, repo=None, new_side=True)
+    defs = set(ch["by_def"])
+    files = [{"path": f["path"], "side": f.get("side"), "aligned": f.get("aligned")}
+             for f in ch["files"]]
+    summary = {
+        "files_changed": len(ch["diffs"]),
+        "files_in_build": len(ch["files"]),
+        "files_not_in_build": len(ch["unmapped"]),
+        "non_instance_declarations": len(ch["non_instance"]),
+        "unattributed_ranges": len(ch["unattributed"]),
+    }
+    sel = diff_selection(s, defs, root_row) if defs else None
+    if sel is None or not sel["marks"]:
+        why = ("no changed line falls inside a module/interface of this build" if not defs else
+               f"none of the {sel['changed_total'] if sel else 0} instance(s) of the changed "
+               "definition(s) is under the root")
+        raise SvwError(
+            ErrorCode.MISSING_INPUT,
+            f"nothing to draw for {base} -> {head or 'working tree'}: {why}",
+            {"reason": "diff_touches_no_instance", **summary,
+             "unmapped_files": [u["path"] for u in ch["unmapped"]][:20],
+             "non_instance_declarations": [d["qualified_name"] for d in ch["non_instance"]][:20]},
+        )
+    names = _names(s, defs)
+    drawn: dict[str, int] = defaultdict(int)
+    for r in sel["rows"]:
+        if sel["marks"].get(str(r["instance_id"])) == "changed":
+            drawn[str(r["definition_declaration_id"])] += 1
+    totals = {
+        str(r["definition_declaration_id"]): int(r["n"])
+        for r in _rows_in(
+            s,
+            "SELECT definition_declaration_id, COUNT(*) AS n FROM instances WHERE build_id=? "
+            "AND definition_declaration_id IN ({}) GROUP BY definition_declaration_id",
+            sorted(defs),
+        )
+    }
+    changed = sorted(
+        ({"qualified_name": names.get(d, {}).get("qualified_name"),
+          "kind": names.get(d, {}).get("kind"),
+          "changed_declarations": ch["by_def"][d]["declarations"],
+          "instances": totals.get(d, 0), "instances_drawn": drawn.get(d, 0)} for d in defs),
+        key=lambda x: (-x["instances_drawn"], str(x["qualified_name"])),
+    )
+    diff = {
+        "base": base,
+        "head": head or "working tree",
+        "changed_definitions": changed,
+        "files": files,
+        "unmapped_files": [u["path"] for u in ch["unmapped"]][:200],
+        "non_instance_declarations": [d["qualified_name"] for d in ch["non_instance"]][:200],
+        "outside_root": sel["outside_root"],
+        "summary": summary,
+    }
+    warns: list[str] = []
+    approx = [f["path"] for f in files if f["aligned"] is not True]
+    if approx:
+        warns.append(
+            f"{len(approx)} changed file(s) match neither side of the diff in the build's "
+            "snapshot: their line mapping is approximate (rebuild, or diff against the revision "
+            "the build was made from)"
+        )
+    if ch["unmapped"]:
+        warns.append(f"{len(ch['unmapped'])} changed file(s) are not part of this build and were "
+                     "not drawn")
+    if ch["non_instance"]:
+        warns.append(f"{len(ch['non_instance'])} changed declaration(s) belong to no "
+                     "module/interface (package, class, free subroutine) and are listed, not drawn")
+    if ch["unattributed"]:
+        warns.append(f"{len(ch['unattributed'])} changed range(s) fall outside every declaration")
+    if sel["outside_root"]:
+        warns.append(f"{sel['outside_root']} instance(s) of the changed definition(s) are outside "
+                     "the root and are not drawn")
+    return diff, sel, warns
 
 
 def export_graph(
@@ -221,14 +522,46 @@ def export_graph(
     name: str | None = None,
     max_instances: int = DEFAULT_MAX_INSTANCES,
     max_fanout: int = DEFAULT_MAX_FANOUT,
+    root: str | None = None,
+    diff_base: str | None = None,
+    diff_head: str | None = None,
 ) -> Envelope:
+    if diff_base is not None:
+        check_ref(diff_base, "diff_base")
+    if diff_head is not None:
+        if diff_base is None:
+            raise SvwError(ErrorCode.INVALID_CONFIG, "diff_head needs diff_base")
+        check_ref(diff_head, "diff_head")
+    if root is not None and (not isinstance(root, str) or not root.strip()):
+        raise SvwError(ErrorCode.INVALID_CONFIG, "root must be a non-empty instance path or id")
     if not isinstance(max_instances, int) or not 1 <= max_instances <= 100_000:
         raise SvwError(ErrorCode.INVALID_CONFIG, "max_instances must be in 1..100000")
     if not isinstance(max_fanout, int) or not 2 <= max_fanout <= 1000:
         raise SvwError(ErrorCode.INVALID_CONFIG, "max_fanout must be in 2..1000")
     with _session(opts, build_id) as s:
-        model = build_model(s, max_instances=max_instances, max_fanout=max_fanout)
-        fname = f"{name or 'graph-' + s.bid[:12]}.html"
+        root_row = resolve_root(s, root) if root is not None else None
+        diff: dict[str, Any] | None = None
+        warns: list[str] = []
+        if diff_base is not None:
+            diff, sel, dwarns = _diff_view(s, diff_base, diff_head, root_row)
+            warns += dwarns
+            root_row = sel["root_row"]
+            model = build_model(
+                s, max_instances=max_instances, max_fanout=max_fanout, selection=sel,
+                root_row=root_row,
+            )
+            model["diff"] = diff
+        else:
+            model = build_model(
+                s, max_instances=max_instances, max_fanout=max_fanout, root_row=root_row
+            )
+        stem = "graph-" + s.bid[:12]
+        if diff is not None:
+            key = f"{diff_base}\0{diff_head or ''}\0{root or ''}"
+            stem += "-diff-" + hashlib.sha256(key.encode()).hexdigest()[:10]
+        elif root_row is not None:  # one default file per (build, root); a path is no file name
+            stem += "-sub-" + hashlib.sha256(str(root_row["path"]).encode()).hexdigest()[:10]
+        fname = f"{name or stem}.html"
         if not _SAFE_NAME.fullmatch(fname) or fname.startswith("."):
             raise SvwError(ErrorCode.INVALID_CONFIG, "name must match [A-Za-z0-9._-]+ (no path)")
         meta = {
@@ -240,12 +573,19 @@ def export_graph(
             "evidence_kind": "HDL_STATIC_RESOLVED",
             "workspace_id": str(s.build["workspace_id"]),
         }
+        if root_row is not None:
+            meta["root"] = str(root_row["path"])
+        if diff is not None:
+            meta["diff"] = f"{diff['base']} -> {diff['head']}"
         page = render_html({"meta": meta, **model})
         data = page.encode("utf-8")
         exports = ensure_private_dir(s.ctx.state_dir, EXPORT_DIR)
         write_under(exports, fname, data)
-        warns = []
         limits = _gap_limits(s) + [GRAPH_NOTE]
+        if diff is not None:
+            limits += [DIFF_VIEW_NOTE, DIFF_NOTE]
+        elif root_row is not None:
+            limits.append(SUBTREE_NOTE)
         if model["truncated"]:
             warns.append(
                 f"truncated: {model['stats']['instances_shown']} of "
@@ -256,6 +596,11 @@ def export_graph(
             warns.append(
                 f"{len(model['hubs'])} signal(s) referenced by more than {max_fanout} instances "
                 "are listed as hubs, not drawn as edges"
+            )
+        if model.get("boundary"):
+            warns.append(
+                f"{len(model['boundary'])} signal(s) declared outside the subtree root are listed "
+                "as boundary signals, not drawn as edges"
             )
         return build_envelope(
             s.ctx,
@@ -270,6 +615,9 @@ def export_graph(
                 "truncated": model["truncated"],
                 "note": GRAPH_NOTE,
                 "served": False,
+                "root": model.get("root"),
+                **({"diff": {k: v for k, v in diff.items() if k != "files"}}
+                   if diff is not None else {}),
             },
             warnings=warns,
             extra_limits=limits,
