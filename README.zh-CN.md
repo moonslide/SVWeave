@@ -61,6 +61,12 @@
 
 ## 状态
 
+### 第二次 Council review：修正与已验证的运行（2026-11-04）
+
+第二次六位专家审查（针对之后的代码：大型 SoC 页面、`--per-commit`、默认完整拓扑）发现两个 **High** 问题，均已先复现再修正：`graph export --per-commit` 运行的 `git log` 在仓库配置 `log.showSignature` 时，会为已签名的 commit 运行仓库指定的 `gpg.program`；以及仓库附带的 `.svweave/` 可以放一个 `files` 为符号链接（例如指向 `$HOME`）的快照，文本搜索会遍历它，且 `snapshot.json` 会被原样信任。另外也修正了：图谱页面只运行自己的查看器脚本（以 hash 指定）；`--split`/`--lazy` 拒绝每页上限，且不再在单一页面上声称完整；沙箱绑定 `$HOME` 的上层目录；以及正确性与接口缺陷。每个修正都有在旧代码上会失败的测试（新增 mutation M31）。
+
+在 `4491a54`、于一个 4 CPU 的云端 session 中验证（不是 CI），`SVWEAVE_REQUIRE_BACKENDS=1`：unit + contract 1752 通过、0 失败、4 个 BLOCKED（与之前相同的四个，该主机无法执行）；fault injection 20、integration 233（0 skipped）、acceptance 12 通过；关键 mutation **31/31 KILLED**。这是第一个覆盖 `--per-commit`、精简页面格式、`--split` 与 `--lazy` 的已记录运行。细节、命令、JUnit 文件与尚未处理的项目（其中一项需要项目负责人决定）：[evidence/council-review-2-2026-11-04](evidence/council-review-2-2026-11-04/README.md)。这不是 `scripts/qualify.py` 的资格认定运行。
+
 ### Council review 修复与已验证的运行（2026-11-04）
 
 六位专家对整个代码库进行审查，发现了包括一个 **High** 在内的多个问题：diff-impact 运行 git 时会套用仓库自身的配置，因此当 partial clone 的配置指定了 `remote.<x>.uploadpack`，`svw_diff_impact`（或 `graph export --diff-base`）在读取缺失的 blob 时，就会在主机上执行该命令。这已修复（不读取用户／系统配置、禁止任何传输协议、拒绝 partial clone、超时确实生效），同时修复的还有：通过 `svweave.yaml` 泄露环境变量秘密（**不兼容变更：** filelist 中的 `$VAR` 现在也必须列在受信的 `policy.json` 的 `environment_allowlist` 中）、只检查 20 条变更的 roll-forward 关卡（新增 mutation M30）、没有 sandbox 的构建不留记录、rename 行数被减半，以及若干接口缺陷。每一项都先重现过；每个修复都有一个在旧代码上会失败的测试。
@@ -592,6 +598,8 @@ svweave graph export --build BUILD_ID --lazy    # 单一页面，打开时才加
 
 放不下的子树会成为“入口节点”：它在上一层页面上是一个节点（带着自己的端口连接），可打开它那一部分（`--split`：链接到它的页面；`--lazy`：双击即在同一张图中加载）。索引页可搜索整个设计的所有实例，并打开正确的部分。在 115,562 个实例上：单一页面打开需 10.1 秒，`--split` 或 `--lazy` 的索引页约 0.55 秒，打开一条搜索结果约 1 秒（[测量证据](evidence/bench/graph-large/README.md)）。`--lazy` 的页面 CSP 允许加载同一目录的脚本（读取本地文件所必需；仅在 Chromium 验证）；`--split` 保持严格的 CSP，任何浏览器都能用。每个页面只会执行它自己的查看器脚本（CSP 写明其 sha256，没有 `'unsafe-inline'` 的脚本）。`--split` 与 `--lazy` 写出一个目录（由 `--name` 命名），并拒绝 `--max-instances` / `--max-fanout`：它们的页面合起来就是完整拓扑，要让页面变小请用 `--page-budget`（至少 100）。每页都会注明唯一的例外：通过没有任何实例声明的信号（例如 package 变量）连接位于不同页面之实例的连接不会画出。
 
+各模式的 envelope `data`：单一页面（默认、`--instance`、`--diff-base`）有 `path`、`bytes`、`sha256`、`stats`、`truncated`、`root`（`--diff-base` 时另有 `diff`）；“没有东西可画”时为 `path: null`、`written: false` 与 `diff`。`--split` / `--lazy` 写出一个目录：`path`（其 `index.html`）、`directory`、`root`，以及位于 `atlas`（`--split`）或 `lazy`（`--lazy`）下的摘要：`pages`、`budget`、`largest_page`、`oversized_pages`、`bytes_total`、`largest_file_bytes`、`files`（至多 200 个名称）、`files_total`、`files_truncated`。
+
 `graph export` 的退出码：写出页面（或没有东西可画）时为 0；与 `query` 命令相同，PARTIAL 的构建为 3、STALE/HISTORICAL 为 5（页面仍会写出，并在页面上注明），除非加上 `--allow-partial` / `--allow-stale`；使用 `--diff-base` 时，STALE 不会改变退出码。`--max-instances` 截断绘图时 `pagination.truncated` 为 true。
 
 ## 在 Claude Code 和 Codex 中使用 SVWeave
@@ -861,7 +869,7 @@ profiles:
     library_dirs: []
     library_files: []
     library_extensions: [".v", ".sv"]
-    environment_allowlist: []          # only these variables may be expanded in paths
+    environment_allowlist: []          # variables a path may expand; each must ALSO be in policy.json
     generated_inputs: []               # must already exist; nothing is generated
     diagnostic_policy: "no_errors"
     # language_options:                # allowlisted slang knobs, part of config_id
@@ -927,7 +935,7 @@ root_mappings:
 | `+incdir+a+b`、`-I DIR`、`-IDIR` | include 目录，保留顺序，绝不排序或去重 |
 | `+define+N=V+M`、`-DN=V` | 宏文本按 token 精确处理；`NAME`、`NAME=` 和 `NAME=V` 互不相同；冲突的重定义为 `INVALID_CONFIG` |
 | `-v FILE`、`-y DIR`、`+libext+.v+.sv` | 库文件、库目录、库扩展名 |
-| 路径 token 中的 `$VAR`、`${VAR}` | 仅当该变量在 `environment_allowlist` 中且已设置时，否则为 `MISSING_INPUT` |
+| 路径 token 中的 `$VAR`、`${VAR}` | 仅当该变量同时在 profile 的 `environment_allowlist` 与受信任 `policy.json` 的 `environment_allowlist` 中且已设置时可用；否则为 `MISSING_INPUT`（`env_not_allowed_by_policy` 会指出 policy 字段） |
 | `-l`、`-logfile`、`-nologo`、`-quiet`、`-q` | 仅影响输出的选项：丢弃并记录为已忽略 |
 
 | 拒绝 | 结果 |

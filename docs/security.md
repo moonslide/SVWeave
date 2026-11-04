@@ -30,8 +30,9 @@ environment, and the user's host.
   inside the project tree is `POLICY_DENIED`, and a repository-local policy file is ignored.
   `workspace_key = sha256(realpath(dir of svweave.yaml))[:16]`.
 * The repository can only tighten the policy. It cannot add roots, enable editing that the policy
-  disables, drop required human approval or list writable paths outside the policy. There is no
-  network field in `svweave.yaml`.
+  disables, drop required human approval, list writable paths outside the policy or read an
+  environment variable the policy's `environment_allowlist` does not name. There is no network
+  field in `svweave.yaml`.
 * `.svweave/` (runtime state) must be a real directory owned by the current user. It holds
   snapshots, the semantic database, candidates, journals, run logs and backend state; it is never
   committed.

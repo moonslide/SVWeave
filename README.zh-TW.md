@@ -61,6 +61,12 @@
 
 ## 狀態
 
+### 第二次 Council review：修正與已驗證的執行（2026-11-04）
+
+第二次六位專家審查（針對之後的程式碼：大型 SoC 頁面、`--per-commit`、預設完整拓撲）發現兩個 **High** 問題，皆已先重現再修正：`graph export --per-commit` 執行的 `git log` 在儲存庫設定 `log.showSignature` 時，會為已簽章的 commit 執行儲存庫指定的 `gpg.program`；以及儲存庫附帶的 `.svweave/` 可以放一個 `files` 為符號連結（例如指向 `$HOME`）的快照，文字搜尋會走訪它，且 `snapshot.json` 會被原樣信任。另外也修正了：圖譜頁面只執行自己的檢視器腳本（以 hash 指定）；`--split`/`--lazy` 拒絕每頁上限，且不再在單一頁面上宣稱完整；沙箱綁定 `$HOME` 的上層目錄；以及正確性與介面缺陷。每個修正都有在舊程式碼上會失敗的測試（新增 mutation M31）。
+
+在 `4491a54`、於一個 4 CPU 的雲端 session 中驗證（不是 CI），`SVWEAVE_REQUIRE_BACKENDS=1`：unit + contract 1752 通過、0 失敗、4 個 BLOCKED（與之前相同的四個，該主機無法執行）；fault injection 20、integration 233（0 skipped）、acceptance 12 通過；關鍵 mutation **31/31 KILLED**。這是第一個涵蓋 `--per-commit`、精簡頁面格式、`--split` 與 `--lazy` 的已記錄執行。細節、指令、JUnit 檔與尚未處理的項目（其中一項需要專案負責人決定）：[evidence/council-review-2-2026-11-04](evidence/council-review-2-2026-11-04/README.md)。這不是 `scripts/qualify.py` 的資格認定執行。
+
 ### Council review 修正與已驗證的執行（2026-11-04）
 
 六位專家對整個程式碼庫進行審查，發現了包括一個 **High** 在內的多個問題：diff-impact 執行 git 時會套用儲存庫自己的設定，因此當 partial clone 的設定指定了 `remote.<x>.uploadpack`，`svw_diff_impact`（或 `graph export --diff-base`）在讀取缺少的 blob 時，就會在主機上執行該指令。這已修正（不讀取使用者／系統設定、禁止任何傳輸協定、拒絕 partial clone、逾時確實生效），同時修正的還有：透過 `svweave.yaml` 洩漏環境變數秘密（**不相容變更：** filelist 中的 `$VAR` 現在也必須列在可信的 `policy.json` 的 `environment_allowlist` 中）、只檢查 20 筆變更的 roll-forward 關卡（新增 mutation M30）、沒有 sandbox 的 build 不留紀錄、rename 行數被減半，以及數個介面缺陷。每一項都先重現過；每個修正都有一個在舊程式碼上會失敗的測試。
@@ -592,6 +598,8 @@ svweave graph export --build BUILD_ID --lazy    # 單一頁面，打開時才載
 
 放不下的子樹會成為「入口節點」：它在上一層頁面上是一個節點（帶著自己的連接埠連線），可開啟它那一部分（`--split`：連到它的頁面；`--lazy`：雙擊即在同一張圖中載入）。索引頁可搜尋整個設計的所有實例，並開啟正確的部分。在 115,562 個實例上：單一頁面開啟需 10.1 秒，`--split` 或 `--lazy` 的索引頁約 0.55 秒，開啟一筆搜尋結果約 1 秒（[量測證據](evidence/bench/graph-large/README.md)）。`--lazy` 的頁面 CSP 允許載入同一目錄的腳本（讀取本機檔案所必需；僅在 Chromium 驗證）；`--split` 維持嚴格的 CSP，任何瀏覽器都能用。每個頁面只會執行它自己的檢視器腳本（CSP 寫明其 sha256，沒有 `'unsafe-inline'` 的腳本）。`--split` 與 `--lazy` 寫出一個目錄（由 `--name` 命名），並拒絕 `--max-instances` / `--max-fanout`：它們的頁面合起來就是完整拓撲，要讓頁面變小請用 `--page-budget`（至少 100）。每頁都會註明唯一的例外：透過沒有任何實例宣告的訊號（例如 package 變數）、連接位於不同頁面之實例的連線不會畫出。
 
+各模式的 envelope `data`：單一頁面（預設、`--instance`、`--diff-base`）有 `path`、`bytes`、`sha256`、`stats`、`truncated`、`root`（`--diff-base` 時另有 `diff`）；「沒有東西可畫」時為 `path: null`、`written: false` 與 `diff`。`--split` / `--lazy` 寫出一個目錄：`path`（其 `index.html`）、`directory`、`root`，以及位於 `atlas`（`--split`）或 `lazy`（`--lazy`）下的摘要：`pages`、`budget`、`largest_page`、`oversized_pages`、`bytes_total`、`largest_file_bytes`、`files`（至多 200 個名稱）、`files_total`、`files_truncated`。
+
 `graph export` 的結束碼：寫出頁面（或沒有東西可畫）時為 0；與 `query` 指令相同，PARTIAL 的建置為 3、STALE/HISTORICAL 為 5（頁面仍會寫出，並在頁面上註明），除非加上 `--allow-partial` / `--allow-stale`；使用 `--diff-base` 時，STALE 不會改變結束碼。`--max-instances` 截斷繪圖時 `pagination.truncated` 為 true。
 
 ## 在 Claude Code 與 Codex 中使用 SVWeave
@@ -861,7 +869,7 @@ profiles:
     library_dirs: []
     library_files: []
     library_extensions: [".v", ".sv"]
-    environment_allowlist: []          # only these variables may be expanded in paths
+    environment_allowlist: []          # variables a path may expand; each must ALSO be in policy.json
     generated_inputs: []               # must already exist; nothing is generated
     diagnostic_policy: "no_errors"
     # language_options:                # allowlisted slang knobs, part of config_id
@@ -927,7 +935,7 @@ root_mappings:
 | `+incdir+a+b`, `-I DIR`, `-IDIR` | include 目錄，保留順序，絕不排序或去重 |
 | `+define+N=V+M`, `-DN=V` | 巨集文字逐 token 精確保留；`NAME`、`NAME=` 與 `NAME=V` 各不相同；衝突的重新定義會得到 `INVALID_CONFIG` |
 | `-v FILE`, `-y DIR`, `+libext+.v+.sv` | 函式庫檔案、函式庫目錄、函式庫副檔名 |
-| 路徑 token 中的 `$VAR`, `${VAR}` | 只有當該變數位於 `environment_allowlist` 且已設定時才可用，否則為 `MISSING_INPUT` |
+| 路徑 token 中的 `$VAR`, `${VAR}` | 只有當該變數同時位於 profile 的 `environment_allowlist` 與受信任 `policy.json` 的 `environment_allowlist`，且已設定時才可用；否則為 `MISSING_INPUT`（`env_not_allowed_by_policy` 會指出 policy 欄位） |
 | `-l`, `-logfile`, `-nologo`, `-quiet`, `-q` | 僅影響輸出的選項：被捨棄並記錄為已忽略 |
 
 | 被拒絕 | 結果 |

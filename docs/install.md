@@ -396,7 +396,9 @@ svweave build --profile P
 
 The trusted policy is created **outside** the repository
 (`$XDG_CONFIG_HOME/svweave/workspaces/<key>/policy.json`, see `docs/security.md`). Editing stays
-disabled until you deliberately enable it there (`docs/editing.md`). This setup remains per
+disabled until you deliberately enable it there (`docs/editing.md`). A filelist that expands
+`$VAR` also needs the variable in that policy's `environment_allowlist` (and in the profile's);
+`svweave init` writes it empty. This setup remains per
 workspace even with a shared installation; do not rerun bootstrap in each project. Global MCP
 registration is in section 2a; the explicit per-project alternative is in `docs/operations.md`
 section 4.

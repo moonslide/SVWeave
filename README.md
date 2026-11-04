@@ -74,6 +74,27 @@ compare-and-set write (TB4). Dashed lines are trust boundaries TB1 to TB4.*
 
 ## Status
 
+### Second council review: fixes and verified run (2026-11-04)
+
+A second six-specialist review, of the code that followed (large-SoC pages, `--per-commit`, the
+complete-topology default), found two **High** issues, both fixed and each reproduced first:
+`graph export --per-commit` ran `git log`, which runs the repository's `gpg.program` for a signed
+commit when the repository config sets `log.showSignature`; and a `.svweave/` shipped in a
+repository could hold a snapshot whose `files` is a symlink (e.g. to `$HOME`), which the text
+search then walked, and a `snapshot.json` that was trusted as written. Also fixed: graph pages
+now run only their own hashed viewer script; `--split`/`--lazy` refuse per-page caps and no
+longer claim completeness on one page; sandbox binds of a parent of `$HOME`; and correctness and
+interface defects. Each fix has a test that fails without it (new mutation M31).
+
+Verified at `4491a54` in one 4-CPU cloud session (not CI), `SVWEAVE_REQUIRE_BACKENDS=1`: unit +
+contract 1752 passed, 0 failed, 4 BLOCKED (the same four as before, not executable on that host);
+fault injection 20, integration 233 (0 skipped), acceptance 12 passed; critical mutations **31/31
+KILLED**. This is the first recorded run that covers `--per-commit`, the compact page format,
+`--split` and `--lazy`. Details, commands, JUnit files and what is left open (one design decision
+for the project owner among them):
+[evidence/council-review-2-2026-11-04](evidence/council-review-2-2026-11-04/README.md). Not a
+`scripts/qualify.py` qualification run.
+
 ### Council review fixes and verified run (2026-11-04)
 
 A six-specialist review of the whole codebase found, among others, one **High** issue:
@@ -589,7 +610,8 @@ Code and Codex](#using-svweave-with-claude-code-and-codex)).*
 **1. Point SVWeave at the project.** SVWeave never has to live inside the design: keep
 `svweave.yaml` in a workspace directory and attach the design as an **external root** (declared
 without a `path` in `svweave.yaml`, mapped to an absolute path in `svweave.local.yaml`, and that
-path added to `allowed_roots` of the trusted `policy.json`): `docs/manifest.md`, section 2b, has
+path added to `allowed_roots` of the trusted `policy.json`; a `$VAR` in a filelist also needs the
+variable in that policy's `environment_allowlist`): `docs/manifest.md`, section 2b, has
 the exact YAML and the differences from a simulator command line (strict filelists, no simulator
 options, `timescale`, several tops, encrypted IP, UVM). In that workspace:
 
@@ -896,6 +918,13 @@ names its sha256; no `'unsafe-inline'` script). `--split` and `--lazy` write a d
 complete topology, `--page-budget` (at least 100) makes the pages smaller. One exception is said
 on every page: a connection through a signal no instance declares (a package variable) between
 instances on different pages is not drawn.
+
+Envelope `data` per mode: a single page (default, `--instance`, `--diff-base`) has `path`,
+`bytes`, `sha256`, `stats`, `truncated`, `root` (and `diff` with `--diff-base`); "nothing to draw"
+has `path: null`, `written: false` and `diff`. `--split` / `--lazy` write a directory: `path`
+(its `index.html`), `directory`, `root` and a summary under `atlas` (`--split`) or `lazy`
+(`--lazy`): `pages`, `budget`, `largest_page`, `oversized_pages`, `bytes_total`,
+`largest_file_bytes`, `files` (at most 200 names), `files_total`, `files_truncated`.
 
 Exit codes of `graph export`: 0 when the page was written (or there was nothing to draw); like the
 `query` commands, 3 for a PARTIAL build and 5 for a STALE/HISTORICAL one even though the page was
@@ -1298,7 +1327,7 @@ profiles:
     library_dirs: []
     library_files: []
     library_extensions: [".v", ".sv"]
-    environment_allowlist: []          # only these variables may be expanded in paths
+    environment_allowlist: []          # variables a path may expand; each must ALSO be in policy.json
     generated_inputs: []               # must already exist; nothing is generated
     diagnostic_policy: "no_errors"
     # language_options:                # allowlisted slang knobs, part of config_id
@@ -1375,7 +1404,7 @@ the last backend probe record.
 | `+incdir+a+b`, `-I DIR`, `-IDIR` | include dirs, order preserved, never sorted or de-duplicated |
 | `+define+N=V+M`, `-DN=V` | macro text is token-exact; `NAME`, `NAME=` and `NAME=V` differ; a conflicting redefinition is `INVALID_CONFIG` |
 | `-v FILE`, `-y DIR`, `+libext+.v+.sv` | library file, library directory, library extensions |
-| `$VAR`, `${VAR}` in path tokens | only if the variable is in `environment_allowlist` and set, else `MISSING_INPUT` |
+| `$VAR`, `${VAR}` in path tokens | only if the variable is in the profile's `environment_allowlist` AND the trusted `policy.json` `environment_allowlist`, and set; else `MISSING_INPUT` (`env_not_allowed_by_policy` names the policy field) |
 | `-l`, `-logfile`, `-nologo`, `-quiet`, `-q` | output-only options: dropped and recorded as ignored |
 
 | Refused | Result |
