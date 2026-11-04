@@ -1627,7 +1627,7 @@ and a benchmark within the plan 22.3 budgets. A gate computed from a step that d
 `NOT_EVALUATED`, never PASS. The release decision is `ACCEPTED_STATIC_PREVIEW` only when every gate
 passes and no blocker is open; otherwise `BLOCKED` with reasons.
 
-**Mutation suite.** `scripts/mutation_suite.py` injects 29 critical mutations (M01–M29, covering plan 20.5
+**Mutation suite.** `scripts/mutation_suite.py` injects 30 critical mutations (M01–M30, covering plan 20.5
 and additional write/workspace-binding/snapshot-reuse safety guards) one at a time into a throwaway copy of the
 repository and runs the mapped tests; a mutation is killed when they fail. `--only M01,M05` selects some; anything
 other than a clean fail (missing patch anchor, timeout, red baseline) is `ERROR`, never killed.

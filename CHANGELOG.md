@@ -23,6 +23,13 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   prefixes are pinned. **Breaking:** `$VAR` expansion in filelists now also needs the variable in
   the trusted `policy.json` `environment_allowlist` (a repository `svweave.yaml` could read any
   variable, e.g. a token, and echo it in an error message to the MCP client).
+* **Write-path and record fixes from the council review**: recovery roll-forward decided on the
+  first 20 changes only (a display cut), so a foreign dependency edit behind 20 of the
+  transaction's own files was not seen and the remaining files were written (now the complete
+  list; mutation M30); a build made by a worker without bwrap isolation now keeps that fact in
+  its stored report (stats + a standing limitation in every later answer, also on reuse);
+  rename preview counts changed lines like the edit gate (it halved them, so "ready" requests
+  were refused by `edit prepare`).
 * **Graph export diff view** (`svweave graph export --diff-base REF [--diff-head REF]`, ADR-014
   amendment): only the instances of the modules/interfaces a git diff changes, with subtrees and
   connecting ancestors; per file the diff side matching the build's snapshot is mapped, so building

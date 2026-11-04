@@ -545,6 +545,7 @@ def _run_job(
         result, rec, build_id, job_id, list(nm.top_modules), stubs=nm.stubs,
         extra_gaps=gaps_extra,
     )
+    _record_isolation(ing, outcome)
     if had_complete:
         return _verified_rerun(ctx, db, run, request_id, build_id, ing, outcome)
     if gaps_extra:
@@ -588,6 +589,22 @@ def _run_job(
     _surface_isolation(env, outcome)
     run.write("result.json", env.model_dump(mode="json"))
     return env
+
+
+DEGRADED_WORKER_NOTE = (
+    "the HDL worker that produced this build ran WITHOUT bwrap isolation (mode {mode}, "
+    "SVWEAVE_ALLOW_DEGRADED_WORKER): no network/filesystem confinement was in force; the result "
+    "is not a qualified sandboxed analysis"
+)
+
+
+def _record_isolation(ing: Any, outcome: WorkerOutcome) -> None:
+    """Persist the worker isolation with the build (stats + a standing limitation), so every
+    later query of it, and a reuse of it, still says how it was produced; not only the one
+    envelope of the build call."""
+    ing.summary["worker_isolation"] = outcome.isolation
+    if outcome.isolation != "bwrap":
+        ing.limitations.insert(0, DEGRADED_WORKER_NOTE.format(mode=outcome.isolation))
 
 
 def _surface_isolation(env: Envelope, outcome: WorkerOutcome) -> Envelope:

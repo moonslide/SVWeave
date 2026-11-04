@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Critical mutation suite (plan 20.5, release gate "Critical invariants").
 
-Twenty-nine deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
+Thirty deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
 the M12–M22 extra write-safety rules, M23–M26 Slurm boundaries, and M27 shared-launcher workspace
-binding, plus M28–M29 verified incremental-snapshot reuse. They are injected, one at a time, into a THROWAWAY COPY of the
+binding, plus M28–M29 verified incremental-snapshot reuse and M30 the complete change list of
+the roll-forward input gate. They are injected, one at a time, into a THROWAWAY COPY of the
 repository. For each one the mapped test subset is run against the copy; a mutation is ``KILLED`` when the subset
 fails (pytest exit 1 with at least one FAILED test) and ``SURVIVED`` when it stays green. Anything
 else (patch anchor missing, syntax/collection error, timeout, red baseline) is ``ERROR`` and is
@@ -390,6 +391,15 @@ MUTATIONS: list[Mutation] = [
                "                        or (before is not None and (files != before or lookup_copy != lookup))):\n",
                "                if False:  # " + MARK + ":M29\n")],
         ["tests/unit/test_incremental_snapshot.py::test_SNP_INC_07_noop_race_retries_and_continuous_changes_are_bounded"],
+    ),
+    m(
+        "M30", "roll-forward decides on a display-truncated change list (first 20 changes only)",
+        "A3 (beyond 20.5); council review 2026-11-04",
+        [Patch("src/svweave/application/edit.py",
+               "        changed = [c.model_dump() for c in res.changed]\n",
+               "        changed = [c.model_dump() for c in res.changed][:20]  # " + MARK + ":M30\n")],
+        ["tests/fault_injection/test_recover_gates.py::"
+         "test_a3_a_foreign_change_behind_twenty_own_changes_is_still_refused"],
     ),
 ]
 

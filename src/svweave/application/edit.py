@@ -1070,10 +1070,12 @@ def check_inputs_unchanged(
     own = tolerate or {}
     for sid in sorted(s for s in sids if s):
         r, _ = _base_rec(ctx, sid)
-        stale = _stale(ctx, r)
-        if stale is None:
+        res = check_freshness(ctx, r)
+        if res.freshness == "CURRENT":
             continue
-        changed = stale.details.get("changed", [])
+        # decide on the COMPLETE change list: a display-truncated list could hide a foreign
+        # change behind the transaction's own applied files (roll-forward would then write)
+        changed = [c.model_dump() for c in res.changed]
         foreign = [
             c for c in changed
             if not (
@@ -1082,11 +1084,13 @@ def check_inputs_unchanged(
             )
         ]
         if foreign or not changed:
+            shown = foreign or changed
             raise SvwError(
                 ErrorCode.EDIT_CONFLICT,
                 "the workspace changed since validation (a source or dependency was edited); "
                 "nothing was written",
-                {"reason": "workspace_changed", **stale.details, "changed": foreign or changed})
+                {"reason": "workspace_changed", "snapshot_id": r.snapshot_id,
+                 "changed": shown[:20], "changed_total": len(shown)})
 
 
 def _conflict(store: TxnStore, txn: Txn, err: SvwError) -> SvwError:

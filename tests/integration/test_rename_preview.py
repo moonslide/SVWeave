@@ -313,3 +313,29 @@ endmodule
     over = [b for b in env["data"]["blockers"] if b["code"] == "parameter_overrides_by_name"]
     assert code == 0 and len(over) == 1 and over[0]["instances"] == 1  # the real override is found
     assert env["data"]["ready_for_edit_request"] is False  # #(.axb(5)) would be left behind
+
+
+
+def test_RNM_I12_preview_limits_measure_changed_lines_like_the_edit_gate(tmp_path: Path) -> None:
+    """Council review: the preview counted (added + removed) // 2, the edit loop counts added +
+    removed. A rename of 4 lines (8 diff lines) under max_changed_lines 6 was "ready" and its
+    edit_request was then refused by prepare (too_many_changed_lines)."""
+    import yaml
+
+    for limit, ready in ((6, False), (8, True)):
+        w = demo_ws(tmp_path / f"l{limit}", editing=True)
+        m = yaml.safe_load((w.root / "svweave.yaml").read_text())
+        m["editing"]["max_changed_lines"] = limit
+        (w.root / "svweave.yaml").write_text(yaml.safe_dump(m, sort_keys=False))
+        code, b = run(w.root, "build", "--profile", "p")
+        assert code == 0
+        code, env = preview(w.root, str(b["build_id"]), "--name", "demo_lane.data_o",
+                            "--to", "data_out")
+        d = env["data"]
+        assert code == 0 and d["summary"]["sites"] == 4 and d["limits"]["max_changed_lines"] == limit
+        assert d["limits"]["within_limits"] is ready and d["ready_for_edit_request"] is ready, limit
+        if ready:  # what the preview accepts, the edit loop accepts too
+            prep = E.prepare(WorkspaceOptions(root=w.root), "r", d["edit_request"],
+                             use_serena=False)
+            assert prep.error is None, prep.error
+            assert prep.data.get("changed_lines", limit) <= limit

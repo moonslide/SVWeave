@@ -597,10 +597,12 @@ def rename_preview(
             old_lines = src.decode("utf-8", "surrogateescape").splitlines(keepends=True)
             new_lines = bytes(out).decode("utf-8", "surrogateescape").splitlines(keepends=True)
             ud = "".join(difflib.unified_diff(old_lines, new_lines, f"a/{lf}", f"b/{lf}", n=1))
+            # the same measure as the edit loop's gate (added + removed lines, editing/diffing.py),
+            # so a preview that says "within limits" is not refused by `edit prepare`
             changed_lines += sum(
                 1 for ln in ud.splitlines()
                 if ln[:1] in "+-" and not ln.startswith(("+++", "---"))
-            ) // 2
+            )
             files_out.append({"file": lf, "sites": len(es)})
             if diff_bytes + len(ud) <= MAX_DIFF_BYTES:
                 diffs.append({"file": lf, "diff": ud})

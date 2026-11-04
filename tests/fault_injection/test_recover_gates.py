@@ -112,3 +112,27 @@ def test_a3_roll_forward_still_works_with_all_gates_green(ws: EditWs) -> None:
     crash(ws, tid, h)
     r = roll(ws, tid)
     assert r.data["recovery"]["block_cleared"] and b"4'd2;" in ws.read("rtl/top.sv")
+
+
+def test_a3_a_foreign_change_behind_twenty_own_changes_is_still_refused(
+    ws: EditWs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Council review: the gate used to look only at the first 20 changes (a display cut). With
+    more than 20 of the transaction's own applied files listed first (max_files_per_patch has no
+    upper bound), a foreign dependency edit further down was never seen and roll-forward wrote."""
+    tid, h, _ = two_file_txn(ws)
+    crash(ws, tid, h)  # one file of the transaction is already at its after-hash
+    (ws.root / "rtl/defs.svh").write_text("`define BUMP 7\n")  # a foreign dependency edit
+    real = E.check_freshness
+
+    def many_own_first(ctx: Any, rec: Any) -> Any:
+        res = real(ctx, rec)
+        own = [c for c in res.changed if c.change == "modified" and c.path != "rtl/defs.svh"]
+        assert own, "setup: the crashed transaction's own applied file must be listed"
+        res.changed = own * 25 + [c for c in res.changed if c not in own]
+        return res
+
+    monkeypatch.setattr(E, "check_freshness", many_own_first)
+    e = refused(ws, tid)
+    assert e.code is ErrorCode.EDIT_CONFLICT and e.details["reason"] == "workspace_changed"
+    assert [c["path"] for c in e.details["changed"]] == ["rtl/defs.svh"]
