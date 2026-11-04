@@ -52,7 +52,7 @@ self-contained HTML graph of a build that you open from disk.
 | What a change to a module, port, signal or instance touches | `svweave query impact` | `svw_impact` | the build's instance tree and resolved references |
 | What a git diff touches | `svweave query diff-impact` | `svw_diff_impact` | `git diff` mapped onto the build's snapshot |
 | Every edit a rename would make, with blockers | `svweave query rename-preview` | `svw_rename_preview` | resolved references plus a verified lexical scan (read-only) |
-| A browsable graph of the hierarchy and its connections | `svweave graph export` | (CLI only) | the build, written as one static HTML file |
+| A browsable graph of the hierarchy and its connections; of one subtree (`--root`) or of only what a git diff changes (`--diff-base`) | `svweave graph export` | (CLI only) | the build, written as one static HTML file |
 | Change code safely | `svweave edit ...` | `svw_edit` (cannot approve) | candidate copy, slang validation, human approval, compare-and-set |
 | Status, evidence, reports | `svweave doctor`, `svweave query evidence`, `svweave report` | `svw_status`, `svw_evidence` | recorded runs; EDA, simulation and formal stay `NOT_RUN` |
 
@@ -73,6 +73,36 @@ source workspace is reached through exactly one path: the edit coordinator's app
 compare-and-set write (TB4). Dashed lines are trust boundaries TB1 to TB4.*
 
 ## Status
+
+### Graph subtree and git-diff views (2026-11-04)
+
+`svweave graph export` can now draw part of a build instead of all of it, without recompiling:
+
+- `--root INSTANCE`: one instance and its descendants. Only those rows are read from the build.
+- `--diff-base REF [--diff-head REF]`: only the instances of the modules/interfaces a `git diff`
+  changes (red), with their subtrees and the ancestors that connect them (dashed, context). Build
+  before or after the edit; per file the diff side that matches the build's snapshot is mapped.
+
+Verified on branch `claude/partial-compile-html-1eyxxd` at `c641509`, in one 4-CPU cloud session
+(not a CI run): unit + contract **1731 passed, 0 failed**; integration with real pyslang,
+codebase-memory-mcp, Serena and UVM under `SVWEAVE_REQUIRE_BACKENDS=1` **214 passed, 0 skipped**.
+New tests use the hand-written RTL `fixtures/language/grf_subtree` and check every subtree page,
+and the changed instances of diff pages, against the full page.
+
+Measured with `scripts/benchmark_graph_subtree.py` on that host, 41,090 instances, CLI wall time
+([evidence](evidence/bench/graph-subtree/README.md)):
+
+| Page | Instances drawn | Time | Size |
+|---|---:|---:|---:|
+| whole build | 41,090 | 14.6 s | 77.6 MB |
+| `--root` one cluster | 642 | 1.70 s | 1.2 MB |
+| `--diff-base`, one module with 65 instances changed | 130 | 1.63 s | 0.2 MB |
+| `--diff-base`, one module with 8,192 instances changed | 41,025 | 15.7 s | 78.2 MB |
+
+The saving is as large as the change is local: a module instantiated almost everywhere draws
+almost everything and is slower than the full export. On a 90-instance design every mode is
+Python start-up (about 1.5 s). One synthetic design on one host: not the plan 22.3 reference
+corpus, no qualification claim.
 
 ### Snapshot I/O update validation (2026-10-29)
 
@@ -621,6 +651,7 @@ by SVWeave's test suite; details in
 | `--verify-only`: `gateway venv missing: nothing to verify` | `--verify-only` ran before `--create-venv`, or against another `--venv-dir`; add `--no-venv` to check the toolchain alone. |
 | `GLIBC_2.38' not found` from `codebase-memory-mcp` | The lock pins the `linux-amd64-portable` (static) build for this reason; do not replace it with the standard build (`docs/install.md` section 4). |
 | Serena does not start; its stderr log says `/usr/bin/env: '.../serena-venv/bin/serena': No such file or directory` | A build from before the sandbox recreated the interpreter's symlink chain (the venv was built on a python-build-standalone runtime such as `.toolchain/runtime/`). Update SVWeave; the venvs do not need to be rebuilt. |
+| `uvm_core: download of https://github.com/accellera-official/uvm-core/archive/... failed (HTTP Error 403: Forbidden)` | The network allows GitHub release downloads but not source archives (in a Claude Code cloud session: the session's GitHub repository scope). Rebuild the locked tarball from the git tag (`git archive` + `gzip -n` reproduces the locked sha256; the installer verifies it) or install without UVM using `--skip-uvm` (reported as skipped, never as verified): `docs/install.md`, "When a locked archive cannot be downloaded". |
 | A failed install left a partial `.toolchain/` | Re-run the same command: artifacts already present with the right sha256 are reused, everything else is re-downloaded and re-verified. Uninstall: remove `.venv`, `.toolchain/`, `.svweave/` and, if wanted, the trusted directory. |
 
 ## Quickstart
@@ -645,6 +676,8 @@ svweave query impact --build BUILD_ID --name demo_lane
 svweave query diff-impact --build BUILD_ID                       # your uncommitted git changes
 svweave query rename-preview --build BUILD_ID --name demo_lane.valid_i --to valid_in
 svweave graph export --build BUILD_ID                            # .svweave/exports/graph-<id>.html
+svweave graph export --build BUILD_ID --root demo_top.g_lane[0].u_lane   # one subtree only
+svweave graph export --build BUILD_ID --diff-base HEAD           # only what your git diff changes
 
 # serve the MCP gateway for your client (stdio)
 svweave serve --transport stdio
@@ -775,6 +808,32 @@ changes (outlined in red) with their subtrees, plus their ancestors as context. 
 after the edit: the side of the diff that matches the build's snapshot is used, per file. A change
 that maps to no instance (a package, a file outside the build) is listed, not drawn. Rationale:
 `docs/adr/ADR-014-static-graph-export.md`.
+
+**From a git diff to a page.** The build is the "compile"; the page only reads the part of it the
+diff reaches. Either order works:
+
+```bash
+# A. build the committed state, then edit: the OLD side of each file is mapped
+svweave build --profile rtl_demo                      # -> BUILD_ID
+vi rtl/my_block.sv                                    # your change, not yet committed
+svweave graph export --build BUILD_ID --diff-base HEAD
+
+# B. edit, then build the changed tree: the NEW side is mapped
+svweave build --profile rtl_demo
+svweave graph export --build BUILD_ID --diff-base HEAD
+
+# C. commit to commit (reads git blobs only; also works where git filters are configured)
+svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature
+```
+
+The envelope's `data.diff` lists the changed definitions with `instances` and `instances_drawn`,
+the changed files with the side used (`old`/`new`; `aligned: false` means an approximate mapping
+and comes with a warning), files not in the build, and changes that belong to no module (package,
+class). Add `--root INSTANCE` to keep only the changes below one instance (the others are counted
+as `outside_root`). A diff that reaches no instance is refused (`MISSING_INPUT`,
+`diff_touches_no_instance`) rather than writing an empty page. As with `diff-impact`, a STALE build
+does not change the exit code here, and comparing with the working tree is refused when the
+repository configures git clean/process filters (use form C).
 
 ## Using SVWeave with Claude Code and Codex
 

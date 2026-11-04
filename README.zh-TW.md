@@ -47,7 +47,7 @@
 | 對模組、連接埠、訊號或實例的變更會觸及哪些地方 | `svweave query impact` | `svw_impact` | 該建置的實例樹與已解析的參照 |
 | 一份 git diff 會觸及哪些地方 | `svweave query diff-impact` | `svw_diff_impact` | 對應到該建置快照上的 `git diff` |
 | 重新命名會做出的每一處編輯，以及阻擋因素 | `svweave query rename-preview` | `svw_rename_preview` | 已解析的參照，加上經驗證的詞法掃描（唯讀） |
-| 可瀏覽的階層及其連線圖譜 | `svweave graph export` | （僅限 CLI） | 該建置，寫成單一靜態 HTML 檔 |
+| 可瀏覽的階層及其連線圖譜；也可只畫一個子樹（`--root`）或只畫 git diff 改到的部分（`--diff-base`） | `svweave graph export` | （僅限 CLI） | 該建置，寫成單一靜態 HTML 檔 |
 | 安全地修改程式碼 | `svweave edit ...` | `svw_edit`（無法核准） | 候選副本、slang 驗證、人工核准、compare-and-set |
 | 狀態、證據、報告 | `svweave doctor`, `svweave query evidence`, `svweave report` | `svw_status`, `svw_evidence` | 已記錄的執行；EDA、模擬與形式驗證維持 `NOT_RUN` |
 
@@ -60,6 +60,26 @@
 *用戶端只與一個閘道溝通。閘道掌管政策、工作、來源追溯與錯誤對應，並透過轉接器驅動三個後端。每個後端都在關閉網路的 `bwrap` 沙箱中執行，且沒有原始碼的可寫掛載（甚至完全沒有掛載）；pyslang worker 同樣處於沙箱內。後端讀取不可變的快照，或把內容寫入 `.svweave/` 之下的候選副本。受信任目錄（政策、核准 HMAC 金鑰、游標金鑰）位於儲存庫之外。使用者的原始碼工作區只能透過唯一一條路徑存取：編輯協調器經核准的 compare-and-set 寫入（TB4）。虛線為信任邊界 TB1 至 TB4。*
 
 ## 狀態
+
+### 圖譜子樹與 git diff 檢視（2026-11-04）
+
+`svweave graph export` 現在可以只畫出建置的一部分，而不必重新編譯：
+
+- `--root INSTANCE`：只畫一個實例及其子孫，只從建置中讀出這些資料列。
+- `--diff-base REF [--diff-head REF]`：只畫 `git diff` 改到的 module/interface 的實例（紅框），連同其子樹，以及連接它們的祖先（虛線框，作為脈絡）。在修改前或修改後建置皆可；每個檔案會對應與建置快照相符的那一側 diff。
+
+在分支 `claude/partial-compile-html-1eyxxd` 的 `c641509`、於一個 4 CPU 的雲端 session 中驗證（不是 CI 執行）：unit + contract **1731 通過、0 失敗**；在 `SVWEAVE_REQUIRE_BACKENDS=1` 下以真實的 pyslang、codebase-memory-mcp、Serena 與 UVM 執行整合測試 **214 通過、0 skip**。新測試使用手寫 RTL `fixtures/language/grf_subtree`，並以完整頁面逐一核對每個子樹頁面，以及 diff 頁面中被改到的實例。
+
+以 `scripts/benchmark_graph_subtree.py` 在該主機上量測，41,090 個實例，CLI 實際耗時（[量測證據](evidence/bench/graph-subtree/README.md)）：
+
+| 頁面 | 畫出的實例 | 時間 | 大小 |
+|---|---:|---:|---:|
+| 整個建置 | 41,090 | 14.6 s | 77.6 MB |
+| `--root` 一個 cluster | 642 | 1.70 s | 1.2 MB |
+| `--diff-base`，改到一個有 65 個實例的 module | 130 | 1.63 s | 0.2 MB |
+| `--diff-base`，改到一個有 8,192 個實例的 module | 41,025 | 15.7 s | 78.2 MB |
+
+改動越集中，省下越多：若改到的 module 幾乎到處都有實例，就幾乎要畫出全部，而且比完整匯出還慢。在 90 個實例的設計上，各種模式的時間都是 Python 啟動時間（約 1.5 s）。這是單一主機上的單一合成設計：不是計畫 22.3 的參考語料，也不構成任何資格認定。
 
 ### 快照 I/O 更新驗證（2026-10-29）
 
@@ -439,6 +459,7 @@ cat /ABS/PATH/docs/agents/AGENTS.snippet.md >> /ABS/PATH/TO/PROJECT/AGENTS.md
 | `--verify-only`：`gateway venv missing: nothing to verify` | `--verify-only` 在 `--create-venv` 之前執行，或針對了另一個 `--venv-dir`；加上 `--no-venv` 可只檢查工具鏈。 |
 | `codebase-memory-mcp` 出現 `GLIBC_2.38' not found` | 鎖定檔正是為此固定了 `linux-amd64-portable`（靜態）版本；不要換成標準版本（`docs/install.md` 第 4 節）。 |
 | Serena 無法啟動；其 stderr 日誌顯示 `/usr/bin/env: '.../serena-venv/bin/serena': No such file or directory` | 這是沙箱尚未重建直譯器符號連結鏈之前的版本（venv 建在 python-build-standalone 執行環境上，例如 `.toolchain/runtime/`）。更新 SVWeave 即可，不需重建 venv。 |
+| `uvm_core: download of https://github.com/accellera-official/uvm-core/archive/... failed (HTTP Error 403: Forbidden)` | 網路允許 GitHub release 下載，但不允許原始碼壓縮檔（在 Claude Code 雲端 session 中，是 session 的 GitHub 儲存庫存取範圍所致）。可從 git tag 重建鎖定的壓縮檔（`git archive` + `gzip -n` 可重現 lock 中的 sha256；安裝程式會驗證），或以 `--skip-uvm` 在不含 UVM 的情況下安裝（會標示為已略過，絕不標示為已驗證）：見 `docs/install.md` 的「When a locked archive cannot be downloaded」。 |
 | 失敗的安裝留下不完整的 `.toolchain/` | 重新執行同一個指令：已存在且 sha256 正確的 artifact 會被重用，其他的會重新下載並重新驗證。解除安裝：移除 `.venv`、`.toolchain/`、`.svweave/`，以及（若需要）受信任目錄。 |
 
 ## 快速入門
@@ -463,6 +484,8 @@ svweave query impact --build BUILD_ID --name demo_lane
 svweave query diff-impact --build BUILD_ID                       # your uncommitted git changes
 svweave query rename-preview --build BUILD_ID --name demo_lane.valid_i --to valid_in
 svweave graph export --build BUILD_ID                            # .svweave/exports/graph-<id>.html
+svweave graph export --build BUILD_ID --root demo_top.g_lane[0].u_lane   # 只畫一個子樹
+svweave graph export --build BUILD_ID --diff-base HEAD           # 只畫你的 git diff 改到的部分
 
 # serve the MCP gateway for your client (stdio)
 svweave serve --transport stdio
@@ -529,6 +552,24 @@ svweave graph export --build BUILD_ID --diff-base HEAD    # 只畫 `git diff HEA
 ```
 
 以瀏覽器開啟該檔案（`file://`，不需要伺服器）。它顯示該單一建置的 elaborated 實例樹（雙擊可收合子樹，搜尋會展開到符合項，拖曳與滾輪可平移與縮放），並以虛線顯示從該建置的直接連接埠關聯推導出的連線：兩個實例參照同一個訊號宣告，方向依宣告的連接埠方向而定。一條線代表兩個節點之間的所有訊號；點擊它可看到清單。被超過 `--max-fanout` 個實例（預設 16）使用的類時脈訊號會被列為 hub，而不會畫出來。頁面帶有該建置的完整度與新鮮度，並在其為 PARTIAL、STALE 或被截斷（`--max-instances`，由最淺層優先）時如實說明。它不是 netlist。頁面沒有網路存取（嚴格的 CSP），並把原始碼文字當作資料處理。在上述 115k 個實例的 SoC 上，匯出耗時 27 s，畫出最淺層的 5000 個實例（38 MB）。`--root INSTANCE`（路徑或實例 id）只讀取並畫出同一建置中該實例的子樹：不會重新編譯，深度從 root 起算，在子樹之外宣告的訊號（root 的連接埠所接到的訊號）會列為邊界訊號，而不會畫出來。`--diff-base REF`（可再加 `--diff-head REF`）以與 `svweave query diff-impact` 相同的方式讀取 git diff，只畫出被改到的 module/interface 的實例（紅框）及其子樹，並以其祖先作為脈絡。在修改前或修改後建置皆可：每個檔案會使用與建置快照相符的那一側 diff。對應不到任何實例的變更（package、不在建置中的檔案）只會列出，不會畫出。設計理由：`docs/adr/ADR-014-static-graph-export.md`。
+
+**從 git diff 到頁面。** 建置就是「編譯」；頁面只讀取 diff 觸及的那一部分。兩種順序都可以：
+
+```bash
+# A. 先建置已提交的狀態，再修改：對應每個檔案的舊側（old）
+svweave build --profile rtl_demo                      # -> BUILD_ID
+vi rtl/my_block.sv                                    # 你的修改，尚未提交
+svweave graph export --build BUILD_ID --diff-base HEAD
+
+# B. 先修改，再建置修改後的工作樹：對應新側（new）
+svweave build --profile rtl_demo
+svweave graph export --build BUILD_ID --diff-base HEAD
+
+# C. commit 對 commit（只讀 git blob；在設定了 git filter 的環境也能用）
+svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature
+```
+
+回應封包的 `data.diff` 會列出：被改到的定義及其 `instances` 與 `instances_drawn`、被改到的檔案及所用的那一側（`old`/`new`；`aligned: false` 代表近似對應，並會附上警告）、不在建置中的檔案，以及不屬於任何 module 的變更（package、class）。加上 `--root INSTANCE` 可只保留某個實例之下的變更（其他的計入 `outside_root`）。若 diff 觸及不到任何實例，會直接拒絕（`MISSING_INPUT`、`diff_touches_no_instance`），而不會寫出空白頁面。與 `diff-impact` 相同，在此模式下 STALE 的建置不會改變結束碼；若儲存庫設定了 git clean/process filter，與工作樹比較會被拒絕（請改用 C）。
 
 ## 在 Claude Code 與 Codex 中使用 SVWeave
 
