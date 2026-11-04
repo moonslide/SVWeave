@@ -71,7 +71,8 @@ Pinned components (details and hashes: `toolchain.lock.json`):
 ### When a locked archive cannot be downloaded (for example UVM)
 
 Some networks allow GitHub *release* downloads but deny GitHub *source archives*
-(`github.com/<owner>/<repo>/archive/...`, `codeload.github.com`). The pinned UVM library is such
+(`github.com/<owner>/<repo>/archive/...`, `codeload.github.com`), or allow them only for some
+repositories. The pinned UVM library is such
 an archive, and every other download is a release asset or a PyPI wheel, so on such a host the
 installer stops at `uvm_core` (before the venv is created) with an error that names the component,
 the file it expects and its locked sha256:
@@ -85,7 +86,21 @@ failed (HTTP Error 403: Forbidden). Put the locked file at <toolchain>/downloads
 Choose one; none of them changes the lock:
 
 1. **Supply the file.** Download that URL on a machine that can, copy it to the path in the message
-   (or into `--artifact-dir`) and re-run. It is used only if its sha256 equals the lock.
+   (or into `--artifact-dir`) and re-run. It is used only if its sha256 equals the lock. Where
+   `git clone` of public repositories works but the archive endpoint does not (a Claude Code cloud
+   session whose GitHub access is scoped to the project's own repository answers the archive URL
+   with "GitHub access to this repository is not enabled for this session"), the same bytes can be
+   rebuilt from the locked commit: GitHub's tarball is `git archive` of the tag piped through
+   `gzip -n`. This reproduced the locked sha256 exactly (git 2.43, GNU gzip); any other result is
+   refused by the installer, so a different git or gzip cannot slip in different bytes.
+
+   ```bash
+   git clone --depth 1 --branch 2020.3.1 https://github.com/accellera-official/uvm-core /tmp/uvm-core
+   git -C /tmp/uvm-core rev-parse HEAD     # must be 78c06547a2a0a29b3dc9dcafae62b75b2ff61544 (lock)
+   git -C /tmp/uvm-core archive --format=tar --prefix=uvm-core-2020.3.1/ 78c06547a2a0a29b3dc9dcafae62b75b2ff61544 \
+       | gzip -n > .toolchain/downloads/uvm_core-2020.3.1.tar.gz
+   python3.12 scripts/bootstrap_locked.py --create-venv   # verifies f55bdbc0... before extracting
+   ```
 2. **Allow the host.** Where the network policy is yours to change (for a Claude Code cloud
    environment: the environment's network access settings), allow `github.com` source archives
    and `codeload.github.com`, then re-run.
