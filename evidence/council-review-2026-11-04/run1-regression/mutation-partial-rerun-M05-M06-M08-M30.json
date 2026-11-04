@@ -1,0 +1,187 @@
+{
+  "suite": "critical-mutations (plan 20.5)",
+  "date": "2026-11-04T04:26:31+00:00",
+  "import_proof": {
+    "svweave_origin_under_python_I": "${REPO}/.svweave/mutation/repo/src/svweave/__init__.py",
+    "inside_scratch_copy": true
+  },
+  "total": 4,
+  "killed": 4,
+  "survived": [],
+  "errors": [],
+  "all_killed": false,
+  "baselines": {
+    "tests/unit/test_edit_prepare.py tests/unit/test_edit_commit.py tests/fault_injection/test_edit_crash.py": {
+      "rc": 0,
+      "seconds": 75.8,
+      "tail": [
+        "...................................................................      [100%]"
+      ]
+    },
+    "tests/unit/test_edit_commit.py tests/unit/test_edit_machine.py tests/unit/test_edit_validate.py": {
+      "rc": 0,
+      "seconds": 65.0,
+      "tail": [
+        "..............................................................           [100%]"
+      ]
+    },
+    "tests/fault_injection/test_edit_crash.py tests/unit/test_edit_commit.py": {
+      "rc": 0,
+      "seconds": 55.3,
+      "tail": [
+        "....................................                                     [100%]"
+      ]
+    },
+    "tests/fault_injection/test_recover_gates.py::test_a3_a_foreign_change_behind_twenty_own_changes_is_still_refused": {
+      "rc": 0,
+      "seconds": 6.2,
+      "tail": [
+        ".                                                                        [100%]"
+      ]
+    }
+  },
+  "mutations": [
+    {
+      "id": "M05",
+      "title": "cancel the expected-hash compare-and-set (exact range and commit precondition)",
+      "plan": "20.5 #5; EDT-02",
+      "files": [
+        "src/svweave/editing/plan.py",
+        "src/svweave/application/edit.py",
+        "src/svweave/editing/journal.py"
+      ],
+      "tests": [
+        "tests/unit/test_edit_prepare.py",
+        "tests/unit/test_edit_commit.py",
+        "tests/fault_injection/test_edit_crash.py"
+      ],
+      "baseline_rc": 0,
+      "import_proof": {
+        "svweave.editing.plan": {
+          "origin_in_copy": true,
+          "marker_present": true
+        },
+        "svweave.application.edit": {
+          "origin_in_copy": true,
+          "marker_present": true
+        },
+        "svweave.editing.journal": {
+          "origin_in_copy": true,
+          "marker_present": true
+        }
+      },
+      "status": "KILLED",
+      "pytest_rc": 1,
+      "seconds": 80.0,
+      "failing_tests": [
+        "tests/unit/test_edit_commit.py::test_edt02_stale_expected_hash_check_protects_the_target_even_if_snapshot_check_passes",
+        "tests/fault_injection/test_edit_crash.py::test_failure_during_apply_after_some_files_requires_recovery"
+      ],
+      "pytest_tail": [
+        "${REPO}/.svweave/mutation/repo/tests/fault_injection/test_edit_crash.py:50: Failed: DID NOT RAISE SvwError",
+        "=========================== short test summary info ============================",
+        "FAILED tests/unit/test_edit_commit.py::test_edt02_stale_expected_hash_check_protects_the_target_even_if_snapshot_check_passes",
+        "FAILED tests/fault_injection/test_edit_crash.py::test_failure_during_apply_after_some_files_requires_recovery"
+      ]
+    },
+    {
+      "id": "M06",
+      "title": "accept a fake approval (HMAC signature check disabled)",
+      "plan": "20.5 #6; EDT-04",
+      "files": [
+        "src/svweave/editing/approval.py"
+      ],
+      "tests": [
+        "tests/unit/test_edit_commit.py",
+        "tests/unit/test_edit_machine.py",
+        "tests/unit/test_edit_validate.py"
+      ],
+      "baseline_rc": 0,
+      "import_proof": {
+        "svweave.editing.approval": {
+          "origin_in_copy": true,
+          "marker_present": true
+        }
+      },
+      "status": "KILLED",
+      "pytest_rc": 1,
+      "seconds": 61.5,
+      "failing_tests": [
+        "tests/unit/test_edit_commit.py::test_sec06_forged_approval_files_are_refused"
+      ],
+      "pytest_tail": [
+        "      + approval_binding_mismatch",
+        "${REPO}/.svweave/mutation/repo/tests/unit/test_edit_commit.py:132: AssertionError: assert 'approval_binding_mismatch' == 'approval_signature_invalid'",
+        "=========================== short test summary info ============================",
+        "FAILED tests/unit/test_edit_commit.py::test_sec06_forged_approval_files_are_refused"
+      ]
+    },
+    {
+      "id": "M08",
+      "title": "blind rollback after a crash (conflicting files are classified as applied, recovery CAS removed)",
+      "plan": "20.5 #8; EDT-07/08",
+      "files": [
+        "src/svweave/editing/journal.py",
+        "src/svweave/application/edit.py"
+      ],
+      "tests": [
+        "tests/fault_injection/test_edit_crash.py",
+        "tests/unit/test_edit_commit.py"
+      ],
+      "baseline_rc": 0,
+      "import_proof": {
+        "svweave.editing.journal": {
+          "origin_in_copy": true,
+          "marker_present": true
+        },
+        "svweave.application.edit": {
+          "origin_in_copy": true,
+          "marker_present": true
+        }
+      },
+      "status": "KILLED",
+      "pytest_rc": 1,
+      "seconds": 52.7,
+      "failing_tests": [
+        "tests/fault_injection/test_edit_crash.py::test_edt08_human_edit_after_crash_is_never_overwritten",
+        "tests/fault_injection/test_edit_crash.py::test_edt08_unrelated_third_state_is_a_conflict_not_a_guess"
+      ],
+      "pytest_tail": [
+        "${REPO}/.svweave/mutation/repo/src/svweave/application/edit.py:1099: svweave.domain.errors.SvwError: EDIT_CONFLICT: the workspace changed since validation (a source or dependency was edited); nothing was written",
+        "=========================== short test summary info ============================",
+        "FAILED tests/fault_injection/test_edit_crash.py::test_edt08_human_edit_after_crash_is_never_overwritten",
+        "FAILED tests/fault_injection/test_edit_crash.py::test_edt08_unrelated_third_state_is_a_conflict_not_a_guess"
+      ]
+    },
+    {
+      "id": "M30",
+      "title": "roll-forward decides on a display-truncated change list (first 20 changes only)",
+      "plan": "A3 (beyond 20.5); council review 2026-11-04",
+      "files": [
+        "src/svweave/application/edit.py"
+      ],
+      "tests": [
+        "tests/fault_injection/test_recover_gates.py::test_a3_a_foreign_change_behind_twenty_own_changes_is_still_refused"
+      ],
+      "baseline_rc": 0,
+      "import_proof": {
+        "svweave.application.edit": {
+          "origin_in_copy": true,
+          "marker_present": true
+        }
+      },
+      "status": "KILLED",
+      "pytest_rc": 1,
+      "seconds": 6.4,
+      "failing_tests": [
+        "tests/fault_injection/test_recover_gates.py::test_a3_a_foreign_change_behind_twenty_own_changes_is_still_refused"
+      ],
+      "pytest_tail": [
+        "      Use -v to get more diff",
+        "${REPO}/.svweave/mutation/repo/tests/fault_injection/test_recover_gates.py:32: AssertionError: roll-forward wrote a file although a gate refused",
+        "=========================== short test summary info ============================",
+        "FAILED tests/fault_injection/test_recover_gates.py::test_a3_a_foreign_change_behind_twenty_own_changes_is_still_refused"
+      ]
+    }
+  ]
+}

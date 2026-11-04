@@ -1,0 +1,59 @@
+[mut] svweave imported (python -I) from: /home/user/SVWeave/.svweave/mutation/repo/src/svweave/__init__.py
+[mut] baseline for M01: rc=0 ['...........                                                              [100%]']
+[mut] M01 KILLED: remove the header hash from the snapshot inventory (headers hash to a constant)
+[mut] baseline for M02: rc=0 ['....                                                                     [100%]']
+[mut] M02 KILLED: ignore include-directory order (slang -I dirs are sorted alphabetically)
+[mut] baseline for M03: rc=0 ['................                                                         [100%]']
+[mut] M03 KILLED: merge methods by bare name (function/task qualified_name = bare name)
+[mut] baseline for M04: rc=0 ['....................                                                     [100%]']
+[mut] M04 KILLED: PARTIAL becomes COMPLETE (ingest completeness verdict always COMPLETE)
+[mut] baseline for M05: rc=1 ['FAILED tests/unit/test_edit_commit.py::test_edt02_stale_expected_hash_check_protects_the_target_even_if_snapshot_check_passes']
+[mut] baseline for M06: rc=1 ['FAILED tests/unit/test_edit_commit.py::test_edt02_stale_expected_hash_check_protects_the_target_even_if_snapshot_check_passes']
+[mut] baseline for M07: rc=0 ['.............                                                            [100%]']
+[mut] M07 KILLED: snapshot/candidate separation lost (candidate files are hardlinks of the snapshot, so a candidate write mutates the snapshot)
+[mut] baseline for M11: rc=0 ['..........................                                               [100%]']
+[mut] M11 KILLED: sandbox write-surface check removed (a backend may get a writable bind of the protected original)
+[mut] baseline for M08: rc=1 ['FAILED tests/unit/test_edit_commit.py::test_edt02_stale_expected_hash_check_protects_the_target_even_if_snapshot_check_passes']
+[mut] baseline for M09: rc=0 ['...............................                                          [100%]']
+[mut] M09 KILLED: ignore unsupported options (unknown flag is logged and dropped, build not blocked)
+[mut] baseline for M10: rc=0 ['.......................................................................  [100%]']
+[mut] M10 KILLED: treat a static build as simulation PASS (absent evidence reported as PASS)
+[mut] baseline for M12: rc=0 ['.........                                                                [100%]']
+[mut] M12 KILLED: roll-forward skips recovery gates (policy / approval / candidate rechecks)
+[mut] baseline for M13: rc=0 ['.....................................                                    [100%]']
+[mut] M13 KILLED: commit and roll-forward skip the current edit-policy recheck (A4)
+[mut] baseline for M14: rc=0 ['..                                                                       [100%]']
+[mut] M14 KILLED: slang_symbol resolution ignores the build/snapshot identity and COMPLETE check
+[mut] baseline for M15: rc=0 ['..                                                                       [100%]']
+[mut] M15 KILLED: slang_symbol picks the first of several matching names (ambiguity refusal removed)
+[mut] baseline for M16: rc=0 ['..............                                                           [100%]']
+[mut] M16 KILLED: slang_symbol replacement shape check removed (class / comment / qualifier escapes)
+[mut] baseline for M17: rc=0 ['..                                                                       [100%]']
+[mut] M17 KILLED: slang_symbol scope-escape check after the candidate build removed
+[mut] baseline for M18: rc=0 ['..                                                                       [100%]']
+[mut] M18 KILLED: slang_symbol base-span shape check removed (extern / prototype / odd span)
+[mut] baseline for M19: rc=0 ['.                                                                        [100%]']
+[mut] M19 KILLED: slang_symbol accepts a symbol_id that is not a task or function
+[mut] baseline for M20: rc=0 ['...............                                                          [100%]']
+[mut] M20 KILLED: slang_symbol replacement may contain preprocessor directives / pasting / any macro
+[mut] baseline for M21: rc=0 ['.                                                                        [100%]']
+[mut] M21 KILLED: slang_symbol candidate target span is not required to equal the replacement
+[mut] baseline for M22: rc=0 ['.                                                                        [100%]']
+[mut] M22 KILLED: slang_symbol macro-body walk ignores state-changing directives (include / undef / define)
+[mut] baseline for M23: rc=0 ['.                                                                        [100%]']
+[mut] M23 KILLED: remove the P0 remote editing provider guard
+[mut] baseline for M24: rc=0 ['.                                                                        [100%]']
+[mut] M24 KILLED: ignore exact scheduler ownership on cancellation
+[mut] baseline for M25: rc=0 ['.                                                                        [100%]']
+[mut] M25 KILLED: drop unknown remote cleanup snapshot pins
+[mut] baseline for M26: rc=0 ['......                                                                   [100%]']
+[mut] M26 KILLED: ignore unresolved remote workspace submission barrier
+[mut] baseline for M27: rc=0 ['...                                                                      [100%]']
+[mut] M27 KILLED: allow a bound shared-launcher workspace to rebind through a later symlink
+[mut] baseline for M28: rc=0 ['.....                                                                    [100%]']
+[mut] M28 KILLED: trust an existing incremental snapshot by its name without exact-tree verification
+[mut] baseline for M29: rc=0 ['.                                                                        [100%]']
+[mut] M29 KILLED: publish an incremental snapshot after source or lookup inventory changed during materialization
+[mut] baseline for M30: rc=0 ['.                                                                        [100%]']
+[mut] M30 KILLED: roll-forward decides on a display-truncated change list (first 20 changes only)
+[mut] killed 27/30; survived=[] errors=['M05', 'M06', 'M08']; wrote /home/user/SVWeave/evidence/mutation/2026-11-04.json
