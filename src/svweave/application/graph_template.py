@@ -233,7 +233,7 @@ function showNode(n) {
   side.appendChild(dl([["path", n.path], ["definition", n.definition], ["top", n.top ? "yes" : ""], ["interface", n.interface ? "yes" : ""],
     ["stub", n.stub ? "yes" : ""], ["blackbox candidate", n.blackbox ? "yes" : ""], ["generate", (n.generate || []).join(" / ")],
     ["source", n.file ? n.file + (n.line ? ":" + n.line : "") : ""], ["children", kids[n.id].length + (n.children_total !== undefined && n.children_total !== kids[n.id].length ? " drawn of " + n.children_total : "")],
-    ["changed by", (n.commits || []).map(function (i) { var c = D.diff.commits[i]; return c ? c.sha.slice(0, 8) + " " + c.subject : ""; }).join("\n")],
+    ["changed by", (n.commits || []).map(function (i) { var c = D.diff.commits[i]; return c ? c.sha.slice(0, 8) + " " + c.subject : ""; }).join("\\n")],
     ["diff", n.diff === "changed" ? "definition changed by the diff" : n.diff === "context" ? "context (ancestor of a changed instance)" : n.diff === "inside" ? "inside a changed instance" : ""]]));
   if (n.params.length) { side.appendChild(h("h2", "Parameters")); side.appendChild(table(["name", "value", ""], n.params.map(function (p) { return [p.name, p.value, p.overridden ? "overridden" : ""]; }))); }
   if (n.ports.length) { side.appendChild(h("h2", "Port associations")); side.appendChild(table(["port", "dir", "actual"], n.ports.map(function (p) { return [p.port, p.dir, p.actual]; }))); }

@@ -53,3 +53,23 @@ def test_GRF_U04_diff_view_text_is_data_and_marks_are_rendered() -> None:
     assert page.count("</script>") == 2 and "<script>alert" not in page
     script = page.split("<script>")[1]
     assert "function changes()" in script and ".node.changed rect" in page and "innerHTML" not in script
+
+
+def test_GRF_U05_the_viewer_script_parses_as_javascript(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """The template is a Python string: an escape like "\\n" in the JS silently becomes a real
+    newline and breaks every page (it happened once, unseen by the substring checks above). Parse
+    the rendered script with node's own parser."""
+    import shutil
+    import subprocess
+
+    import pytest
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is required to parse the viewer script")
+    page = render_html({"nodes": [], "edges": [], "hubs": [], "meta": {}})
+    script = page.split("<script>")[1].split("</script>")[0]
+    f = tmp_path / "viewer.js"
+    f.write_text(script)
+    r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-800:]
