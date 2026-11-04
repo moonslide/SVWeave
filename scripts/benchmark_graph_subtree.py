@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Paired timing of `svweave graph export` on a whole build vs `--root` (subtree view).
+"""Paired timing of `svweave graph export` on a whole build vs `--instance` (subtree view).
 
 The design is the hand-written fixture ``fixtures/language/grf_subtree`` (grf_soc: CLUSTERS
 clusters x CORES cores x 4 stages; 1 + CLUSTERS*(2+5*CORES) + 1 instances), elaborated ONCE by the
@@ -150,7 +150,7 @@ def equivalence(full: dict[str, Any], sub: dict[str, Any], root: str) -> list[st
     return why
 
 
-_KW = {"--root": "root", "--diff-base": "diff_base", "--diff-head": "diff_head"}
+_KW = {"--instance": "instance", "--diff-base": "diff_base", "--diff-head": "diff_head"}
 _GIT_ENV = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_AUTHOR_NAME": "bench",
             "GIT_AUTHOR_EMAIL": "bench@invalid", "GIT_COMMITTER_NAME": "bench",
             "GIT_COMMITTER_EMAIL": "bench@invalid"}
@@ -225,8 +225,8 @@ def main() -> int:
     mid = a.clusters // 2
     modes: dict[str, list[str]] = {
         "full": [],
-        "cluster_subtree": ["--root", f"grf_soc.g_cl[{mid}].u_cl"],
-        "core_subtree": ["--root", f"grf_soc.g_cl[{mid}].u_cl.g_core[{a.cores // 2}].u_core"],
+        "cluster_subtree": ["--instance", f"grf_soc.g_cl[{mid}].u_cl"],
+        "core_subtree": ["--instance", f"grf_soc.g_cl[{mid}].u_cl.g_core[{a.cores // 2}].u_core"],
         "diff_reduce": ["--diff-base", "main", "--diff-head", "chg-reduce"],
         "diff_core": ["--diff-base", "main", "--diff-head", "chg-core"],
     }

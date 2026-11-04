@@ -47,7 +47,7 @@
 | 对模块、端口、信号或实例的一次变更会波及什么 | `svweave query impact` | `svw_impact` | 该构建的实例树和已解析的引用 |
 | 一个 git diff 会波及什么 | `svweave query diff-impact` | `svw_diff_impact` | 映射到该构建快照上的 `git diff` |
 | 一次重命名会做的每一处编辑，以及阻断项 | `svweave query rename-preview` | `svw_rename_preview` | 已解析的引用加上经过校验的词法扫描（只读） |
-| 可浏览的层次结构及其连接图；也可只画一个子树（`--root`）或只画 git diff 改到的部分（`--diff-base`） | `svweave graph export` | （仅 CLI） | 该构建，写成一个静态 HTML 文件 |
+| 可浏览的层次结构及其连接图；也可只画一个子树（`--instance`）或只画 git diff 改到的部分（`--diff-base`） | `svweave graph export` | （仅 CLI） | 该构建，写成一个静态 HTML 文件 |
 | 安全地修改代码 | `svweave edit ...` | `svw_edit`（不能审批） | 候选副本、slang 验证、人工审批、compare-and-set |
 | 状态、证据、报告 | `svweave doctor`、`svweave query evidence`、`svweave report` | `svw_status`、`svw_evidence` | 已记录的运行；EDA、仿真和形式验证保持 `NOT_RUN` |
 
@@ -65,7 +65,7 @@
 
 `svweave graph export` 现在可以只绘制构建的一部分，而无需重新编译：
 
-- `--root INSTANCE`：只绘制一个实例及其子孙，只从构建中读取这些数据行。
+- `--instance INSTANCE`：只绘制一个实例及其子孙，只从构建中读取这些数据行。
 - `--diff-base REF [--diff-head REF]`：只绘制 `git diff` 修改到的 module/interface 的实例（红框），连同其子树，以及连接它们的祖先（虚线框，作为上下文）。在修改前或修改后构建均可；每个文件对应与构建快照相符的那一侧 diff。
 
 在分支 `claude/partial-compile-html-1eyxxd` 的 `c641509`、于一个 4 CPU 的云端 session 中验证（不是 CI 运行）：unit + contract **1731 通过、0 失败**；在 `SVWEAVE_REQUIRE_BACKENDS=1` 下使用真实的 pyslang、codebase-memory-mcp、Serena 和 UVM 运行集成测试 **214 通过、0 skip**。新测试使用手写 RTL `fixtures/language/grf_subtree`，并以完整页面逐一核对每个子树页面，以及 diff 页面中被修改的实例。
@@ -75,7 +75,7 @@
 | 页面 | 绘制的实例 | 时间 | 大小 |
 |---|---:|---:|---:|
 | 整个构建 | 41,090 | 14.6 s | 77.6 MB |
-| `--root` 一个 cluster | 642 | 1.70 s | 1.2 MB |
+| `--instance` 一个 cluster | 642 | 1.70 s | 1.2 MB |
 | `--diff-base`，修改了一个有 65 个实例的 module | 130 | 1.63 s | 0.2 MB |
 | `--diff-base`，修改了一个有 8,192 个实例的 module | 41,025 | 15.7 s | 78.2 MB |
 
@@ -484,7 +484,7 @@ svweave query impact --build BUILD_ID --name demo_lane
 svweave query diff-impact --build BUILD_ID                       # your uncommitted git changes
 svweave query rename-preview --build BUILD_ID --name demo_lane.valid_i --to valid_in
 svweave graph export --build BUILD_ID                            # .svweave/exports/graph-<id>.html
-svweave graph export --build BUILD_ID --root demo_top.g_lane[0].u_lane   # 只画一个子树
+svweave graph export --build BUILD_ID --instance demo_top.g_lane[0].u_lane   # 只画一个子树
 svweave graph export --build BUILD_ID --diff-base HEAD           # 只画你的 git diff 改到的部分
 
 # serve the MCP gateway for your client (stdio)
@@ -547,11 +547,11 @@ SVWeave 从不修改客户端的配置。请把类似下面的条目加入你自
 
 ```bash
 svweave graph export --build BUILD_ID          # writes .svweave/exports/graph-<build>.html
-svweave graph export --build BUILD_ID --root top.u_sub   # 只画该实例及其子孙
+svweave graph export --build BUILD_ID --instance top.u_sub   # 只画该实例及其子孙
 svweave graph export --build BUILD_ID --diff-base HEAD    # 只画 `git diff HEAD` 改到的部分
 ```
 
-在浏览器中打开该文件（`file://`，无需服务器）。它显示该构建展开后的实例树（双击折叠子树，搜索会展开到匹配项，拖动和滚轮用于平移和缩放），并以虚线显示从该构建的直接端口关联推导出的连接：两个实例引用同一个信号声明，方向由所声明的端口方向决定。一条线代表两个节点之间的所有信号；点击它可查看列表。被多于 `--max-fanout` 个实例（默认 16）使用的类时钟信号以枢纽形式列出，不绘制。页面携带该构建的完整性和新鲜度，并在其为 PARTIAL、STALE 或被截断（`--max-instances`，优先保留最浅层）时明确说明。它不是网表。页面没有网络访问（严格 CSP），并把源码文本视为数据。在上述 115k 实例的 SoC 上，导出耗时 27 s，绘制了最浅的 5000 个实例（38 MB）。`--root INSTANCE`（路径或实例 id）只读取并绘制同一构建中该实例的子树：不会重新编译，深度从 root 起算，在子树之外声明的信号（root 的端口所连接的信号）列为边界信号，不绘制。`--diff-base REF`（可再加 `--diff-head REF`）以与 `svweave query diff-impact` 相同的方式读取 git diff，只绘制被修改的 module/interface 的实例（红框）及其子树，并以其祖先作为上下文。在修改前或修改后构建均可：每个文件使用与构建快照相符的那一侧 diff。对应不到任何实例的变更（package、不在构建中的文件）只列出，不绘制。设计依据：`docs/adr/ADR-014-static-graph-export.md`。
+在浏览器中打开该文件（`file://`，无需服务器）。它显示该构建展开后的实例树（双击折叠子树，搜索会展开到匹配项，拖动和滚轮用于平移和缩放），并以虚线显示从该构建的直接端口关联推导出的连接：两个实例引用同一个信号声明，方向由所声明的端口方向决定。一条线代表两个节点之间的所有信号；点击它可查看列表。被多于 `--max-fanout` 个实例（默认 16）使用的类时钟信号以枢纽形式列出，不绘制。页面携带该构建的完整性和新鲜度，并在其为 PARTIAL、STALE 或被截断（`--max-instances`，优先保留最浅层）时明确说明。它不是网表。页面没有网络访问（严格 CSP），并把源码文本视为数据。在上述 115k 实例的 SoC 上，导出耗时 27 s，绘制了最浅的 5000 个实例（38 MB）。`--instance INSTANCE`（路径或实例 id）只读取并绘制同一构建中该实例的子树：不会重新编译，深度从 root 起算，在子树之外声明的信号（root 的端口所连接的信号）列为边界信号，不绘制。`--diff-base REF`（可再加 `--diff-head REF`）以与 `svweave query diff-impact` 相同的方式读取 git diff，只绘制被修改的 module/interface 的实例（红框）及其子树，并以其祖先作为上下文。在修改前或修改后构建均可：每个文件使用与构建快照相符的那一侧 diff。对应不到任何实例的变更（package、不在构建中的文件）只列出，不绘制。设计依据：`docs/adr/ADR-014-static-graph-export.md`。
 
 **从 git diff 到页面。** 构建就是“编译”；页面只读取 diff 触及的那一部分。两种顺序都可以：
 
@@ -569,7 +569,9 @@ svweave graph export --build BUILD_ID --diff-base HEAD
 svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature
 ```
 
-响应信封的 `data.diff` 会列出：被修改的定义及其 `instances` 与 `instances_drawn`、被修改的文件及所用的那一侧（`old`/`new`；`aligned: false` 表示近似对应，并附带警告）、不在构建中的文件，以及不属于任何 module 的变更（package、class）。加上 `--root INSTANCE` 可只保留某个实例之下的变更（其他的计入 `outside_root`）。若 diff 触及不到任何实例，会直接拒绝（`MISSING_INPUT`、`diff_touches_no_instance`），而不会写出空白页面。与 `diff-impact` 相同，在此模式下 STALE 的构建不会改变退出码；若仓库配置了 git clean/process filter，与工作树比较会被拒绝（请改用 C）。
+响应信封的 `data.diff` 会列出：被修改的定义及其 `instances` 与 `instances_drawn`、被修改的文件及所用的那一侧（`old`/`new`；`aligned: false` 表示近似对应，并附带警告）、不在构建中的文件，以及不属于任何 module 的变更（package、class）。加上 `--instance INSTANCE` 可只保留某个实例之下的变更（其他的计入 `outside_root`）。若 diff 触及不到任何实例（例如没有修改的工作树），这是一个答案而不是错误：退出码 0、`data.written: false`、`data.path: null`，`data.diff.nothing_to_draw` 说明原因，且不会写出页面。与 `diff-impact` 相同，在此模式下 STALE 的构建不会改变退出码；若仓库配置了 git clean/process filter，与工作树比较会被拒绝（请改用 C）；partial clone（promisor remote）也会被拒绝，因为读取它可能触发下载。
+
+`graph export` 的退出码：写出页面（或没有东西可画）时为 0；与 `query` 命令相同，PARTIAL 的构建为 3、STALE/HISTORICAL 为 5（页面仍会写出，并在页面上注明），除非加上 `--allow-partial` / `--allow-stale`；使用 `--diff-base` 时，STALE 不会改变退出码。`--max-instances` 截断绘图时 `pagination.truncated` 为 true。
 
 ## 在 Claude Code 和 Codex 中使用 SVWeave
 
@@ -945,7 +947,7 @@ root_mappings:
 | `svweave query search --snapshot S --query Q` | 图候选或带标记的文本回退（`--scope`、`--no-graph`） |
 | `svweave report --build B` | 由真实数据填充的状态报告；未评估的门禁会如实说明 |
 | `svweave evidence import --manifest FILE` | 导入外部证据（存储为 `EXTERNAL_DECLARED`） |
-| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--root I] [--diff-base R [--diff-head R]]` | 写出 `.svweave/exports/<name>.html`：实例层次加上端口关联连接，一个自包含页面，不提供任何服务（ADR-014）；`--root` 只绘制实例 I 的子树；`--diff-base` 只绘制 git diff 改到的实例 |
+| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R]] [--allow-stale] [--allow-partial]` | 写出 `.svweave/exports/<name>.html`：实例层次加上端口关联连接，一个自包含页面，不提供任何服务（ADR-014）；`--instance` 只绘制实例 I 的子树；`--diff-base` 只绘制 git diff 改到的实例 |
 | `svweave cache gc [--no-dry-run]` | 对快照做垃圾回收；保留最近 3 个及被引用的快照；默认为试运行 |
 | `svweave debug bundle --build B [--out DIR]` | 复现包：哈希、清单、诊断摘要、脱敏路径 |
 | `svweave schema emit [--check] [--out DIR]` | 写出或校验 `schemas/*.schema.json` |

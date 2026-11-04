@@ -52,7 +52,7 @@ self-contained HTML graph of a build that you open from disk.
 | What a change to a module, port, signal or instance touches | `svweave query impact` | `svw_impact` | the build's instance tree and resolved references |
 | What a git diff touches | `svweave query diff-impact` | `svw_diff_impact` | `git diff` mapped onto the build's snapshot |
 | Every edit a rename would make, with blockers | `svweave query rename-preview` | `svw_rename_preview` | resolved references plus a verified lexical scan (read-only) |
-| A browsable graph of the hierarchy and its connections; of one subtree (`--root`) or of only what a git diff changes (`--diff-base`) | `svweave graph export` | (CLI only) | the build, written as one static HTML file |
+| A browsable graph of the hierarchy and its connections; of one subtree (`--instance`) or of only what a git diff changes (`--diff-base`) | `svweave graph export` | (CLI only) | the build, written as one static HTML file |
 | Change code safely | `svweave edit ...` | `svw_edit` (cannot approve) | candidate copy, slang validation, human approval, compare-and-set |
 | Status, evidence, reports | `svweave doctor`, `svweave query evidence`, `svweave report` | `svw_status`, `svw_evidence` | recorded runs; EDA, simulation and formal stay `NOT_RUN` |
 
@@ -78,7 +78,7 @@ compare-and-set write (TB4). Dashed lines are trust boundaries TB1 to TB4.*
 
 `svweave graph export` can now draw part of a build instead of all of it, without recompiling:
 
-- `--root INSTANCE`: one instance and its descendants. Only those rows are read from the build.
+- `--instance INSTANCE`: one instance and its descendants. Only those rows are read from the build.
 - `--diff-base REF [--diff-head REF]`: only the instances of the modules/interfaces a `git diff`
   changes (red), with their subtrees and the ancestors that connect them (dashed, context). Build
   before or after the edit; per file the diff side that matches the build's snapshot is mapped.
@@ -95,7 +95,7 @@ Measured with `scripts/benchmark_graph_subtree.py` on that host, 41,090 instance
 | Page | Instances drawn | Time | Size |
 |---|---:|---:|---:|
 | whole build | 41,090 | 14.6 s | 77.6 MB |
-| `--root` one cluster | 642 | 1.70 s | 1.2 MB |
+| `--instance` one cluster | 642 | 1.70 s | 1.2 MB |
 | `--diff-base`, one module with 65 instances changed | 130 | 1.63 s | 0.2 MB |
 | `--diff-base`, one module with 8,192 instances changed | 41,025 | 15.7 s | 78.2 MB |
 
@@ -676,7 +676,7 @@ svweave query impact --build BUILD_ID --name demo_lane
 svweave query diff-impact --build BUILD_ID                       # your uncommitted git changes
 svweave query rename-preview --build BUILD_ID --name demo_lane.valid_i --to valid_in
 svweave graph export --build BUILD_ID                            # .svweave/exports/graph-<id>.html
-svweave graph export --build BUILD_ID --root demo_top.g_lane[0].u_lane   # one subtree only
+svweave graph export --build BUILD_ID --instance demo_top.g_lane[0].u_lane   # one subtree only
 svweave graph export --build BUILD_ID --diff-base HEAD           # only what your git diff changes
 
 # serve the MCP gateway for your client (stdio)
@@ -786,7 +786,7 @@ stop early.
 
 ```bash
 svweave graph export --build BUILD_ID          # writes .svweave/exports/graph-<build>.html
-svweave graph export --build BUILD_ID --root top.u_sub   # only that instance and its descendants
+svweave graph export --build BUILD_ID --instance top.u_sub   # only that instance and its descendants
 svweave graph export --build BUILD_ID --diff-base HEAD    # only what `git diff HEAD` changes
 ```
 
@@ -799,7 +799,7 @@ than `--max-fanout` instances (default 16) are listed as hubs, not drawn. The pa
 build's completeness and freshness and says so when it is PARTIAL, STALE or truncated
 (`--max-instances`, shallowest first). It is not a netlist. The page has no network access (strict
 CSP) and treats source text as data. On the 115k-instance SoC above the export took 27 s and drew
-the 5000 shallowest instances (38 MB). `--root INSTANCE` (a path or an instance id) reads and draws
+the 5000 shallowest instances (38 MB). `--instance INSTANCE` (a path or an instance id) reads and draws
 only that instance's subtree of the same build: nothing is recompiled, depth is counted from the
 root, and signals declared outside it (what the root's ports connect to) are listed as boundary
 signals instead of being drawn. `--diff-base REF` (optionally `--diff-head REF`) reads the git
@@ -829,11 +829,18 @@ svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature
 The envelope's `data.diff` lists the changed definitions with `instances` and `instances_drawn`,
 the changed files with the side used (`old`/`new`; `aligned: false` means an approximate mapping
 and comes with a warning), files not in the build, and changes that belong to no module (package,
-class). Add `--root INSTANCE` to keep only the changes below one instance (the others are counted
-as `outside_root`). A diff that reaches no instance is refused (`MISSING_INPUT`,
-`diff_touches_no_instance`) rather than writing an empty page. As with `diff-impact`, a STALE build
-does not change the exit code here, and comparing with the working tree is refused when the
-repository configures git clean/process filters (use form C).
+class). Add `--instance INSTANCE` to keep only the changes below one instance (the others are counted
+as `outside_root`). A diff that reaches no instance (for example a clean tree) is an answer, not an
+error: exit 0, `data.written: false`, `data.path: null`, `data.diff.nothing_to_draw` says why, and
+no page is written. As with `diff-impact`, a STALE build does not change the exit code here, and
+comparing with the working tree is refused when the repository configures git clean/process filters
+(use form C); a partial clone (promisor remote) is refused because reading it could fetch.
+
+Exit codes of `graph export`: 0 when the page was written (or there was nothing to draw); like the
+`query` commands, 3 for a PARTIAL build and 5 for a STALE/HISTORICAL one even though the page was
+written (the page says so too), unless `--allow-partial` / `--allow-stale` is given; with
+`--diff-base`, STALE never changes the exit code. `pagination.truncated` is true when
+`--max-instances` cut the drawing.
 
 ## Using SVWeave with Claude Code and Codex
 
@@ -1350,7 +1357,7 @@ prints one JSON envelope.
 | `svweave query search --snapshot S --query Q` | graph candidates or marked text fallback (`--scope`, `--no-graph`) |
 | `svweave report --build B` | status report filled from real data; unevaluated gates say so |
 | `svweave evidence import --manifest FILE` | import external evidence (stored `EXTERNAL_DECLARED`) |
-| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--root I] [--diff-base R [--diff-head R]]` | write `.svweave/exports/<name>.html`: instance hierarchy plus port-association connections, one self-contained page, nothing served (ADR-014); `--root` draws only the subtree of instance I; `--diff-base` only the instances a git diff changes |
+| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R]] [--allow-stale] [--allow-partial]` | write `.svweave/exports/<name>.html`: instance hierarchy plus port-association connections, one self-contained page, nothing served (ADR-014); `--instance` draws only the subtree of instance I; `--diff-base` only the instances a git diff changes |
 | `svweave cache gc [--no-dry-run]` | garbage-collect snapshots; keeps the last 3 and referenced ones; dry run by default |
 | `svweave debug bundle --build B [--out DIR]` | reproduction bundle: hashes, manifest, diagnostics summary, redacted paths |
 | `svweave schema emit [--check] [--out DIR]` | write or verify `schemas/*.schema.json` |

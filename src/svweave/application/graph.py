@@ -26,7 +26,7 @@ from svweave.application.impact import _names
 from svweave.application.options import WorkspaceOptions
 from svweave.application.queries import _gap_limits, _resolve_instance, _session
 from svweave.application.semantic_common import build_envelope
-from svweave.domain.envelope import Envelope
+from svweave.domain.envelope import Envelope, Pagination
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.security.safeio import ensure_private_dir, write_under
 from svweave.storage.semantic import loads
@@ -436,8 +436,10 @@ def build_model(
 
 def _diff_view(
     s: Any, base: str, head: str | None, root_row: Any
-) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
-    """git diff -> changed definitions -> the instances to draw (:func:`diff_selection`)."""
+) -> tuple[dict[str, Any], dict[str, Any] | None, list[str]]:
+    """git diff -> changed definitions -> the instances to draw (:func:`diff_selection`). The
+    selection is None when the diff reaches no instance (nothing to draw is an answer, not an
+    error: the build itself is not blocked)."""
     ch = collect_changes(s, base=base, head=head, repo=None, new_side=True)
     defs = set(ch["by_def"])
     files = [{"path": f["path"], "side": f.get("side"), "aligned": f.get("aligned")}
@@ -450,22 +452,15 @@ def _diff_view(
         "unattributed_ranges": len(ch["unattributed"]),
     }
     sel = diff_selection(s, defs, root_row) if defs else None
-    if sel is None or not sel["marks"]:
-        why = ("no changed line falls inside a module/interface of this build" if not defs else
-               f"none of the {sel['changed_total'] if sel else 0} instance(s) of the changed "
-               "definition(s) is under the root")
-        raise SvwError(
-            ErrorCode.MISSING_INPUT,
-            f"nothing to draw for {base} -> {head or 'working tree'}: {why}",
-            {"reason": "diff_touches_no_instance", **summary,
-             "unmapped_files": [u["path"] for u in ch["unmapped"]][:20],
-             "non_instance_declarations": [d["qualified_name"] for d in ch["non_instance"]][:20]},
-        )
+    if sel is not None and not sel["marks"]:
+        sel_none_reason = (f"none of the {sel['changed_total']} instance(s) of the changed "
+                           "definition(s) is under the instance")
+        outside = sel["outside_root"]
+        sel = None
+    else:
+        sel_none_reason = "no changed line falls inside a module/interface of this build"
+        outside = sel["outside_root"] if sel is not None else 0
     names = _names(s, defs)
-    drawn: dict[str, int] = defaultdict(int)
-    for r in sel["rows"]:
-        if sel["marks"].get(str(r["instance_id"])) == "changed":
-            drawn[str(r["definition_declaration_id"])] += 1
     totals = {
         str(r["definition_declaration_id"]): int(r["n"])
         for r in _rows_in(
@@ -476,11 +471,12 @@ def _diff_view(
         )
     }
     changed = sorted(
-        ({"qualified_name": names.get(d, {}).get("qualified_name"),
+        ({"declaration_id": d,
+          "qualified_name": names.get(d, {}).get("qualified_name"),
           "kind": names.get(d, {}).get("kind"),
           "changed_declarations": ch["by_def"][d]["declarations"],
-          "instances": totals.get(d, 0), "instances_drawn": drawn.get(d, 0)} for d in defs),
-        key=lambda x: (-x["instances_drawn"], str(x["qualified_name"])),
+          "instances": totals.get(d, 0), "instances_drawn": 0} for d in defs),
+        key=lambda x: str(x["qualified_name"]),
     )
     diff = {
         "base": base,
@@ -489,9 +485,11 @@ def _diff_view(
         "files": files,
         "unmapped_files": [u["path"] for u in ch["unmapped"]][:200],
         "non_instance_declarations": [d["qualified_name"] for d in ch["non_instance"]][:200],
-        "outside_root": sel["outside_root"],
+        "outside_root": outside,
         "summary": summary,
     }
+    if sel is None:
+        diff["nothing_to_draw"] = sel_none_reason
     warns: list[str] = []
     approx = [f["path"] for f in files if f["aligned"] is not True]
     if approx:
@@ -508,9 +506,9 @@ def _diff_view(
                      "module/interface (package, class, free subroutine) and are listed, not drawn")
     if ch["unattributed"]:
         warns.append(f"{len(ch['unattributed'])} changed range(s) fall outside every declaration")
-    if sel["outside_root"]:
-        warns.append(f"{sel['outside_root']} instance(s) of the changed definition(s) are outside "
-                     "the root and are not drawn")
+    if outside:
+        warns.append(f"{outside} instance(s) of the changed definition(s) are outside "
+                     "the instance and are not drawn")
     return diff, sel, warns
 
 
@@ -522,7 +520,7 @@ def export_graph(
     name: str | None = None,
     max_instances: int = DEFAULT_MAX_INSTANCES,
     max_fanout: int = DEFAULT_MAX_FANOUT,
-    root: str | None = None,
+    instance: str | None = None,
     diff_base: str | None = None,
     diff_head: str | None = None,
 ) -> Envelope:
@@ -532,24 +530,46 @@ def export_graph(
         if diff_base is None:
             raise SvwError(ErrorCode.INVALID_CONFIG, "diff_head needs diff_base")
         check_ref(diff_head, "diff_head")
-    if root is not None and (not isinstance(root, str) or not root.strip()):
-        raise SvwError(ErrorCode.INVALID_CONFIG, "root must be a non-empty instance path or id")
+    if instance is not None and (not isinstance(instance, str) or not instance.strip()):
+        raise SvwError(ErrorCode.INVALID_CONFIG, "instance must be a non-empty instance path or id")
     if not isinstance(max_instances, int) or not 1 <= max_instances <= 100_000:
         raise SvwError(ErrorCode.INVALID_CONFIG, "max_instances must be in 1..100000")
     if not isinstance(max_fanout, int) or not 2 <= max_fanout <= 1000:
         raise SvwError(ErrorCode.INVALID_CONFIG, "max_fanout must be in 2..1000")
     with _session(opts, build_id) as s:
-        root_row = resolve_root(s, root) if root is not None else None
+        root_row = resolve_root(s, instance) if instance is not None else None
         diff: dict[str, Any] | None = None
         warns: list[str] = []
         if diff_base is not None:
             diff, sel, dwarns = _diff_view(s, diff_base, diff_head, root_row)
             warns += dwarns
+            if sel is None:  # nothing to draw: report it, write no page
+                warns.insert(0, f"nothing to draw for {diff['base']} -> {diff['head']}: "
+                                f"{diff['nothing_to_draw']}; no page was written")
+                return build_envelope(
+                    s.ctx, s.db, s.build, request_id,
+                    {"path": None, "written": False, "served": False, "diff": diff,
+                     "note": GRAPH_NOTE},
+                    warnings=warns,
+                    extra_limits=_gap_limits(s) + [DIFF_VIEW_NOTE, DIFF_NOTE],
+                    freshness=s.fresh(),
+                )
             root_row = sel["root_row"]
             model = build_model(
                 s, max_instances=max_instances, max_fanout=max_fanout, selection=sel,
                 root_row=root_row,
             )
+            # count what the page really draws (after --max-instances), per definition
+            def_of = {str(r["instance_id"]): str(r["definition_declaration_id"])
+                      for r in sel["rows"]}
+            drawn: dict[str, int] = defaultdict(int)
+            for n in model["nodes"]:
+                if n["diff"] == "changed":
+                    drawn[def_of[n["id"]]] += 1
+            for x in diff["changed_definitions"]:
+                x["instances_drawn"] = drawn.get(x["declaration_id"], 0)
+            diff["changed_definitions"].sort(
+                key=lambda x: (-x["instances_drawn"], str(x["qualified_name"])))
             model["diff"] = diff
         else:
             model = build_model(
@@ -557,7 +577,7 @@ def export_graph(
             )
         stem = "graph-" + s.bid[:12]
         if diff is not None:
-            key = f"{diff_base}\0{diff_head or ''}\0{root or ''}"
+            key = f"{diff_base}\0{diff_head or ''}\0{instance or ''}"
             stem += "-diff-" + hashlib.sha256(key.encode()).hexdigest()[:10]
         elif root_row is not None:  # one default file per (build, root); a path is no file name
             stem += "-sub-" + hashlib.sha256(str(root_row["path"]).encode()).hexdigest()[:10]
@@ -615,10 +635,11 @@ def export_graph(
                 "truncated": model["truncated"],
                 "note": GRAPH_NOTE,
                 "served": False,
+                "written": True,
                 "root": model.get("root"),
-                **({"diff": {k: v for k, v in diff.items() if k != "files"}}
-                   if diff is not None else {}),
+                **({"diff": diff} if diff is not None else {}),
             },
+            pagination=Pagination(limit=max_instances, truncated=bool(model["truncated"])),
             warnings=warns,
             extra_limits=limits,
             freshness=s.fresh(),

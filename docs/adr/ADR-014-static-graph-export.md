@@ -34,8 +34,10 @@ an inline viewer (SVG, vanilla JS, no library). It is opened from disk by the us
   `tran`/`alias`. This is the same direct-association guarantee as `svweave query connections`.
 * An interactive local server remains out of scope until a later ADR.
 
-## Amendment (2026-11-03): subtree view, `--root`
-`svweave graph export --build B --root INSTANCE` writes the same kind of page for ONE instance and
+## Amendment (2026-11-03): subtree view, `--instance`
+(Introduced as `--root`; renamed to `--instance` on 2026-11-04 because `--root` is the global
+project-directory option and other commands call an instance `--instance`.)
+`svweave graph export --build B --instance INSTANCE` writes the same kind of page for ONE instance and
 its descendants (a path or an instance id; an unknown or ambiguous name is refused, never guessed).
 It is a view of the same immutable build, not a new compile: nothing is re-elaborated and the
 build id, completeness and freshness on the page are the build's.
@@ -57,7 +59,7 @@ build id, completeness and freshness on the page are the build's.
   saving grows with the design; on a ~90-instance design the CLI time is Python start-up either way.
 
 ## Amendment (2026-11-04): diff view, `--diff-base` / `--diff-head`
-`svweave graph export --build B --diff-base REF [--diff-head REF] [--root I]` draws only what a
+`svweave graph export --build B --diff-base REF [--diff-head REF] [--instance I]` draws only what a
 git diff changes, on the same immutable build (nothing is recompiled):
 
 * The diff is read exactly like `svweave query diff-impact` (same fixed `git diff -U0` argv, same
@@ -67,12 +69,15 @@ git diff changes, on the same immutable build (nothing is recompiled):
   version (edit, then build); `files[].side` says which. A file that matches neither is mapped
   approximately and the envelope warns. `diff-impact` itself keeps the old-side mapping only.
 * Every instance of a changed module/interface definition is drawn (`changed`) with its whole
-  subtree (`inside`), plus the ancestors that connect them (`context`) up to `--root` or, without
+  subtree (`inside`), plus the ancestors that connect them (`context`) up to `--instance` or, without
   it, up to their lowest common ancestor. Context ancestors show only their drawn children
   (`children_total` gives the real count) and only connections among drawn instances.
 * Changes that map to no instance (package, class, a file not in the build, a range outside every
-  declaration) are listed and warned about, never drawn; a diff that maps to no instance at all is
-  refused (`MISSING_INPUT`, `diff_touches_no_instance`) instead of writing an empty page.
+  declaration) are listed and warned about, never drawn. A diff that maps to no instance at all
+  writes no page and answers OK with `data.written: false` and `data.diff.nothing_to_draw`
+  (first shipped as a `MISSING_INPUT` refusal, which made a clean tree look like a BLOCKED build).
+* The git it runs treats repository metadata as untrusted (no user/system config, no transport,
+  submodules ignored, partial clones refused, bounded time and output): see diff_impact.py.
 * Like `diff-impact`, STALE never changes the exit code in this mode: the workspace is expected to
   differ from the build.
 * The saving depends on how local the change is: a change to a module instantiated everywhere

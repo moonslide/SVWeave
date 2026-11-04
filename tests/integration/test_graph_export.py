@@ -81,7 +81,7 @@ def test_GRF_I03_limits_hubs_and_refusals(tmp_path: Path) -> None:
     assert not (root.parent / "x.html").exists()
 
 
-# ------------------------------------------------------------------ subtree view (--root)
+# ------------------------------------------------------------------ subtree view (--instance)
 # fixtures/language/grf_subtree: grf_soc -> g_cl[c].u_cl -> g_core[i].u_core -> 4 grf_stage, plus
 # one grf_reduce per cluster and one at the top. Expectations below are derived from that RTL.
 def _grf(tmp_path: Path, clusters: int = 2, cores: int = 2) -> tuple[Path, str]:
@@ -104,7 +104,7 @@ def _edges(data: dict[str, Any]) -> set[tuple[str, str, str, str]]:
 def test_GRF_I04_subtree_draws_exactly_the_rtl_below_the_root(tmp_path: Path) -> None:
     root, bid = _grf(tmp_path)
     cl = "grf_soc.g_cl[1].u_cl"
-    code, env = run(root, "graph", "export", "--build", bid, "--root", cl)
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", cl)
     assert code == 0 and env["outcome"] == "OK" and env["data"]["root"] == cl
     assert env["data"]["path"].startswith(f".svweave/exports/graph-{bid[:12]}-sub-")
     assert any("subtree view" in x for x in env["analysis_coverage"]["limitations"])
@@ -134,7 +134,7 @@ def test_GRF_I04_subtree_draws_exactly_the_rtl_below_the_root(tmp_path: Path) ->
     assert {(x["signal"], x["instances"]) for x in data["boundary"]} == {
         ("grf_soc.clk", 1), ("grf_soc.rst_n", 1), ("grf_soc.din", 1), ("grf_soc.cluster_bus", 1)}
     # a core: 4 stages, the f2d/d2e/e2w chain, and its port signals from the cluster as boundary
-    code, env = run(root, "graph", "export", "--build", bid, "--root", core0, "--name", "core")
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", core0, "--name", "core")
     core = _page_data(root / env["data"]["path"])
     assert [n["path"] for n in core["nodes"]] == [core0] + [f"{core0}.{s}" for s in stages]
     assert {x["signal"] for x in core["boundary"]} == {
@@ -155,7 +155,7 @@ def test_GRF_I05_every_subtree_equals_the_full_page_restricted_to_it(tmp_path: P
         for n in full["nodes"]:
             kids.setdefault(n["parent"], []).append(n["id"])
         for i, r in enumerate(full["nodes"]):
-            code, env = run(root, "graph", "export", "--build", bid, "--root", r["path"],
+            code, env = run(root, "graph", "export", "--build", bid, "--instance", r["path"],
                             "--max-fanout", fanout, "--name", f"s{fanout}-{i}")
             assert code == 0, env
             sub = _page_data(root / env["data"]["path"])
@@ -183,22 +183,22 @@ def test_GRF_I05_every_subtree_equals_the_full_page_restricted_to_it(tmp_path: P
 def test_GRF_I06_subtree_root_resolution_limits_and_refusals(tmp_path: Path) -> None:
     root, bid = _grf(tmp_path)
     cl = "grf_soc.g_cl[0].u_cl"
-    code, env = run(root, "graph", "export", "--build", bid, "--root", cl, "--name", "by-path")
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", cl, "--name", "by-path")
     iid = next(n["id"] for n in _page_data(root / env["data"]["path"])["nodes"] if n["path"] == cl)
-    code, env = run(root, "graph", "export", "--build", bid, "--root", iid, "--name", "by-id")
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", iid, "--name", "by-id")
     assert code == 0 and env["data"]["root"] == cl  # an instance id names the same subtree
-    code, env = run(root, "graph", "export", "--build", bid, "--root", "grf_soc", "--name", "top")
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", "grf_soc", "--name", "top")
     top = _page_data(root / env["data"]["path"])
     assert len(top["nodes"]) == 26 and top["boundary"] == []  # the top's ports are its own signals
-    code, env = run(root, "graph", "export", "--build", bid, "--root", cl, "--max-instances", "3",
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", cl, "--max-instances", "3",
                     "--name", "cut")
     assert code == 0 and env["data"]["truncated"] is True
     cut = _page_data(root / env["data"]["path"])
     assert [n["path"] for n in cut["nodes"]][0] == cl and [n["depth"] for n in cut["nodes"]] == [0, 1, 1]
-    code, e = run(root, "graph", "export", "--build", bid, "--root", "grf_soc.g_cl[9].u_cl")
+    code, e = run(root, "graph", "export", "--build", bid, "--instance", "grf_soc.g_cl[9].u_cl")
     assert code == 3 and e["error"]["code"] == "MISSING_INPUT"
     for bad in ("", "  ", "grf_soc\nx"):
-        code, e = run(root, "graph", "export", "--build", bid, "--root", bad)
+        code, e = run(root, "graph", "export", "--build", bid, "--instance", bad)
         assert code == 2 and e["error"]["code"] == "INVALID_CONFIG", repr(bad)
     pages = list((root / ".svweave" / "exports").iterdir())
     assert pages and all(stat.S_IMODE(p.stat().st_mode) == 0o600 for p in pages)
@@ -252,6 +252,9 @@ def test_GRF_I07_diff_after_the_build_draws_changed_instances_and_their_ancestor
     d = env["data"]["diff"]
     assert [(x["qualified_name"], x["instances"], x["instances_drawn"])
             for x in d["changed_definitions"]] == [("grf_reduce", 3, 3)]
+    # the envelope carries what the README promises: files with the side used
+    assert d["files"] == [{"path": "grf_reduce.sv", "side": "old", "aligned": True}]
+    assert env["data"]["written"] is True and env["pagination"]["truncated"] is False
     data = _page_data(root / env["data"]["path"])
     assert data["meta"]["diff"] == "HEAD -> working tree" and data["root"] == "grf_soc"
     assert data["diff"]["files"] == [{"path": "grf_reduce.sv", "side": "old", "aligned": True}]
@@ -309,9 +312,9 @@ def test_GRF_I09_root_limits_the_diff_and_commit_to_commit_diffs(tmp_path: Path)
     bid = _build(root)
     _edit(root, "grf_core.sv", "grf_stage #(.W(W), .K(3)) u_exec", "grf_stage #(.W(W), .K(5)) u_exec")
     cl1 = "grf_soc.g_cl[1].u_cl"
-    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD", "--root", cl1)
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD", "--instance", cl1)
     assert code == 0 and env["data"]["diff"]["outside_root"] == 2
-    assert any("outside the root" in w for w in env["warnings"])
+    assert any("outside the instance" in w for w in env["warnings"])
     data = _page_data(root / env["data"]["path"])
     assert data["root"] == cl1 and [n["path"] for n in data["nodes"]][0] == cl1
     assert sorted(p for p, m in _marks(data).items() if m == "changed") == [
@@ -327,26 +330,53 @@ def test_GRF_I09_root_limits_the_diff_and_commit_to_commit_diffs(tmp_path: Path)
 
 
 @pytest.mark.usefixtures("isolated_git")
-def test_GRF_I10_diff_view_refusals(tmp_path: Path) -> None:
+def test_GRF_I10_nothing_to_draw_is_an_answer_and_bad_input_is_refused(tmp_path: Path) -> None:
     root = _git_grf(tmp_path)
     bid = _build(root)
-    code, e = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD")
-    assert code == 3 and e["error"]["code"] == "MISSING_INPUT"  # no change at all
-    assert e["error"]["details"]["reason"] == "diff_touches_no_instance"
+    exports = root / ".svweave" / "exports"
+
+    def nothing(*extra: str) -> dict[str, Any]:
+        code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD", *extra)
+        # like `query diff-impact` on an empty diff: OK, the build is not BLOCKED, no page
+        assert code == 0 and env["outcome"] == "OK", env.get("error")
+        assert env["analysis_coverage"]["completeness"] == "COMPLETE"
+        assert env["data"]["path"] is None and env["data"]["written"] is False
+        assert any(w.startswith("nothing to draw") for w in env["warnings"])
+        d: dict[str, Any] = env["data"]["diff"]
+        return d
+
+    assert "no changed line" in nothing()["nothing_to_draw"]  # clean tree
     (root / "notes.txt").write_text("not RTL\n")
     from tests.integration.test_diff_impact import git
 
     git(root, "add", "notes.txt")
-    code, e = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD")
-    assert code == 3 and e["error"]["details"]["files_not_in_build"] == 1
-    assert e["error"]["details"]["unmapped_files"] == ["notes.txt"]
+    d = nothing()
+    assert d["unmapped_files"] == ["notes.txt"] and d["summary"]["files_not_in_build"] == 1
     _edit(root, "grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];")
     core = "grf_soc.g_cl[0].u_cl.g_core[0].u_core"  # a reducer change does not reach a core
-    code, e = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD", "--root", core)
-    assert code == 3 and "under the root" in e["error"]["message"]
+    d = nothing("--instance", core)
+    assert "under the instance" in d["nothing_to_draw"] and d["outside_root"] == 3
+    assert not exports.exists() or not list(exports.glob("*-diff-*"))
     for bad in (["--diff-head", "HEAD"], ["--diff-base", "-x"], ["--diff-base", "a..b"],
                 ["--diff-base", "HEAD", "--diff-head", "--x"]):
         code, e = run(root, "graph", "export", "--build", bid, *bad)
         assert code == 2 and e["error"]["code"] == "INVALID_CONFIG", bad
     code, e = run(root, "graph", "export", "--build", bid, "--diff-base", "nosuchref")
-    assert code != 0 and e["error"] is not None
+    assert code == 3 and e["error"]["code"] == "MISSING_INPUT"
+    assert e["error"]["details"]["reason"] == "git_failed"
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I11_truncated_diff_view_reports_what_is_really_drawn(tmp_path: Path) -> None:
+    root = _git_grf(tmp_path)
+    bid = _build(root)
+    _edit(root, "grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];")
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD",
+                    "--max-instances", "3")
+    assert code == 0 and env["data"]["truncated"] is True and env["pagination"]["truncated"]
+    assert env["pagination"]["limit"] == 3
+    data = _page_data(root / env["data"]["path"])
+    assert [n["diff"] for n in data["nodes"]] == ["context"] * 3  # soc and both clusters
+    x = env["data"]["diff"]["changed_definitions"][0]
+    assert (x["instances"], x["instances_drawn"]) == (3, 0)  # not "3 drawn"
+    assert data["stats"]["changed_instances"] == 0

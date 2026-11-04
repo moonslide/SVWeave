@@ -129,3 +129,17 @@ def test_DIF_I06_not_a_git_repository(tmp_path: Path) -> None:
     code, env = diff_impact(w.root, str(b["build_id"]))
     assert code == 3 and env["error"]["code"] == "MISSING_INPUT"
     assert env["error"]["details"]["reason"] == "git_failed"
+
+
+def test_DIF_I07_cut_lists_set_pagination_truncated(tmp_path: Path) -> None:
+    root, bid = repo_build(tmp_path)
+    edit(root, "assign data_o  = data_i;", "assign data_o  = ~data_i;")
+    top = root / "fixtures/demo/rtl/demo_top.sv"
+    top.write_text(top.read_text().replace("      .clk     (clk),", "      .clk     (clk ),", 1))
+    code, env = diff_impact(root, bid)
+    assert code == 0 and len(env["data"]["affected_definitions"]) == 2
+    assert env["pagination"] == {"limit": 50, "next_cursor": None, "truncated": False}
+    code, env = diff_impact(root, bid, "--limit", "1")
+    assert code == 0 and len(env["data"]["affected_definitions"]) == 1
+    assert "affected_definitions" in env["data"]["truncated_lists"]
+    assert env["pagination"]["truncated"] is True and env["pagination"]["limit"] == 1

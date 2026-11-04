@@ -345,7 +345,7 @@ the tested SHA; later documentation commits are not automatically native-tested.
 * The page is a snapshot of one build and does not refresh. Layout is a plain tree; very large
   designs need `--max-instances` or collapsing to stay readable.
 * Only the user's browser renders it; the viewer is not part of the qualification gates.
-* `--root` (subtree view) reads only the root and its descendants. Signals declared outside the
+* `--instance` (subtree view) reads only the root and its descendants. Signals declared outside the
   subtree are listed as boundary signals, not drawn; fan-out counts uses inside the subtree, so a
   hierarchical reference from outside the subtree into it is not counted. It is a view of the same
   build, not a separate compile: a design that does not elaborate as a whole has no subtree either.

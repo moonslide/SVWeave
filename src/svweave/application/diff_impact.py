@@ -50,7 +50,7 @@ from svweave.application.options import WorkspaceOptions
 from svweave.application.queries import _decl_dto, _gap_limits, _session
 from svweave.application.semantic_common import build_envelope
 from svweave.domain.cursor import MAX_RESPONSE_BYTES, check_limit
-from svweave.domain.envelope import Envelope
+from svweave.domain.envelope import Envelope, Pagination
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.snapshot.capture import load_record, snapshots_dir
 
@@ -616,6 +616,8 @@ def diff_impact(
             s.build,
             request_id,
             data,
+            # a cut list is a truncated answer: absence from it is not proof (docs/mcp_contract)
+            pagination=Pagination(limit=lim, truncated=bool(cut)),
             warnings=warns,
             extra_limits=[*_gap_limits(s), DIFF_NOTE],
             freshness=s.fresh(),

@@ -95,8 +95,11 @@ def _diff_flags(f: Callable[..., Any]) -> Callable[..., Any]:
     envelope still reports ``freshness``). ``--allow-partial`` keeps its meaning."""
 
     @click.option("--allow-partial", is_flag=True, help="Exit 0 for a PARTIAL build (default 3).")
+    @click.option(
+        "--allow-stale", is_flag=True, help="Accepted for uniformity: STALE never changes the exit code."
+    )
     @functools.wraps(f)
-    def wrapper(st: _State, *a: Any, allow_partial: bool, **kw: Any) -> Any:
+    def wrapper(st: _State, *a: Any, allow_partial: bool, allow_stale: bool, **kw: Any) -> Any:
         st.query_policy = (True, allow_partial)
         return f(st, *a, **kw)
 
@@ -380,7 +383,7 @@ def graph_grp() -> None:
     help="Signals used by more instances are listed as hubs, not drawn.",
 )
 @click.option(
-    "--root",
+    "--instance",
     default=None,
     help="Subtree view: read and draw only this instance (path or id) and its descendants.",
 )
@@ -401,7 +404,7 @@ def graph_export_cmd(
     name: str | None,
     max_instances: int,
     max_fanout: int,
-    root: str | None,
+    instance: str | None,
     diff_base: str | None,
     diff_head: str | None,
 ) -> None:
@@ -419,7 +422,7 @@ def graph_export_cmd(
                 name=name,
                 max_instances=max_instances,
                 max_fanout=max_fanout,
-                root=root,
+                instance=instance,
                 diff_base=diff_base,
                 diff_head=diff_head,
             )
@@ -435,7 +438,8 @@ def query_grp() -> None:
 def _paging(f: Callable[..., Any]) -> Callable[..., Any]:
     f = click.option("--cursor", default=None, help="Opaque cursor from a previous page.")(f)
     return click.option(
-        "--limit", type=int, default=None, help="Items per page (default 100, max 500)."
+        "--limit", type=int, default=None,
+        help="Items per page (max 500; default 100, query symbol 50).",
     )(f)
 
 
