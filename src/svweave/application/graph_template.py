@@ -23,8 +23,16 @@ def dumps_safe(obj: Any) -> str:
     )
 
 
-def render_html(model: dict[str, Any]) -> str:
-    return _PAGE.replace(_PLACEHOLDER, dumps_safe(model))
+CSP_STRICT = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:"
+#: --lazy only: the page loads its data files (c-<hash>.js in its own directory) with <script src>;
+#: on file:// that needs 'self' (tested in Chromium; SRI cannot be used there, fetch is blocked)
+CSP_LAZY = ("default-src 'none'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+            "img-src data:")
+
+
+def render_html(model: dict[str, Any], *, lazy: bool = False) -> str:
+    page = _PAGE.replace(_PLACEHOLDER, dumps_safe(model))
+    return page.replace(CSP_STRICT, CSP_LAZY, 1) if lazy else page
 
 
 _PAGE = """<!doctype html>
@@ -185,7 +193,8 @@ if (m.completeness !== "COMPLETE") msgs.push("Analysis is " + m.completeness + "
 if (m.freshness !== "CURRENT") msgs.push("Freshness is " + m.freshness + ": the workspace changed since this build.");
 if (D.truncated) msgs.push("Truncated: " + D.stats.instances_shown + " of " + D.stats.instances_total + " instances shown (shallowest first).");
 if (D.hubs.length) msgs.push(D.hubs.length + " high-fanout signal(s) are listed in the side panel, not drawn.");
-if (!D.truncated && !D.hubs.length && !m.root && !D.diff) msgs.push("Complete topology: all " + D.nodes.length + " instances and all " + D.edges.length + " connections of this build are in the page; deeper levels start collapsed (expand all).");
+if (m.lazy) msgs.push("Complete topology in " + m.lazy.parts + " parts (" + m.lazy.instances_total + " instances): dashed-blue nodes are parts not loaded yet; double-click one, or search, to load it.");
+else if (!D.truncated && !D.hubs.length && !m.root && !D.diff) msgs.push("Complete topology: all " + D.nodes.length + " instances and all " + D.edges.length + " connections of this build are in the page; deeper levels start collapsed (expand all).");
 if (D.diff) msgs.push("Diff view (" + D.diff.base + " -> " + D.diff.head + "): " + D.stats.changed_instances + " instance(s) of " + D.diff.changed_definitions.length + " changed definition(s) are outlined in red with their subtrees; dashed ancestors are context and show only their drawn children.");
 else if (m.root) msgs.push("Subtree view of " + m.root + ": only this instance and its descendants were read; fan-out counts uses inside the subtree.");
 if (D.boundary && D.boundary.length) msgs.push(D.boundary.length + " signal(s) declared outside the subtree are listed in the side panel, not drawn.");
@@ -262,15 +271,15 @@ function draw() {
     g.appendChild(el("text", { x: 8, y: 16 }, trunc(relName(n), 26)));
     var sub = n.definition || "", ck = kids[n.id].length;
     if (ck && n.collapsed) sub += "  [+" + ck + "]";
-    if (n.portal) sub += "  -> page of " + n.portal.instances;
+    if (n.portal) sub += n.portal.chunk ? "  [load " + n.portal.instances + "]" : "  -> page of " + n.portal.instances;
     g.appendChild(el("text", { x: 8, y: 30, "class": "sub" }, trunc(sub, 32)));
     g.appendChild(el("title", {}, n.path));
     g.addEventListener("click", function (ev) { ev.stopPropagation(); sel = n.id; selEdge = null; showNode(n); draw(); });
-    g.addEventListener("dblclick", function (ev) { ev.stopPropagation(); if (kids[n.id].length) { n.collapsed = !n.collapsed; draw(); } });
+    g.addEventListener("dblclick", function (ev) { ev.stopPropagation(); if (n.portal && n.portal.chunk) { loadChunk(n.portal.chunk, function () { showNode(n); }); return; } if (kids[n.id].length) { n.collapsed = !n.collapsed; draw(); } });
     g.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { sel = n.id; selEdge = null; showNode(n); draw(); } });
     gn.appendChild(g);
   });
-  document.getElementById("count").textContent = Object.keys(pos).length + " of " + D.nodes.length + " nodes visible, " + D.edges.length + " connections";
+  document.getElementById("count").textContent = Object.keys(pos).length + " of " + D.nodes.length + " nodes visible, " + D.edges.length + " connections" + (m.lazy ? " (loaded so far; " + m.lazy.instances_total + " instances in the design)" : "");
 }
 function relName(n) {
   var p = n.parent && byId[n.parent];
@@ -290,6 +299,11 @@ function table(head, rows) {
 function showNode(n) {
   clearSide();
   side.appendChild(h("h2", n.name));
+  if (n.portal && n.portal.chunk) {
+    var lb = h("button", "Load this subtree here (" + n.portal.instances + " instances)");
+    lb.addEventListener("click", function () { loadChunk(n.portal.chunk, function () { showNode(n); }); });
+    side.appendChild(lb);
+  }
   if (n.portal && safeHref(n.portal.href)) {
     var pl = h("a", "Open the page of this subtree (" + n.portal.instances + " instances)", "portal-link");
     pl.href = n.portal.href;
@@ -397,11 +411,19 @@ function atlasSearch(q) {
   for (var j = 0; j < atlasPaths.length && found.length < 50; j++) if (atlasPaths[j].toLowerCase().indexOf(q) >= 0) found.push(j);
   side.appendChild(h("h2", "Whole design (" + atlasPaths.length + " instances): " + (found.length >= 50 ? "first 50 matches" : found.length + " match(es)")));
   found.forEach(function (j) {
-    var file = A.pages[A.pg[j]];
-    if (!safeHref(file)) return;
-    var a = h("a", atlasPaths[j]);
-    a.href = file + "#f=" + encodeURIComponent(atlasPaths[j]);
-    var row = h("div"); row.appendChild(a); side.appendChild(row);
+    var file = A.pages[A.pg[j]], row = h("div");
+    if (m.lazy) {
+      var b2 = h("a", atlasPaths[j]);
+      b2.href = "#";
+      b2.addEventListener("click", function (ev) { ev.preventDefault(); openFound(j); });
+      row.appendChild(b2);
+    } else {
+      if (!safeHref(file)) return;
+      var a = h("a", atlasPaths[j]);
+      a.href = file + "#f=" + encodeURIComponent(atlasPaths[j]);
+      row.appendChild(a);
+    }
+    side.appendChild(row);
   });
 }
 // arriving from a search result: open the tree down to that instance and select it
@@ -410,11 +432,57 @@ function focusFromHash() {
   if (hsh.indexOf("#f=") !== 0) return;
   var want = "";
   try { want = decodeURIComponent(hsh.slice(3)); } catch (err) { return; }
+  focusPath(want);
+}
+function focusPath(want) {
   var hit = D.nodes.filter(function (n) { return n.path === want; })[0];
   if (!hit) return;
   var a = hit.parent ? byId[hit.parent] : null;
   while (a) { a.collapsed = false; a = a.parent ? byId[a.parent] : null; }
   sel = hit.id; draw(); showNode(hit);
+}
+// ---- --lazy: parts of the topology are data files (c-<10 hex>.js) beside this page
+var loaded = {}, waiting = {};
+function safeChunk(x) {
+  return typeof x === "string" && x.length === 15 && x.indexOf("c-") === 0 && x.slice(12) === ".js" && /^[0-9a-f]+$/.test(x.slice(2, 12));
+}
+function loadChunk(file, done) {
+  if (!safeChunk(file)) return;
+  if (loaded[file]) { if (done) done(); return; }
+  if (waiting[file]) { if (done) waiting[file].push(done); return; }
+  waiting[file] = done ? [done] : [];
+  var sc = document.createElement("script");
+  sc.src = file;
+  sc.onerror = function () {
+    delete waiting[file];
+    document.getElementById("banner").textContent = "Could not load the part " + file + " (it must sit beside this page; some browsers refuse local scripts).";
+  };
+  document.head.appendChild(sc);
+}
+window.svwChunk = function (raw) {
+  var P = decodePage(raw), file = P.meta && P.meta.chunk;
+  if (!safeChunk(file) || loaded[file]) return;
+  loaded[file] = 1;
+  var base = 0;
+  P.nodes.forEach(function (n) {
+    var have = byId[n.id];
+    if (have) { delete have.portal; have.collapsed = false; base = have.depth; return; }  // the portal: now open
+    n.depth = n.parent && byId[n.parent] ? byId[n.parent].depth + 1 : base;
+    n.collapsed = n.depth >= base + 2;
+    byId[n.id] = n; kids[n.id] = [];
+    if (n.parent && byId[n.parent]) kids[n.parent].push(n);
+    D.nodes.push(n);
+  });
+  P.edges.forEach(function (e) { D.edges.push(e); });
+  draw();
+  var cbs = waiting[file] || [];
+  delete waiting[file];
+  cbs.forEach(function (cb) { cb(); });
+};
+function openFound(j) {
+  var chain = [], pgi = A.pg[j];
+  while (pgi > 0) { chain.unshift(A.pages[pgi]); pgi = A.parent[pgi]; }
+  (function next() { if (!chain.length) { focusPath(atlasPaths[j]); return; } loadChunk(chain.shift(), next); })();
 }
 
 // ---- pan / zoom

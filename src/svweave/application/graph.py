@@ -74,6 +74,10 @@ ATLAS_NOTE = (
     "with its own port associations and opens the page of its subtree; together the pages are "
     "the complete topology"
 )
+LAZY_NOTE = (
+    "lazy: one page that loads the parts of the topology from data files of its directory when "
+    "a portal is opened (its CSP admits scripts from that directory); verified in Chromium only"
+)
 SUBTREE_NOTE = (
     "subtree view: only the root instance and its descendants were read; fan-out counts uses "
     "inside the subtree, and signals declared outside it are listed as boundary signals, not drawn"
@@ -631,10 +635,12 @@ def _export_atlas(
     budget: int,
     max_instances: int | None,
     max_fanout: int | None,
+    lazy: bool = False,
 ) -> Envelope:
     """--split: the complete topology (or one --instance subtree) as linked pages of at most
-    ``budget`` instances in one directory; ``index.html`` is the top page (graph_atlas)."""
-    stem = "graph-" + s.bid[:12] + "-atlas"
+    ``budget`` instances in one directory; ``index.html`` is the top page (graph_atlas).
+    --lazy: the same cut as one page (index.html) that loads the other parts (c-<hash>.js)."""
+    stem = "graph-" + s.bid[:12] + ("-lazy" if lazy else "-atlas")
     if root_row is not None:
         stem += "-" + hashlib.sha256(str(root_row["path"]).encode()).hexdigest()[:10]
     dirname = name or stem
@@ -655,12 +661,14 @@ def _export_atlas(
         s, start, budget=budget, meta=meta,
         model_of=lambda region: build_model(
             s, max_instances=max_instances, max_fanout=max_fanout, region_rows=region),
+        lazy=lazy,
     )
     exports = ensure_private_dir(s.ctx.state_dir, EXPORT_DIR)
     out = ensure_private_dir(exports, dirname)
     for entry in os.scandir(out):  # pages of an earlier, different cut must not linger
-        if entry.is_file(follow_symlinks=False) and entry.name.startswith("p-") \
-                and entry.name.endswith(".html") and entry.name not in files:
+        if entry.is_file(follow_symlinks=False) and entry.name not in files and (
+                (entry.name.startswith("p-") and entry.name.endswith(".html"))
+                or (entry.name.startswith("c-") and entry.name.endswith(".js"))):
             os.unlink(entry.path)
     for fname, data in files.items():
         write_under(out, fname, data)
@@ -676,11 +684,11 @@ def _export_atlas(
             "written": True,
             "served": False,
             "root": str(root_row["path"]) if root_row is not None else None,
-            "atlas": {**summary, "files": sorted(files)[:200]},
+            ("lazy" if lazy else "atlas"): {**summary, "files": sorted(files)[:200]},
             "note": GRAPH_NOTE,
         },
         warnings=warns,
-        extra_limits=_gap_limits(s) + [GRAPH_NOTE, ATLAS_NOTE],
+        extra_limits=_gap_limits(s) + [GRAPH_NOTE, LAZY_NOTE if lazy else ATLAS_NOTE],
         freshness=s.fresh(),
     )
 
@@ -699,10 +707,14 @@ def export_graph(
     per_commit: bool = False,
     split: bool = False,
     page_budget: int | None = None,
+    lazy: bool = False,
 ) -> Envelope:
-    if page_budget is not None and not split:
-        raise SvwError(ErrorCode.INVALID_CONFIG, "page_budget needs split")
-    if split and diff_base is not None:
+    if split and lazy:
+        raise SvwError(ErrorCode.INVALID_CONFIG, "give split OR lazy: linked pages or one page "
+                       "that loads its parts")
+    if page_budget is not None and not (split or lazy):
+        raise SvwError(ErrorCode.INVALID_CONFIG, "page_budget needs split or lazy")
+    if (split or lazy) and diff_base is not None:
         raise SvwError(ErrorCode.INVALID_CONFIG,
                        "split applies to the complete topology or an --instance subtree, not to "
                        "a diff view (a diff page is small already)")
@@ -731,11 +743,11 @@ def export_graph(
         raise SvwError(ErrorCode.INVALID_CONFIG, "max_fanout must be at least 2 (omit: no hubs)")
     with _session(opts, build_id) as s:
         root_row = resolve_root(s, instance) if instance is not None else None
-        if split:
+        if split or lazy:
             return _export_atlas(
                 s, request_id, root_row=root_row, name=name, instance=instance,
                 budget=page_budget or DEFAULT_PAGE_BUDGET, max_instances=max_instances,
-                max_fanout=max_fanout,
+                max_fanout=max_fanout, lazy=lazy,
             )
         diff: dict[str, Any] | None = None
         warns: list[str] = []

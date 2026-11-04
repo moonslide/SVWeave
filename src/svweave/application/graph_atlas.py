@@ -46,6 +46,10 @@ def page_file(root_path: str) -> str:
     return "p-" + hashlib.sha256(root_path.encode()).hexdigest()[:10] + ".html"
 
 
+def chunk_file(root_path: str) -> str:
+    return "c-" + hashlib.sha256(root_path.encode()).hexdigest()[:10] + ".js"
+
+
 def plan(rows: list[Any], start: list[str], budget: int) -> tuple[list[Page], dict[str, int]]:
     """Cut the tree under ``start`` into pages. ``rows``: (instance_id, parent_id, path, ord) of
     at least every instance under ``start``, in pre-order. Returns the pages (index first) and
@@ -146,7 +150,8 @@ def search_index(rows: list[Any], pages: list[Page]) -> dict[str, Any]:
         cols["p"].append(pi)
         cols["r"].append(sidx[rel])
         cols["pg"].append(home[iid])
-    return {"pages": [pg.file for pg in pages], "s": strings, **cols}
+    return {"pages": [pg.file for pg in pages], "parent": [-1 if pg.parent is None else pg.parent
+                                                          for pg in pages], "s": strings, **cols}
 
 
 def build_pages(
@@ -156,10 +161,17 @@ def build_pages(
     budget: int,
     meta: dict[str, Any],
     model_of: Any,
+    lazy: bool = False,
 ) -> tuple[dict[str, bytes], dict[str, Any]]:
-    """All pages of the atlas under ``start_rows`` as {file name: html bytes}, plus a summary.
-    ``model_of(region_rows)`` builds one page model (graph.build_model with region_rows)."""
+    """All pages of the atlas under ``start_rows`` as {file name: bytes}, plus a summary.
+    ``model_of(region_rows)`` builds one page model (graph.build_model with region_rows).
+
+    ``lazy``: ONE page (index.html, the top part) plus one data file per other part
+    (``c-<hash>.js``, ``svwChunk(<page data>);``) that the page loads into the same drawing when
+    a portal is opened. Same cut, same disjoint parts; only the index page's CSP also admits
+    scripts from its own directory ('self'), which the loading needs on file://."""
     from svweave.application.graph import _rows_in
+    from svweave.application.graph_template import dumps_safe
 
     light = s.rows("SELECT instance_id, parent_id, path, ord FROM instances WHERE build_id=? "
                    "ORDER BY ord", s.bid)
@@ -173,7 +185,30 @@ def build_pages(
     summary: dict[str, Any] = {"pages": len(pages), "budget": budget, "largest_page": 0,
                                "oversized_pages": 0}
     path_of = {str(r["instance_id"]): str(r["path"]) for r in light}
+    if lazy:
+        for pg in pages[1:]:
+            pg.file = chunk_file(path_of[pg.roots[0]])
+    file_of_root = {pg.roots[0]: pg.file for pg in pages[1:]}
+    total = sum(size[x] for x in start)
     for i, pg in enumerate(pages):
+        if lazy:
+            region = _rows_in(s, "SELECT * FROM instances WHERE build_id=? AND instance_id IN ({})",
+                              pg.members)
+            model = model_of(region)
+            for n in model["nodes"]:
+                if n["id"] in set(pg.portals):
+                    n["portal"] = {"chunk": file_of_root[n["id"]], "instances": size[n["id"]]}
+            if i == 0:
+                data = {"meta": {**meta, "lazy": {"parts": len(pages), "budget": budget,
+                                                  "instances_total": total}},
+                        **model, "atlas_search": search_index(light, pages)}
+                files[pg.file] = render_html(encode_page(data), lazy=True).encode("utf-8")
+            else:
+                data = {"meta": {"chunk": pg.file, "root": path_of[pg.roots[0]]}, **model}
+                files[pg.file] = ("svwChunk(" + dumps_safe(encode_page(data)) + ");\n").encode()
+            summary["largest_page"] = max(summary["largest_page"], len(pg.members))
+            summary["oversized_pages"] += len(pg.members) > budget
+            continue
         trail = (crumbs[pg.parent] if pg.parent is not None else []) + [
             [path_of[pg.roots[0]] if pg.parent is not None else "index", pg.file]]
         crumbs.append(trail)

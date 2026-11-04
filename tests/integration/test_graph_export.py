@@ -562,3 +562,51 @@ def test_GRF_I16_atlas_refusals_and_a_subtree_atlas(tmp_path: Path) -> None:
     index = _page_data(root / env["data"]["path"])
     assert [n["path"] for n in index["nodes"]][0] == "grf_soc.g_cl[1].u_cl"
     assert len(index["nodes"]) == 152
+
+
+def _chunk_data(path: Path) -> dict[str, Any]:
+    from svweave.application.graph_codec import decode
+
+    text = path.read_text()
+    assert text.startswith("svwChunk(") and text.endswith(");\n")
+    data: dict[str, Any] = decode(json.loads(text[len("svwChunk("):-3]))
+    return data
+
+
+def test_GRF_I17_lazy_one_page_plus_parts_is_the_complete_topology(tmp_path: Path) -> None:
+    root, bid = _grf(tmp_path, clusters=4, cores=30)
+    code, env = run(root, "graph", "export", "--build", bid, "--name", "whole")
+    whole = _page_data(root / env["data"]["path"])
+    code, env = run(root, "graph", "export", "--build", bid, "--lazy", "--page-budget", "200",
+                    "--name", "lazy")
+    assert code == 0, env.get("error")
+    lz = env["data"]["lazy"]
+    assert lz["pages"] == 4 and lz["oversized_pages"] == 0
+    d = root / env["data"]["directory"]
+    assert sorted(lz["files"])[-1] == "index.html" and all(
+        f == "index.html" or (f.startswith("c-") and f.endswith(".js")) for f in lz["files"])
+    html = (d / "index.html").read_text()
+    assert "script-src 'self' 'unsafe-inline'" in html  # only a --lazy page admits 'self'
+    for other in (root / ".svweave/exports/whole.html",):
+        assert "script-src 'unsafe-inline';" in other.read_text() and "'self'" not in \
+            other.read_text().split("</head>")[0]
+    index = _page_data(d / "index.html")
+    assert index["meta"]["lazy"] == {"parts": 4, "budget": 200, "instances_total": 610}
+    parts = {f: _chunk_data(d / f) for f in lz["files"] if f != "index.html"}
+    portals = [n for n in index["nodes"] if "portal" in n]
+    assert all(set(p["portal"]) == {"chunk", "instances"} for p in portals)
+    for p in portals:
+        part = parts[p["portal"]["chunk"]]
+        assert part["meta"] == {"chunk": p["portal"]["chunk"], "root": p["path"]}
+        assert part["nodes"][0]["path"] == p["path"]
+    # same disjoint cut as --split: the union is the complete topology
+    seen: set[str] = set()
+    union: list[tuple[str, str, str, str]] = []
+    for pg in [index, *parts.values()]:
+        seen |= {n["path"] for n in pg["nodes"] if "portal" not in n}
+        union += sorted(_edges(pg))
+    assert seen == {n["path"] for n in whole["nodes"]}
+    assert len(union) == len(set(union)) and set(union) == _edges(whole)
+    assert index["atlas_search"]["parent"] == [-1, 0, 0, 0]
+    code, e = run(root, "graph", "export", "--build", bid, "--lazy", "--split")
+    assert code == 2 and e["error"]["code"] == "INVALID_CONFIG"

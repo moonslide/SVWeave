@@ -408,7 +408,16 @@ def graph_grp() -> None:
     "most --page-budget instances; for SoCs too large for one page.",
 )
 @click.option(
-    "--page-budget", type=int, default=None, help="Instances per page with --split (default 5000)."
+    "--lazy",
+    is_flag=True,
+    help="Write ONE page that loads the other parts of the topology (data files beside it) when "
+    "a portal is opened; same cut as --split (Chromium-verified).",
+)
+@click.option(
+    "--page-budget",
+    type=int,
+    default=None,
+    help="Instances per page or part with --split/--lazy (default 5000).",
 )
 @pass_state
 @_query_flags
@@ -423,6 +432,7 @@ def graph_export_cmd(
     diff_head: str | None,
     per_commit: bool,
     split: bool,
+    lazy: bool,
     page_budget: int | None,
 ) -> None:
     """Write .svweave/exports/<name>.html: instance hierarchy plus port-association connections."""
@@ -445,6 +455,7 @@ def graph_export_cmd(
                 per_commit=per_commit,
                 split=split,
                 page_budget=page_budget,
+                lazy=lazy,
             )
         )
     )
