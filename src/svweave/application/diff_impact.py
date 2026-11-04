@@ -21,12 +21,14 @@ runtime, UVM factory/config_db or bit-level reasoning. Counts are counts, not a 
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import re
+import selectors
+import signal
 import sqlite3
 import subprocess
-import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -83,73 +85,106 @@ def check_ref(ref: str, field: str) -> str:
     return ref
 
 
-def _git(repo: Path, args: list[str], ok: tuple[int, ...] = (0,)) -> bytes:
-    argv = [
-        "git",
-        "-C",
-        str(repo),
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "core.quotePath=false",
-        "--no-pager",
-        *args,
-    ]
-    env = {
-        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-        "HOME": os.environ.get("HOME", "/nonexistent"),
+# Repository metadata is untrusted (the same stance as update_git): git must not read the user's
+# global/system config, must never reach a transport (a partial clone's lazy fetch would run
+# `remote.<x>.uploadpack` / `core.sshCommand` from the repository config), must not descend into
+# submodules (their own config and filters) and must not take output prefixes from config.
+_GIT_CONFIG = (
+    "core.fsmonitor=false",
+    "core.quotePath=false",
+    "protocol.allow=never",
+    "diff.noprefix=false",
+    "diff.mnemonicPrefix=false",
+    "diff.srcPrefix=a/",
+    "diff.dstPrefix=b/",
+    "diff.ignoreSubmodules=all",
+    "submodule.recurse=false",
+)
+
+
+def _git_env() -> dict[str, str]:
+    return {
+        "PATH": os.environ.get("PATH", os.defpath),
+        "HOME": "/nonexistent",
+        "XDG_CONFIG_HOME": "/nonexistent",
         "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_SYSTEM": os.devnull,
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_ATTR_NOSYSTEM": "1",
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_TERMINAL_PROMPT": "0",
+        "GIT_NO_LAZY_FETCH": "1",
+        "GIT_ALLOW_PROTOCOL": "",
     }
+
+
+def _kill_group(proc: subprocess.Popen[bytes]) -> None:
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL)
+
+
+def _git(repo: Path, args: list[str], ok: tuple[int, ...] = (0,)) -> bytes:
+    argv = ["git", "-C", str(repo)]
+    for kv in _GIT_CONFIG:
+        argv += ["-c", kv]
+    argv += ["--no-pager", *args]
     try:
         proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell, refs validated by check_ref
             argv,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
-            env=env,
+            env=_git_env(),
+            start_new_session=True,  # a timeout or overflow kills git AND its children
         )
     except FileNotFoundError as e:
         raise SvwError(
             ErrorCode.BACKEND_UNAVAILABLE, "git is not installed", {"reason": "git_missing"}
         ) from e
-    # stdout is read in bounded chunks and git is killed the moment the cap is exceeded: the diff
-    # (or a blob) is never buffered whole just to be refused afterwards. stderr is drained on a
-    # thread so a chatty git cannot block on a full pipe.
-    err: list[bytes] = []
-
-    def drain_err() -> None:
-        assert proc.stderr is not None
-        err.append(proc.stderr.read(1 << 16))
-        while proc.stderr.read(1 << 16):
-            pass
-
-    t = threading.Thread(target=drain_err, daemon=True)
-    t.start()
+    # Both pipes are drained without blocking, so the deadline holds even while git writes
+    # nothing; stdout is capped, so the diff (or a blob) is never buffered whole only to be
+    # refused afterwards.
     chunks: list[bytes] = []
+    err = bytearray()
     size = 0
     over = timed_out = False
     deadline = time.monotonic() + GIT_TIMEOUT_S
-    assert proc.stdout is not None
-    while True:
-        if time.monotonic() > deadline:
-            timed_out = True
-            proc.kill()
-            break
-        chunk = proc.stdout.read(1 << 20)
-        if not chunk:
-            break
-        size += len(chunk)
-        if size > MAX_DIFF_BYTES:
-            over = True
-            proc.kill()
-            break
-        chunks.append(chunk)
-    rc = proc.wait()
-    t.join(timeout=5)
-    for f in (proc.stdout, proc.stderr):
-        if f is not None:
+    assert proc.stdout is not None and proc.stderr is not None
+    try:
+        with selectors.DefaultSelector() as sel:
+            for pipe in (proc.stdout, proc.stderr):
+                os.set_blocking(pipe.fileno(), False)
+                sel.register(pipe, selectors.EVENT_READ)
+            while sel.get_map():
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    timed_out = True
+                    break
+                for key, _ in sel.select(timeout=left):
+                    chunk = os.read(key.fd, 1 << 16)
+                    if not chunk:
+                        sel.unregister(key.fileobj)
+                    elif key.fileobj is proc.stdout:
+                        size += len(chunk)
+                        if size > MAX_DIFF_BYTES:
+                            over = True
+                            break
+                        chunks.append(chunk)
+                    elif len(err) < 1 << 16:
+                        err += chunk
+                if over:
+                    break
+        if not (timed_out or over):
+            try:
+                rc = proc.wait(timeout=max(deadline - time.monotonic(), 0.05))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+    finally:
+        _kill_group(proc)  # also reaps children that outlived git and hold the pipes
+        if proc.poll() is None:
+            proc.wait()
+        for f in (proc.stdout, proc.stderr):
             f.close()
     if timed_out:
         raise SvwError(
@@ -160,13 +195,32 @@ def _git(repo: Path, args: list[str], ok: tuple[int, ...] = (0,)) -> bytes:
             ErrorCode.OUTPUT_LIMIT, "the diff is larger than 64 MiB", {"reason": "diff_too_large"}
         )
     if rc not in ok:
-        first = (err[0] if err else b"").decode("utf-8", "replace").strip().splitlines()[:1]
+        first = bytes(err).decode("utf-8", "replace").strip().splitlines()[:1]
         raise SvwError(
             ErrorCode.MISSING_INPUT,
             "git could not answer: " + (first[0][:200] if first else f"exit {rc}"),
             {"reason": "git_failed", "args": args[:3]},
         )
     return b"".join(chunks)
+
+
+def _refuse_lazy_objects(top: Path) -> None:
+    """A partial clone / promisor remote can make a plain read fetch missing objects, i.e. run
+    transport commands named by the repository config. Transports are disabled anyway; refuse the
+    layout outright so the answer is a clear policy refusal, not a confusing git error."""
+    lazy = _git(
+        top,
+        ["config", "--get-regexp", r"^(extensions\.partialclone|remote\..*\.promisor)$"],
+        ok=(0, 1),
+    ).decode("utf-8", "replace").strip()
+    if lazy:
+        raise SvwError(
+            ErrorCode.POLICY_DENIED,
+            "the repository is a partial clone (promisor remote): reading it may need to fetch "
+            "objects, which SVWeave never does; use a full clone",
+            {"reason": "partial_clone_unsupported",
+             "settings": sorted({ln.split()[0] for ln in lazy.splitlines()})[:10]},
+        )
 
 
 class FileDiff:
@@ -211,8 +265,8 @@ def parse_diff(text: str) -> list[FileDiff]:
             cur = FileDiff(old, _path(line[4:]))
             out.append(cur)
         elif line.startswith("Binary files ") or line.startswith("GIT binary patch"):
-            m = re.match(r"Binary files (?:a/)?(.*?) and (?:b/)?(.*?) differ$", line)
-            b = FileDiff(m.group(1) if m else None, m.group(2) if m else None)
+            m = re.match(r"Binary files (.*?) and (.*?) differ$", line)
+            b = FileDiff(_path(m.group(1)) if m else None, _path(m.group(2)) if m else None)
             b.binary = True
             out.append(b)
             cur = None
@@ -315,6 +369,7 @@ def collect_changes(
     repo_dir = Path(repo) if repo else s.ctx.project_root
     _, real = s.ctx.path_policy.check(str(repo_dir), s.ctx.project_root)
     top = Path(_git(real, ["rev-parse", "--show-toplevel"]).decode().strip())
+    _refuse_lazy_objects(top)
     _git(top, ["rev-parse", "--verify", "-q", base + "^{commit}"])
     if head is not None:
         _git(top, ["rev-parse", "--verify", "-q", head + "^{commit}"])
@@ -334,7 +389,8 @@ def collect_changes(
                 {"reason": "git_filters_configured",
                  "filters": sorted({ln.split()[0] for ln in filters.splitlines()})[:10]},
             )
-    diff_args = ["diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames"]
+    diff_args = ["diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames",
+                 "--src-prefix=a/", "--dst-prefix=b/", "--ignore-submodules=all"]
     diff_args += [base] + ([head] if head else []) + ["--"]
     # only the project's own subtree: a monorepo around it is none of this tool's business
     proj = Path(os.path.realpath(s.ctx.project_root))
