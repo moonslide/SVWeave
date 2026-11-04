@@ -366,7 +366,10 @@ def graph_grp() -> None:
 @graph_grp.command("export")
 @click.option("--build", "build_id", required=True, help="64-hex build id.")
 @click.option(
-    "--name", default=None, help="File name stem under .svweave/exports/ (default graph-<build>)."
+    "--name",
+    default=None,
+    help="File name stem under .svweave/exports/ (default graph-<build>); with --split/--lazy "
+    "the name of the directory that holds the pages.",
 )
 @click.option(
     "--max-instances",
@@ -417,7 +420,8 @@ def graph_grp() -> None:
     "--page-budget",
     type=int,
     default=None,
-    help="Instances per page or part with --split/--lazy (default 5000).",
+    help="Instances per page or part with --split/--lazy (default 5000, at least 100). "
+    "--max-instances/--max-fanout are refused with --split/--lazy.",
 )
 @pass_state
 @_query_flags

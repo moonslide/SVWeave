@@ -41,6 +41,7 @@ from svweave.application.queries import _gap_limits, _resolve_instance, _session
 from svweave.application.semantic_common import build_envelope
 from svweave.domain.envelope import Envelope, Pagination
 from svweave.domain.errors import ErrorCode, SvwError
+from svweave.domain.states import EvidenceKind
 from svweave.security.safeio import ensure_private_dir, write_under
 from svweave.storage.semantic import loads
 
@@ -52,6 +53,9 @@ DEFAULT_MAX_FANOUT: int | None = None
 #: above these the page still holds everything, but the envelope says how to make it smaller
 LARGE_PAGE_INSTANCES = 20_000
 LARGE_PAGE_BYTES = 64 * 1024 * 1024
+#: smallest --page-budget; the envelope lists at most this many file names of an atlas
+MIN_PAGE_BUDGET = 100
+MAX_LISTED_FILES = 200
 MAX_PORTS_PER_INSTANCE = 200
 # bound for one ``IN (...)`` list (SQLite's default host-parameter limit is far above this)
 _SQL_CHUNK = 900
@@ -72,7 +76,8 @@ DIFF_VIEW_NOTE = (
 ATLAS_NOTE = (
     "atlas: the topology is split into linked pages; a portal node is drawn on its parent page "
     "with its own port associations and opens the page of its subtree; together the pages are "
-    "the complete topology"
+    "the complete topology, except connections through a signal no instance declares (a "
+    "package or $unit variable) between instances on different pages"
 )
 LAZY_NOTE = (
     "lazy: one page that loads the parts of the topology from data files of its directory when "
@@ -109,6 +114,19 @@ def _owner_instance(sig_path: str, by_path: dict[str, str]) -> tuple[str, str] |
         iid = by_path.get(sig_path[:end])
         if iid is not None:
             return sig_path[:end], iid
+
+
+def _owned_in_build(s: Any, sig_paths: list[str]) -> set[str]:
+    """Those of ``sig_paths`` that an instance of the build declares (some proper dotted prefix
+    is an instance path); the others belong to no instance (package / $unit variables)."""
+    prefixes: dict[str, list[str]] = defaultdict(list)
+    for sp in sig_paths:
+        end = len(sp)
+        while (end := sp.rfind(".", 0, end)) > 0:
+            prefixes[sp[:end]].append(sp)
+    found = _rows_in(s, "SELECT path FROM instances WHERE build_id=? AND path IN ({})",
+                     sorted(prefixes))
+    return {sp for r in found for sp in prefixes[str(r["path"])]}
 
 
 def _ord(r: Any) -> tuple[int, int]:
@@ -363,9 +381,14 @@ def build_model(
     edges: list[dict[str, Any]] = []
     hubs: list[dict[str, Any]] = []
     boundary: list[dict[str, Any]] = []
+    # a signal no instance of the BUILD declares (a package or $unit variable) is drawn as on the
+    # complete page (sibling out -> in edges); only one whose owner is off this page is boundary
+    off_page = (_owned_in_build(s, [m["path"] for m in members.values()
+                                    if _owner_instance(m["path"], by_path) is None])
+                if partial else set())
     for m in members.values():
         users = {iid for iid, _, _ in m["uses"]}
-        if partial and _owner_instance(m["path"], by_path) is None:
+        if m["path"] in off_page:
             boundary.append({"signal": m["path"], "instances": len(users)})
             continue
         if max_fanout is not None and len(users) > max_fanout:
@@ -547,8 +570,10 @@ def _diff_view(
     }
     sel = diff_selection(s, defs, root_row) if defs else None
     if sel is not None and not sel["marks"]:
-        sel_none_reason = (f"none of the {sel['changed_total']} instance(s) of the changed "
-                           "definition(s) is under the instance")
+        sel_none_reason = (
+            f"none of the {sel['changed_total']} instance(s) of the changed definition(s) is "
+            "under the instance" if root_row is not None and sel["changed_total"]
+            else "the changed definition(s) have no instance in this build")
         outside = sel["outside_root"]
         sel = None
     else:
@@ -625,6 +650,21 @@ def _diff_view(
     return diff, sel, warns
 
 
+def _page_meta(s: Any, limits: list[str]) -> dict[str, Any]:
+    """What every page states about its evidence (rule 5): build, snapshot, completeness,
+    freshness, provenance and the limitations of the envelope that wrote it."""
+    return {
+        "build_id": s.bid,
+        "snapshot_id": str(s.build["snapshot_id"]),
+        "profile": str(s.build["profile"]),
+        "completeness": str(s.build["completeness"]),
+        "freshness": s.fresh().value,
+        "evidence_kind": EvidenceKind.HDL_STATIC_RESOLVED.value,
+        "workspace_id": str(s.build["workspace_id"]),
+        "limitations": list(limits),
+    }
+
+
 def _export_atlas(
     s: Any,
     request_id: str,
@@ -633,8 +673,6 @@ def _export_atlas(
     name: str | None,
     instance: str | None,
     budget: int,
-    max_instances: int | None,
-    max_fanout: int | None,
     lazy: bool = False,
 ) -> Envelope:
     """--split: the complete topology (or one --instance subtree) as linked pages of at most
@@ -648,19 +686,12 @@ def _export_atlas(
         raise SvwError(ErrorCode.INVALID_CONFIG, "name must match [A-Za-z0-9._-]+ (no path)")
     start = [root_row] if root_row is not None else s.rows(
         "SELECT * FROM instances WHERE build_id=? AND parent_id IS NULL ORDER BY ord", s.bid)
-    meta = {
-        "build_id": s.bid,
-        "snapshot_id": str(s.build["snapshot_id"]),
-        "profile": str(s.build["profile"]),
-        "completeness": str(s.build["completeness"]),
-        "freshness": s.fresh().value,
-        "evidence_kind": "HDL_STATIC_RESOLVED",
-        "workspace_id": str(s.build["workspace_id"]),
-    }
+    limits = _gap_limits(s) + [GRAPH_NOTE, LAZY_NOTE if lazy else ATLAS_NOTE]
+    meta = _page_meta(s, limits)
     files, summary = build_atlas_pages(
         s, start, budget=budget, meta=meta,
         model_of=lambda region: build_model(
-            s, max_instances=max_instances, max_fanout=max_fanout, region_rows=region),
+            s, max_instances=None, max_fanout=None, region_rows=region),
         lazy=lazy,
     )
     exports = ensure_private_dir(s.ctx.state_dir, EXPORT_DIR)
@@ -684,11 +715,13 @@ def _export_atlas(
             "written": True,
             "served": False,
             "root": str(root_row["path"]) if root_row is not None else None,
-            ("lazy" if lazy else "atlas"): {**summary, "files": sorted(files)[:200]},
+            ("lazy" if lazy else "atlas"): {
+                **summary, "files": sorted(files)[:MAX_LISTED_FILES],
+                "files_total": len(files), "files_truncated": len(files) > MAX_LISTED_FILES},
             "note": GRAPH_NOTE,
         },
         warnings=warns,
-        extra_limits=_gap_limits(s) + [GRAPH_NOTE, LAZY_NOTE if lazy else ATLAS_NOTE],
+        extra_limits=limits,
         freshness=s.fresh(),
     )
 
@@ -710,17 +743,26 @@ def export_graph(
     lazy: bool = False,
 ) -> Envelope:
     if split and lazy:
-        raise SvwError(ErrorCode.INVALID_CONFIG, "give split OR lazy: linked pages or one page "
-                       "that loads its parts")
+        raise SvwError(ErrorCode.INVALID_CONFIG, "give split (--split) OR lazy (--lazy): "
+                       "linked pages or one page that loads its parts")
     if page_budget is not None and not (split or lazy):
-        raise SvwError(ErrorCode.INVALID_CONFIG, "page_budget needs split or lazy")
+        raise SvwError(ErrorCode.INVALID_CONFIG, "page_budget (--page-budget) needs split "
+                       "(--split) or lazy (--lazy)")
+    if (split or lazy) and (max_instances is not None or max_fanout is not None):
+        # the pages together are the complete topology; a per-page cap would silently drop
+        # instances and connections of every page and is not reported per page
+        raise SvwError(ErrorCode.INVALID_CONFIG,
+                       "max_instances/max_fanout (--max-instances/--max-fanout) cannot be "
+                       "combined with split/lazy (--split/--lazy): those pages are the complete "
+                       "topology; use page_budget (--page-budget) to make the pages smaller")
     if (split or lazy) and diff_base is not None:
         raise SvwError(ErrorCode.INVALID_CONFIG,
                        "split applies to the complete topology or an --instance subtree, not to "
                        "a diff view (a diff page is small already)")
     if page_budget is not None and (not isinstance(page_budget, int)
-                                    or isinstance(page_budget, bool) or page_budget < 100):
-        raise SvwError(ErrorCode.INVALID_CONFIG, "page_budget must be at least 100 instances")
+                                    or isinstance(page_budget, bool) or page_budget < MIN_PAGE_BUDGET):
+        raise SvwError(ErrorCode.INVALID_CONFIG, f"page_budget (--page-budget) must be at least "
+                       f"{MIN_PAGE_BUDGET} instances")
     if per_commit and (diff_base is None or diff_head is None):
         raise SvwError(
             ErrorCode.INVALID_CONFIG,
@@ -746,8 +788,7 @@ def export_graph(
         if split or lazy:
             return _export_atlas(
                 s, request_id, root_row=root_row, name=name, instance=instance,
-                budget=page_budget or DEFAULT_PAGE_BUDGET, max_instances=max_instances,
-                max_fanout=max_fanout, lazy=lazy,
+                budget=page_budget or DEFAULT_PAGE_BUDGET, lazy=lazy,
             )
         diff: dict[str, Any] | None = None
         warns: list[str] = []
@@ -802,15 +843,12 @@ def export_graph(
         fname = f"{name or stem}.html"
         if not _SAFE_NAME.fullmatch(fname) or fname.startswith("."):
             raise SvwError(ErrorCode.INVALID_CONFIG, "name must match [A-Za-z0-9._-]+ (no path)")
-        meta = {
-            "build_id": s.bid,
-            "snapshot_id": str(s.build["snapshot_id"]),
-            "profile": str(s.build["profile"]),
-            "completeness": str(s.build["completeness"]),
-            "freshness": s.fresh().value,
-            "evidence_kind": "HDL_STATIC_RESOLVED",
-            "workspace_id": str(s.build["workspace_id"]),
-        }
+        limits = _gap_limits(s) + [GRAPH_NOTE]
+        if diff is not None:
+            limits += [DIFF_VIEW_NOTE, DIFF_NOTE]
+        elif root_row is not None:
+            limits.append(SUBTREE_NOTE)
+        meta = _page_meta(s, limits)
         if root_row is not None:
             meta["root"] = str(root_row["path"])
         if diff is not None:
@@ -819,11 +857,6 @@ def export_graph(
         data = page.encode("utf-8")
         exports = ensure_private_dir(s.ctx.state_dir, EXPORT_DIR)
         write_under(exports, fname, data)
-        limits = _gap_limits(s) + [GRAPH_NOTE]
-        if diff is not None:
-            limits += [DIFF_VIEW_NOTE, DIFF_NOTE]
-        elif root_row is not None:
-            limits.append(SUBTREE_NOTE)
         if model["truncated"]:
             warns.append(
                 f"truncated: {model['stats']['instances_shown']} of "
@@ -839,8 +872,8 @@ def export_graph(
             warns.append(
                 f"large page: {len(model['nodes'])} instances, {len(model['edges'])} edges, "
                 f"{len(data) // (1024 * 1024)} MiB; a browser may be slow. It is the complete "
-                "topology; to reduce it use --instance, --diff-base, --max-instances or "
-                "--max-fanout"
+                "topology; to keep it complete in smaller pages use --split or --lazy, to "
+                "reduce it use --instance, --diff-base, --max-instances or --max-fanout"
             )
         if model.get("boundary"):
             warns.append(

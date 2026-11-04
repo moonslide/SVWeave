@@ -801,6 +801,7 @@ def test_SEC_ENV01_a_repository_profile_cannot_read_a_variable_the_trusted_polic
     assert e.code == ErrorCode.MISSING_INPUT
     assert [i["reason"] for i in e.details["issues"]] == ["env_not_allowed_by_policy"]
     assert e.details["issues"][0]["variable"] == "SVW_FAKE_SECRET"
+    assert "environment_allowlist" in e.details["issues"][0]["hint"]  # says where to allow it
     assert secret not in json.dumps({"m": str(e), "d": e.details})
     ws.policy(environment_allowlist=["OTHER"])  # allowing a different variable changes nothing
     with pytest.raises(SvwError) as ei:
@@ -821,3 +822,15 @@ def test_SEC_ENV02_policy_environment_allowlist_names_are_validated() -> None:
     with pytest.raises(ValidationError):
         Policy.model_validate({"schema_version": "1.0", "allowed_roots": ["/x"],
                                "environment_allowlist": ["1BAD"]})
+
+
+def test_SEC_ENV03_the_init_policy_template_carries_an_empty_environment_allowlist(
+        tmp_path: Path) -> None:
+    """Council review 2: the trusted policy `svweave init` writes did not show the field that
+    bounds a profile's environment_allowlist."""
+    from svweave.application.templates import policy_dict
+    from svweave.config.models import Policy
+
+    d = policy_dict(tmp_path)
+    assert d["environment_allowlist"] == []
+    assert Policy.model_validate(d).environment_allowlist == []

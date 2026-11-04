@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Critical mutation suite (plan 20.5, release gate "Critical invariants").
 
-Thirty deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
+Thirty-one deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
 the M12–M22 extra write-safety rules, M23–M26 Slurm boundaries, and M27 shared-launcher workspace
-binding, plus M28–M29 verified incremental-snapshot reuse and M30 the complete change list of
-the roll-forward input gate. They are injected, one at a time, into a THROWAWAY COPY of the
+binding, plus M28–M29 verified incremental-snapshot reuse, M30 the complete change list of
+the roll-forward input gate and M31 the verified candidate snapshot of edit validate. They are injected, one at a time, into a THROWAWAY COPY of the
 repository. For each one the mapped test subset is run against the copy; a mutation is ``KILLED`` when the subset
 fails (pytest exit 1 with at least one FAILED test) and ``SURVIVED`` when it stays green. Anything
 else (patch anchor missing, syntax/collection error, timeout, red baseline) is ``ERROR`` and is
@@ -400,6 +400,15 @@ MUTATIONS: list[Mutation] = [
                "        changed = stale.details[\"changed\"]  # " + MARK + ":M30\n")],
         ["tests/fault_injection/test_recover_gates.py::"
          "test_a3_a_foreign_change_behind_twenty_own_changes_is_still_refused"],
+    ),
+    m(
+        "M31", "edit validate reuses a candidate snapshot directory found on disk unverified",
+        "A3 (beyond 20.5); council review 2 2026-11-04",
+        [Patch("src/svweave/editing/candsnap.py",
+               "        if (not final.is_symlink() and _content_matches(final, files)\n",
+               "        if (not final.is_symlink()  # " + MARK + ":M31\n")],
+        ["tests/unit/test_snapshot_trust.py::"
+         "test_SEC_SNP05_validate_never_reuses_a_planted_candidate_snapshot"],
     ),
 ]
 

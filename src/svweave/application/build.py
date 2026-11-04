@@ -825,9 +825,14 @@ def _blocked(
                 "unresolved_count": 0,
                 "dynamic_count": 0,
                 "reasons": dumps(reasons),
-                "limitations": dumps(["Results withheld: dependency leak."]),
+                # the stored verdict says how it was produced too (not only this envelope)
+                "limitations": dumps(
+                    ([DEGRADED_WORKER_NOTE.format(mode=outcome.isolation)]
+                     if outcome.isolation != "bwrap" else [])
+                    + ["Results withheld: dependency leak."]),
                 "stats": dumps(
-                    {**result["stats"], "semantic_deviations": list(nm.semantic_deviations)}
+                    {**result["stats"], "semantic_deviations": list(nm.semantic_deviations),
+                     "worker_isolation": outcome.isolation}
                 ),
                 "dependency_report": dumps(dep),
                 "source_map": dumps(source_map),

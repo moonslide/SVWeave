@@ -109,6 +109,21 @@ def test_relative_and_conflicting_paths_refused(tmp_path: Path) -> None:
         validate_spec(SandboxSpec(ro_paths=(Path.home(),)))
 
 
+def test_SEC_SBX01_a_read_only_parent_of_home_or_the_ssh_dir_is_refused(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Council review 2: only / and $HOME itself were refused read-only; `/home` (a parent of
+    $HOME) exposed it whole."""
+    home = tmp_path / "home" / "u"
+    (home / ".ssh").mkdir(parents=True)
+    (home / "proj").mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    for bad in (home.parent, tmp_path, home / ".ssh", home / ".ssh" / "id"):
+        with pytest.raises(SvwError) as ei:
+            validate_spec(SandboxSpec(ro_paths=(bad,)))
+        assert ei.value.code is ErrorCode.POLICY_DENIED, bad
+    validate_spec(SandboxSpec(ro_paths=(home / "proj",)))  # a path inside $HOME stays allowed
+
+
 def test_protected_original_cannot_be_exposed_writable(tmp_path: Path) -> None:
     orig = tmp_path / "orig"
     (orig / "sub").mkdir(parents=True)

@@ -211,7 +211,9 @@ def validate_spec(spec: SandboxSpec) -> tuple[list[Path], list[Path]]:
                     {"path": str(w)},
                 )
     for r in ro:
-        if r in (Path("/"), home):
+        # not only $HOME itself: any parent of it (`/home`, `/Users`) exposes it whole, and no
+        # path may overlap ~/.ssh
+        if r == Path("/") or r == home or r in home.parents or _overlaps(r, home / ".ssh"):
             raise SvwError(
                 ErrorCode.POLICY_DENIED, "refusing to expose / or $HOME to a backend", {"path": str(r)}
             )

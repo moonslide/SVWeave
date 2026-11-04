@@ -1,7 +1,8 @@
 """``svweave graph export --split``: the complete topology as an atlas of linked pages.
 
 A page that holds a whole large SoC is too big for a browser (about 7.6 KB per instance before
-compaction, 1 KB after; a 115k-instance design is still around 100 MB). The atlas cuts the
+compaction, under 1 KB after; a 115k-instance design is still a 40.9 MB page that opens in about
+10 s, evidence/bench/graph-large/). The atlas cuts the
 instance tree into pages of at most ``budget`` instances. A subtree that does not fit becomes a
 PORTAL: it stays on its parent page as one node, linked to its own page, where it is the root.
 
@@ -10,10 +11,13 @@ declared in the scope that instantiates it (its parent) or a sibling sharing tha
 portal's own port associations reference its parent's scope, so they are drawn on the parent
 page; everything below the portal references the portal's scope or deeper, so it is drawn on the
 portal's page. No edge is drawn twice and none is lost (tests compare the union with the single
-complete page). A hierarchical reference across pages is listed as a boundary signal.
+complete page). A hierarchical reference across pages is listed as a boundary signal. The one
+exception, stated on every page (graph.ATLAS_NOTE): a signal no instance declares (a package
+variable) connecting instances on different pages; each page draws its own pairs only.
 
-Everything is one build: nothing is recompiled. Links are plain relative links between files of
-one directory: no server, no script loading, the same strict CSP as a single page (ADR-014).
+Everything is one build: nothing is recompiled. ``--split`` links are plain relative links between
+files of one directory: no server, no script loading, the same strict CSP as a single page.
+``--lazy`` loads ``c-<hash>.js`` data files of the same directory (its CSP adds 'self'; ADR-014).
 """
 
 from __future__ import annotations
@@ -195,8 +199,9 @@ def build_pages(
             region = _rows_in(s, "SELECT * FROM instances WHERE build_id=? AND instance_id IN ({})",
                               pg.members)
             model = model_of(region)
+            portal_ids = set(pg.portals)
             for n in model["nodes"]:
-                if n["id"] in set(pg.portals):
+                if n["id"] in portal_ids:
                     n["portal"] = {"chunk": file_of_root[n["id"]], "instances": size[n["id"]]}
             if i == 0:
                 data = {"meta": {**meta, "lazy": {"parts": len(pages), "budget": budget,

@@ -110,3 +110,36 @@ def test_SEC_DIF04_a_new_binary_file_is_named_by_its_path_not_dev_null() -> None
     assert [(f.old, f.new, f.path, f.binary) for f in files] == [(None, "x.bin", "x.bin", True)]
     gone = dimp.parse_diff("Binary files a/y.bin and /dev/null differ\n")
     assert [(f.old, f.new) for f in gone] == [("y.bin", None)]
+
+
+def test_SEC_DIF05_per_commit_git_log_never_runs_the_repository_gpg_program(tmp_path: Path) -> None:
+    """``log.showSignature`` in the repository config makes ``git log`` verify a signed commit
+    with ``gpg.program``: a program the repository names. Both log calls of --per-commit."""
+    repo, marker = tmp_path / "r", tmp_path / "PWNED"
+    git("init", "-q", "-b", "main", str(repo))
+    (repo / "a.sv").write_text("module a;\nendmodule\n")
+    git("-C", str(repo), "add", "a.sv")
+    git("-C", str(repo), "commit", "-qm", "base")
+    (repo / "a.sv").write_text("module a;\nwire w;\nendmodule\n")
+    git("-C", str(repo), "add", "a.sv")
+    tree = git("-C", str(repo), "write-tree").strip()
+    parent = git("-C", str(repo), "rev-parse", "HEAD").strip()
+    body = (f"tree {tree}\nparent {parent}\nauthor t <t@t> 1 +0000\ncommitter t <t@t> 1 +0000\n"
+            "gpgsig -----BEGIN PGP SIGNATURE-----\n garbage\n -----END PGP SIGNATURE-----\n\n"
+            "signed\n")
+    obj = tmp_path / "commit.txt"
+    obj.write_text(body)
+    sha = git("-C", str(repo), "hash-object", "-t", "commit", "-w", str(obj)).strip()
+    git("-C", str(repo), "update-ref", "refs/heads/main", sha)
+    prog = tmp_path / "gpg.sh"
+    prog.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+    prog.chmod(0o755)
+    git("-C", str(repo), "config", "log.showSignature", "true")
+    git("-C", str(repo), "config", "gpg.program", str(prog))
+    # setup check: plain git with this config does run the program
+    git("-C", str(repo), "log", "-1", "--format=%H")
+    assert marker.exists(), "setup: git log must run gpg.program for a signed commit"
+    marker.unlink()
+    assert [c["sha"] for c in dimp.commits_in_range(repo, "HEAD~1", "HEAD")[0]] == [sha]
+    assert dimp.commits_touching(repo, "HEAD~1", "HEAD", "a.sv", 1, 3) == [sha]
+    assert not marker.exists(), "repository config made SVWeave's git log run gpg.program"

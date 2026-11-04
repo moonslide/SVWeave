@@ -6,6 +6,8 @@ JSON block and the script writes source-derived text with ``textContent`` only (
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 from typing import Any
 
@@ -23,23 +25,24 @@ def dumps_safe(obj: Any) -> str:
     )
 
 
-CSP_STRICT = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:"
-#: --lazy only: the page loads its data files (c-<hash>.js in its own directory) with <script src>;
-#: on file:// that needs 'self' (tested in Chromium; SRI cannot be used there, fetch is blocked)
-CSP_LAZY = ("default-src 'none'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
-            "img-src data:")
+_CSP_HEAD = "@@SVWEAVE_CSP@@"
+
+
+def _csp(script_src: str) -> str:
+    return (f"default-src 'none'; style-src 'unsafe-inline'; script-src {script_src}; "
+            "img-src data:; base-uri 'none'; form-action 'none'")
 
 
 def render_html(model: dict[str, Any], *, lazy: bool = False) -> str:
     page = _PAGE.replace(_PLACEHOLDER, dumps_safe(model))
-    return page.replace(CSP_STRICT, CSP_LAZY, 1) if lazy else page
+    return page.replace(_CSP_HEAD, CSP_LAZY if lazy else CSP_STRICT, 1)
 
 
 _PAGE = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:">
+<meta http-equiv="Content-Security-Policy" content="@@SVWEAVE_CSP@@">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SVWeave graph</title>
 <style>
@@ -115,7 +118,9 @@ small{color:var(--mut)}
 function decodePage(R) {
   if (R.format !== "svweave-graph/2") return R;
   var s = R.s, n = R.n, sg = R.sg, full = {}, paths = [], nodes = [], i;
-  var g = n.g || {}, pa = n.pa || {}, po = n.po || {}, df = n.diff || {}, cm = n.commits || {}, ct = n.children_total || {}, pt = n.portal || {};
+  var g = n.g || {}, pa = n.pa || {}, po = n.po || {};
+  // the optional per-node keys: graph_codec._OPTIONAL (a test keeps the two lists equal)
+  var OPTIONAL = ["diff", "commits", "children_total", "portal"];
   n.full.forEach(function (x) { full[x] = 1; });
   function sigPath(k) { var o = sg[k]; return o[0] >= 0 ? paths[o[0]] + "." + s[o[1]] : String(s[o[1]]); }
   function lazyPorts(node, raw) {
@@ -134,10 +139,7 @@ function decodePage(R) {
       params: (pa[k] || []).map(function (x) { return { name: s[x[0]], value: s[x[1]], overridden: !!x[2] }; }),
       file: s[n.fl[i]], line: n.ln[i] };
     lazyPorts(node, po[k] || []);
-    if (k in df) node.diff = df[k];
-    if (k in cm) node.commits = cm[k];
-    if (k in ct) node.children_total = ct[k];
-    if (k in pt) node.portal = pt[k];
+    OPTIONAL.forEach(function (o) { if (n[o] && k in n[o]) node[o] = n[o][k]; });
     nodes.push(node);
   }
   var edges = [];
@@ -194,12 +196,16 @@ if (m.freshness !== "CURRENT") msgs.push("Freshness is " + m.freshness + ": the 
 if (D.truncated) msgs.push("Truncated: " + D.stats.instances_shown + " of " + D.stats.instances_total + " instances shown (shallowest first).");
 if (D.hubs.length) msgs.push(D.hubs.length + " high-fanout signal(s) are listed in the side panel, not drawn.");
 if (m.lazy) msgs.push("Complete topology in " + m.lazy.parts + " parts (" + m.lazy.instances_total + " instances): dashed-blue nodes are parts not loaded yet; double-click one, or search, to load it.");
+else if (m.atlas) msgs.push("Atlas page " + m.atlas.page + " of " + m.atlas.pages + ": this page holds " + D.nodes.length + " instances; dashed-blue portal nodes open the pages of their subtrees, so this page alone is NOT the complete topology (all pages together are).");
 else if (!D.truncated && !D.hubs.length && !m.root && !D.diff) msgs.push("Complete topology: all " + D.nodes.length + " instances and all " + D.edges.length + " connections of this build are in the page; deeper levels start collapsed (expand all).");
 if (D.diff) msgs.push("Diff view (" + D.diff.base + " -> " + D.diff.head + "): " + D.stats.changed_instances + " instance(s) of " + D.diff.changed_definitions.length + " changed definition(s) are outlined in red with their subtrees; dashed ancestors are context and show only their drawn children.");
-else if (m.root) msgs.push("Subtree view of " + m.root + ": only this instance and its descendants were read; fan-out counts uses inside the subtree.");
+else if (m.root && !m.atlas) msgs.push("Subtree view of " + m.root + ": only this instance and its descendants were read; fan-out counts uses inside the subtree.");
 if (D.boundary && D.boundary.length) msgs.push(D.boundary.length + " signal(s) declared outside the subtree are listed in the side panel, not drawn.");
 msgs.push(D.note);
-document.getElementById("banner").textContent = msgs.join("  ");
+if (m.limitations && m.limitations.length) msgs.push("Limitations (" + m.limitations.length + "): hover here.");
+var bannerEl = document.getElementById("banner");
+bannerEl.textContent = msgs.join("  ");
+if (m.limitations) bannerEl.title = m.limitations.join("\\n");
 
 // ---- layout (left to right tidy tree over the visible nodes)
 var NW = 190, NH = 38, GX = 70, GY = 14, pos = {};
@@ -511,3 +517,20 @@ focusFromHash();
 </body>
 </html>
 """
+
+
+def _viewer_hash() -> str:
+    """CSP source of the one inline script: its sha256, so no other inline script ever runs
+    (a JSON data block is not executed and needs none)."""
+    start = _PAGE.index("<script>\n") + len("<script>")
+    body = _PAGE[start:_PAGE.index("</script>", start)]
+    return "'sha256-" + base64.b64encode(hashlib.sha256(body.encode()).digest()).decode() + "'"
+
+
+VIEWER_HASH = _viewer_hash()
+CSP_STRICT = _csp(VIEWER_HASH)
+#: --lazy only: the page loads its data files (c-<hash>.js in its own directory) with <script src>;
+#: on file:// that needs 'self' (tested in Chromium; SRI cannot be used there, fetch is blocked).
+#: In Chromium 'self' on a file: page admits any local file: the loader only ever asks for
+#: c-<10 hex>.js beside the page (safeChunk)
+CSP_LAZY = _csp("'self' " + VIEWER_HASH)

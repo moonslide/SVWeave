@@ -145,6 +145,9 @@ class _Resolver:
                     chain,
                     reason="env_not_allowed_by_policy",
                     variable=var,
+                    hint=(f'add "{var}" to "environment_allowlist" in the trusted policy.json '
+                          "($XDG_CONFIG_HOME/svweave/workspaces/<key>/policy.json, outside the "
+                          "repository; `svweave init` writes it) only if a person trusts it"),
                 )
                 ok = False
             elif not self.environ.get(var):

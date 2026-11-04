@@ -69,6 +69,16 @@ def test_DIF_U02_ranges_map_old_lines_to_bytes_and_anchor_insertions() -> None:
     assert _ranges([(1, 1)], b"no newline") == [(0, 10, 1, 1)]  # last line without \n
 
 
+def test_DIF_U05_a_hunk_wholly_past_the_end_anchors_at_the_last_line_not_the_whole_file() -> None:
+    """An unaligned, shorter snapshot: the hunk must not become byte 0..EOF (every declaration
+    of the file would be reported changed) nor an inverted line range."""
+    data = b"l1\nl2\n"
+    assert _ranges([(10, 1)], data) == [(3, 6, 2, 2)]
+    assert _ranges([(10, 3)], b"l1\nl2") == [(3, 5, 2, 2)]
+    for lo, _hi, first, last in _ranges([(7, 2), (3, 1)], data):
+        assert lo >= 3 and first <= last
+
+
 class R(dict[str, object]):
     pass
 

@@ -23,7 +23,7 @@ from svweave.domain.envelope import AnalysisCoverage, Envelope, ErrorInfo, Outco
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import is_sha256_hex
 from svweave.domain.states import Completeness, Freshness
-from svweave.security.safeio import ensure_private_dir, write_under
+from svweave.security.safeio import ensure_private_dir, require_real_dir, write_under
 from svweave.snapshot.capture import check_freshness, load_record, snapshots_dir
 from svweave.storage.db import Database
 
@@ -197,6 +197,12 @@ def search(
             f"snapshot {snapshot_id} not found",
             {"reason": "snapshot_missing", "snapshot_id": snapshot_id},
         )
+    try:  # the text fallback walks this tree: no link anywhere on the way (a planted
+        # `.svweave/snapshots/<id>/files -> /home` would be walked as the snapshot)
+        require_real_dir(snapshots_dir(ctx), f"{snapshot_id}/files")
+    except FileNotFoundError as e:
+        raise SvwError(ErrorCode.MISSING_INPUT, f"snapshot {snapshot_id} not found",
+                       {"reason": "snapshot_missing", "snapshot_id": snapshot_id}) from e
     rec = load_record(sdir)
     env = svw_search(
         snapshot_id=snapshot_id,

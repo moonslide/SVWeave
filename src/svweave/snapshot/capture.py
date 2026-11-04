@@ -25,7 +25,7 @@ from svweave.config.paths import is_hardlinked
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import compute_snapshot_id
 from svweave.manifest.models import NormalizedManifest
-from svweave.security.safeio import read_regular_under, unsafe
+from svweave.security.safeio import read_regular_under, safe_rel_path, unsafe
 from svweave.snapshot.models import (
     Change,
     ExplicitEntry,
@@ -486,20 +486,26 @@ def _content_matches(final: Path, files: list[SnapFile]) -> bool:
     not a link). A snapshot directory that already exists is not trusted by its name alone: its id
     is computable from public facts, so a pre-seeded ``.svweave/`` could hold other bytes."""
     for f in files:
-        p = final / f.snapshot_path
+        # no link in ANY component (a planted `files -> ../../..` would make the "immutable"
+        # snapshot the live tree), only regular files
         try:
-            st = os.lstat(p)
-        except OSError:
+            data = read_regular_under(final, f.snapshot_path)
+        except (OSError, SvwError):
             return False
-        if not stat.S_ISREG(st.st_mode):
-            return False
-        h = hashlib.sha256()
-        with open(p, "rb") as fh:
-            while chunk := fh.read(_CHUNK):
-                h.update(chunk)
-        if h.hexdigest() != f.sha256:
+        if hashlib.sha256(data).hexdigest() != f.sha256:
             return False
     return True
+
+
+def _record_matches(final: Path, record: SnapshotRecord) -> bool:
+    """The stored ``snapshot.json`` describes exactly what was captured (later reads trust it:
+    freshness, byte offsets); a planted one with the right id but another spec is not reused."""
+    try:
+        stored = load_record(final)
+    except (OSError, ValueError, SvwError):
+        return False
+    return (stored.workspace_id == record.workspace_id and stored.spec == record.spec
+            and stored.files == record.files and stored.lookup == record.lookup)
 
 
 def _freeze(root: Path) -> None:
@@ -612,7 +618,8 @@ def _capture(
             final = root / sid
             with snapshot_publish_lock(ctx):
                 if final.exists() or final.is_symlink():
-                    if not final.is_symlink() and _content_matches(final, files):
+                    if (not final.is_symlink() and _content_matches(final, files)
+                            and _record_matches(final, record)):
                         remove_snapshot_dir(tmp)
                         # same bytes, but THIS call's metadata (profile, config): the stored record
                         # may have been written for another profile with the same inputs
@@ -653,8 +660,34 @@ def _verify_resolved_inputs(nm: NormalizedManifest, files: list[SnapFile]) -> No
         )
 
 
+MAX_RECORD_BYTES = 32 << 20
+
+
 def load_record(snapshot_dir: Path) -> SnapshotRecord:
-    return SnapshotRecord.model_validate_json((snapshot_dir / "snapshot.json").read_text("utf-8"))
+    """The record of a published snapshot, read without following links and checked against its
+    own identity: the directory name is its id, the id is recomputed from its inventory, every
+    ``snapshot_path`` is the canonical one. A ``.svweave/`` is project-writable; a planted record
+    must not steer freshness or byte offsets (``MISSING_INPUT``, reason
+    ``snapshot_metadata_invalid``)."""
+    try:
+        raw = read_regular_under(snapshot_dir, "snapshot.json", MAX_RECORD_BYTES + 1)
+        if len(raw) > MAX_RECORD_BYTES:
+            raise ValueError("snapshot metadata exceeds 32 MiB")
+        rec = SnapshotRecord.model_validate_json(raw)
+        ok = (rec.snapshot_id == snapshot_dir.name
+              and snapshot_id_for(rec.spec, rec.files, rec.lookup) == rec.snapshot_id
+              and all(f.snapshot_path == "files/" + snapshot_rel(f.logical_path)
+                      and safe_rel_path(f.snapshot_path) is not None for f in rec.files))
+    except FileNotFoundError:
+        raise
+    except (OSError, ValueError, SvwError) as e:
+        raise SvwError(ErrorCode.MISSING_INPUT, f"snapshot {snapshot_dir.name}: unreadable record",
+                       {"reason": "snapshot_metadata_invalid"}) from e
+    if not ok:
+        raise SvwError(ErrorCode.MISSING_INPUT,
+                       f"snapshot {snapshot_dir.name}: record does not match its identity",
+                       {"reason": "snapshot_metadata_invalid"})
+    return rec
 
 
 # --------------------------------------------------------------------------- freshness

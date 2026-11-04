@@ -140,6 +140,23 @@ def read_regular(path: Path, max_bytes: int | None = None, *, tail: bool = False
         os.close(fd)
 
 
+def require_real_dir(base: Path, rel: str) -> None:
+    """``base`` and every component of ``base/rel`` are real directories, no link anywhere
+    (``POLICY_DENIED`` otherwise; ``FileNotFoundError`` when missing). For a tree that is about to
+    be walked: ``os.walk`` follows a link at its top, so a planted ``files -> /home`` would be
+    walked as if it were the snapshot."""
+    parts = [] if rel in ("", ".") else rel.split("/")
+    if parts and safe_rel_path(rel) is None:
+        raise unsafe(rel, "not a safe relative path")
+    try:
+        fd = _walk(base, parts, create=False)
+    except OSError as e:
+        if isinstance(e, FileNotFoundError):
+            raise
+        raise unsafe(rel or str(base), f"not a real directory ({e.strerror})") from e
+    os.close(fd)
+
+
 def read_regular_under(base: Path, rel: str, max_bytes: int | None = None) -> bytes:
     """Read ``base/rel`` as a regular file, following NO link in any component below ``base``.
 

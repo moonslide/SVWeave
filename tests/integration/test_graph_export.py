@@ -507,12 +507,18 @@ def test_GRF_I15_the_atlas_pages_together_are_exactly_the_complete_topology(
     # clusters 1..3 (152 each) no longer fit and become pages of their own
     assert a["pages"] == 4 and a["budget"] == 200 and a["oversized_pages"] == 0
     assert a["largest_page"] <= 200
+    assert a["files_total"] == 4 and a["files_truncated"] is False
     d = root / env["data"]["directory"]
     pages = {f: _page_data(d / f) for f in a["files"]}
     index = pages["index.html"]
     portals = [n for n in index["nodes"] if "portal" in n]
     assert sorted(n["path"] for n in portals) == [f"grf_soc.g_cl[{c}].u_cl" for c in (1, 2, 3)]
     assert len(index["nodes"]) == 157
+    # each page states its limitations (rule 5), the atlas note among them, like the envelope
+    assert index["meta"]["limitations"] == env["analysis_coverage"]["limitations"][
+        -len(index["meta"]["limitations"]):] and any("atlas:" in x for x in
+                                                    index["meta"]["limitations"])
+    assert any("not a netlist" in x for x in whole["meta"]["limitations"])
     for p in portals:  # every portal opens an existing page whose root it is
         sub = pages[p["portal"]["href"]]
         assert sub["meta"]["root"] == p["path"] and p["portal"]["instances"] == 152
@@ -550,7 +556,9 @@ def test_GRF_I15_the_atlas_pages_together_are_exactly_the_complete_topology(
 def test_GRF_I16_atlas_refusals_and_a_subtree_atlas(tmp_path: Path) -> None:
     root, bid = _grf(tmp_path, clusters=4, cores=30)
     for bad in (["--split", "--diff-base", "HEAD"], ["--page-budget", "500"],
-                ["--split", "--page-budget", "10"], ["--split", "--name", "../x"]):
+                ["--split", "--page-budget", "10"], ["--split", "--name", "../x"],
+                # council review 2: a per-page cap would silently drop content of every page
+                ["--split", "--max-instances", "100"], ["--lazy", "--max-fanout", "8"]):
         code, e = run(root, "graph", "export", "--build", bid, *bad)
         assert code == 2 and e["error"]["code"] == "INVALID_CONFIG", bad
     code, env = run(root, "graph", "export", "--build", bid, "--split", "--instance",
@@ -586,10 +594,15 @@ def test_GRF_I17_lazy_one_page_plus_parts_is_the_complete_topology(tmp_path: Pat
     assert sorted(lz["files"])[-1] == "index.html" and all(
         f == "index.html" or (f.startswith("c-") and f.endswith(".js")) for f in lz["files"])
     html = (d / "index.html").read_text()
-    assert "script-src 'self' 'unsafe-inline'" in html  # only a --lazy page admits 'self'
+    from svweave.application.graph_template import CSP_LAZY, CSP_STRICT, VIEWER_HASH
+
+    head = html.split("</head>")[0]
+    assert f'content="{CSP_LAZY}"' in head  # only a --lazy page admits 'self'
+    assert f"script-src 'self' {VIEWER_HASH};" in head and "'unsafe-inline';" not in \
+        head.split("script-src")[1].split(";")[0]
     for other in (root / ".svweave/exports/whole.html",):
-        assert "script-src 'unsafe-inline';" in other.read_text() and "'self'" not in \
-            other.read_text().split("</head>")[0]
+        ohead = other.read_text().split("</head>")[0]
+        assert f'content="{CSP_STRICT}"' in ohead and "'self'" not in ohead
     index = _page_data(d / "index.html")
     assert index["meta"]["lazy"] == {"parts": 4, "budget": 200, "instances_total": 610}
     parts = {f: _chunk_data(d / f) for f in lz["files"] if f != "index.html"}
@@ -610,3 +623,28 @@ def test_GRF_I17_lazy_one_page_plus_parts_is_the_complete_topology(tmp_path: Pat
     assert index["atlas_search"]["parent"] == [-1, 0, 0, 0]
     code, e = run(root, "graph", "export", "--build", bid, "--lazy", "--split")
     assert code == 2 and e["error"]["code"] == "INVALID_CONFIG"
+
+
+def test_GRF_I18_a_signal_no_instance_declares_is_drawn_on_atlas_pages_too(
+        tmp_path: Path) -> None:
+    """Council review 2: on a page of an atlas (region rows) a signal without an owner instance
+    (a package variable) was listed as boundary, while the complete page draws its sibling edge,
+    so the union of the pages was not the complete topology."""
+    from tests.integration.test_rename_preview import lean_ws
+
+    src = """\
+package gp; logic v; endpackage
+module drv (output logic o); assign o = 1'b1; endmodule
+module snk (input logic i); logic q; assign q = i; endmodule
+module gtop; logic z; assign z = 1'b0; drv u_d (.o(gp::v)); snk u_k (.i(gp::v)); endmodule
+"""
+    root, bid = lean_ws(tmp_path, {"rtl/g.sv": src}, "gtop")
+    code, env = run(root, "graph", "export", "--build", bid, "--name", "whole")
+    whole = _page_data(root / env["data"]["path"])
+    assert ("gtop.u_d", "gtop.u_k", "gp::v", "o -> i") in _edges(whole)
+    for mode in ("--split", "--lazy"):
+        code, env = run(root, "graph", "export", "--build", bid, mode, "--name", mode[2:])
+        assert code == 0, env.get("error")
+        page = _page_data(root / env["data"]["path"])
+        assert _edges(page) == _edges(whole), mode
+        assert not page.get("boundary"), mode

@@ -106,3 +106,45 @@ def test_GRF_C03_the_javascript_decoder_matches_the_python_decoder(tmp_path: Pat
     assert js["edges"] == py["edges"]
     assert {k: v for k, v in js.items() if k not in ("nodes", "edges")} == \
         {k: v for k, v in py.items() if k not in ("nodes", "edges")}
+
+
+def test_GRF_C04_the_viewer_knows_every_optional_node_key_and_the_sample_uses_them_all() -> None:
+    """Council review 2: a key added to graph_codec._OPTIONAL but not to the viewer would be
+    dropped silently in the browser (GRF-C03 only covers keys its sample happens to use)."""
+    import re
+
+    from svweave.application.graph_codec import _OPTIONAL
+
+    js = re.search(r"var OPTIONAL = \[(.*?)\];", _PAGE)
+    assert js and [x.strip().strip('"') for x in js.group(1).split(",")] == list(_OPTIONAL)
+    used = {k for n in sample()["nodes"] for k in n}
+    assert set(_OPTIONAL) <= used
+
+
+def test_GRF_C05_the_viewer_accepts_exactly_the_file_names_the_atlas_writes(tmp_path: Path) -> None:
+    """The names graph_atlas writes and the viewer's link/script guards are one contract."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is required to run the viewer's guards")
+    from svweave.application.graph_atlas import chunk_file, page_file
+
+    body = _PAGE.split("<script>\n", 1)[1]
+    guards = "".join(
+        body[body.index(f"function {name}("):].split("\n}\n", 1)[0] + "\n}\n"
+        for name in ("safeHref", "safeChunk"))
+    good = {"href": ["index.html", page_file("a.b"), page_file("x[3].y")],
+            "chunk": [chunk_file("a.b"), chunk_file("x[3].y")]}
+    bad = ["../p-0123456789.html", "p-0123456789.html?x", "p-012345678G.html",
+           "javascript:alert(1)", "/etc/passwd", "p-0123456789.htm", "c-0123456789.jsx",
+           "C-0123456789.js", "c-0123456789.js/", "", None, 17]
+    runner = tmp_path / "g.js"
+    runner.write_text(guards + "var t = JSON.parse(process.argv[2]);\n"
+                      "process.stdout.write(JSON.stringify({"
+                      "href: t.href.map(safeHref), chunk: t.chunk.map(safeChunk),"
+                      "badHref: t.bad.map(safeHref), badChunk: t.bad.map(safeChunk)}));\n")
+    r = subprocess.run([node, str(runner), json.dumps({**good, "bad": bad})], capture_output=True,
+                       text=True, check=False)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout)
+    assert all(out["href"]) and all(out["chunk"])
+    assert not any(out["badHref"]) and not any(out["badChunk"])

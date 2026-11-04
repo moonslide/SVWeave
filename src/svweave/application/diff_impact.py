@@ -99,7 +99,15 @@ _GIT_CONFIG = (
     "diff.dstPrefix=b/",
     "diff.ignoreSubmodules=all",
     "submodule.recurse=false",
+    # `log.showSignature` in the repository config makes `git log` verify every signed commit,
+    # i.e. run `gpg.program` (or the ssh / x509 one): a program chosen by the repository
+    "log.showSignature=false",
+    "gpg.program=" + os.devnull,
+    "gpg.ssh.program=" + os.devnull,
+    "gpg.x509.program=" + os.devnull,
 )
+#: every `git log` runs with these (signature checks, external diff and textconv off)
+_LOG_SAFE = ("--no-show-signature", "--no-ext-diff", "--no-textconv")
 
 
 def _git_env() -> dict[str, str]:
@@ -311,9 +319,12 @@ def _ranges(hunks: list[tuple[int, int]], data: bytes) -> list[tuple[int, int, i
             off = starts[line - 1] if line - 1 < len(starts) else max(len(data) - 1, 0)
             out.append((off, off + 1, line, line))
             continue
-        first, last = max(a, 1), max(min(a + n - 1, nlines), 1)
+        # a hunk past the end of these bytes (an unaligned, shorter snapshot) anchors at the last
+        # line, like an insertion: never at byte 0, which would cover the whole file
+        first = min(max(a, 1), max(nlines, 1))
+        last = max(min(a + n - 1, nlines), first)
         end = starts[last] if last < len(starts) else len(data)
-        out.append((starts[first - 1] if first - 1 < len(starts) else 0, max(end, 1), first, last))
+        out.append((starts[first - 1], max(end, 1), first, last))
     return out
 
 
@@ -527,7 +538,7 @@ _MARK = "\x01svw:"
 def commits_in_range(top: Path, base: str, head: str) -> tuple[list[dict[str, str]], bool]:
     """Commits of ``base..head``, oldest first, at most MAX_RANGE_COMMITS (second value: cut).
     The subject is repository text: data, capped, never interpreted."""
-    out = _git(top, ["log", "--reverse", "--format=%H%x00%s", f"{base}..{head}", "--"])
+    out = _git(top, ["log", *_LOG_SAFE, "--reverse", "--format=%H%x00%s", f"{base}..{head}", "--"])
     rows = []
     for ln in out.decode("utf-8", "replace").splitlines():
         sha, _, subject = ln.partition("\x00")
@@ -540,7 +551,7 @@ def commits_touching(top: Path, base: str, head: str, path: str, first: int, las
     """Commits of ``base..head`` that changed lines first..last (1-based, in the HEAD version)
     of ``path``: git's own line-history tracing (``log -L``), which also sees deletions inside
     the range. ``-s``: commit ids only, no patches."""
-    out = _git(top, ["log", "-s", "--format=%x01svw:%H", f"-L{first},{last}:{path}",
+    out = _git(top, ["log", *_LOG_SAFE, "-s", "--format=%x01svw:%H", f"-L{first},{last}:{path}",
                      f"{base}..{head}"])
     return [ln[len(_MARK):].strip() for ln in out.decode("utf-8", "replace").splitlines()
             if ln.startswith(_MARK)]

@@ -6,23 +6,24 @@ baseline; the snapshot id is derived from the candidate content only.
 from __future__ import annotations
 
 import os
-import shutil
 import stat
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 from svweave.config.context import WorkspaceContext, snapshot_rel
+from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import sha256_hex
+from svweave.security.safeio import read_regular_under
 from svweave.snapshot.capture import (
+    _content_matches,
+    _record_matches,
     load_record,
     remove_snapshot_dir,
     snapshot_id_for,
     snapshots_dir,
 )
 from svweave.snapshot.models import SnapFile, SnapshotRecord
-
-_CHUNK = 1 << 20
 
 
 def _freeze(root: Path) -> None:
@@ -56,8 +57,6 @@ def derive_candidate_snapshot(
     sid = snapshot_id_for(base.spec, files, base.lookup)
     root = snapshots_dir(ctx)
     final = root / sid
-    if final.exists():
-        return load_record(final)
     rec = SnapshotRecord(
         snapshot_id=sid,
         workspace_id=base.workspace_id,
@@ -69,8 +68,16 @@ def derive_candidate_snapshot(
         files=files,
         lookup=base.lookup,
     )
+    if final.exists() or final.is_symlink():
+        # an existing directory is reused only when it holds exactly these bytes and this record
+        # (its id is computable from public facts; a planted one would make validate compile
+        # other bytes than the candidate's); otherwise it is replaced by a verified copy
+        if (not final.is_symlink() and _content_matches(final, files)
+                and _record_matches(final, rec)):
+            return load_record(final)
+        remove_snapshot_dir(final)
     tmp = root / f".tmp-{uuid.uuid4().hex}"
-    src_files = root / base.snapshot_id / "files"
+    src_dir = root / base.snapshot_id
     try:
         (tmp / "files").mkdir(parents=True)
         for f in files:  # real byte copies, never links
@@ -78,11 +85,14 @@ def derive_candidate_snapshot(
             dest.parent.mkdir(parents=True, exist_ok=True)
             if f.logical_path in changed:
                 dest.write_bytes(changed[f.logical_path])
-            else:
-                with open(src_files / snapshot_rel(f.logical_path), "rb") as fin, open(
-                    dest, "xb"
-                ) as fout:
-                    shutil.copyfileobj(fin, fout, _CHUNK)
+            else:  # the base's bytes, read through no link and checked against its record
+                data = read_regular_under(src_dir, f.snapshot_path)
+                if sha256_hex(data) != f.sha256:
+                    raise SvwError(ErrorCode.MISSING_INPUT,
+                                   f"base snapshot file {f.logical_path} does not match its record",
+                                   {"reason": "snapshot_content_mismatch"})
+                with open(dest, "xb") as fout:
+                    fout.write(data)
         (tmp / "snapshot.json").write_text(rec.model_dump_json(indent=2), encoding="utf-8")
         _freeze(tmp)
         os.rename(tmp, final)

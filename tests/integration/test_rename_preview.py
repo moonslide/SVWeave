@@ -339,3 +339,38 @@ def test_RNM_I12_preview_limits_measure_changed_lines_like_the_edit_gate(tmp_pat
                              use_serena=False)
             assert prep.error is None, prep.error
             assert prep.data.get("changed_lines", limit) <= limit
+
+
+def test_RNM_I13_a_last_line_without_newline_is_counted_like_the_edit_gate(tmp_path: Path) -> None:
+    """Council review 2: the preview joined difflib's lines and split them again; a removed last
+    line without a newline fused with the added one (one line counted instead of two), so at the
+    max_changed_lines boundary the preview said ready and `edit prepare` refused."""
+    import yaml
+
+    for limit, ready in ((7, False), (8, True)):
+        w = demo_ws(tmp_path / f"l{limit}", editing=True)
+        lane = w.root / LANE
+        text = lane.read_text()
+        assert text.endswith("  assign data_o  = data_i;\nendmodule\n`default_nettype wire\n")
+        # the last line holds a rename site and has no newline
+        lane.write_text(text.replace("  assign data_o  = data_i;\nendmodule\n`default_nettype wire\n",
+                                     "  assign data_o  = data_i; endmodule"))
+        m = yaml.safe_load((w.root / "svweave.yaml").read_text())
+        m["editing"]["max_changed_lines"] = limit
+        (w.root / "svweave.yaml").write_text(yaml.safe_dump(m, sort_keys=False))
+        code, b = run(w.root, "build", "--profile", "p")
+        assert code == 0, b
+        code, env = preview(w.root, str(b["build_id"]), "--name", "demo_lane.data_o",
+                            "--to", "data_out")
+        d = env["data"]
+        assert code == 0, env
+        lane_diff = next(x["diff"] for x in d["diffs"] if x["file"] == LANE)
+        assert "\\ No newline at end of file" in lane_diff
+        assert "endmodule-" not in lane_diff and "endmodule+" not in lane_diff
+        assert d["limits"]["within_limits"] is ready and d["ready_for_edit_request"] is ready, (
+            limit, d["limits"])
+        if ready:
+            prep = E.prepare(WorkspaceOptions(root=w.root), "r", d["edit_request"],
+                             use_serena=False)
+            assert prep.error is None, prep.error
+            assert prep.data.get("changed_lines", limit) <= limit
