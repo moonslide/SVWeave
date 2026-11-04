@@ -63,6 +63,10 @@ td,th{border-bottom:1px solid var(--line);padding:2px 4px;text-align:left;vertic
 .node.stub rect,.node.blackbox rect{stroke-dasharray:4 3;stroke:var(--warn)}
 .node.changed rect{fill:color-mix(in srgb,var(--bad) 18%,var(--card));stroke:var(--bad);stroke-width:2}
 .node.context rect{stroke-dasharray:3 3;opacity:.75}
+.crow{cursor:pointer}
+.crow:hover td,.crow.on td{background:color-mix(in srgb,var(--acc) 16%,transparent)}
+.crow:focus-visible{outline:2px solid var(--acc)}
+dd{white-space:pre-line}
 .node.sel rect{stroke:var(--acc);stroke-width:3}
 .node.hit rect{fill:color-mix(in srgb,var(--acc) 22%,var(--card))}
 .node.dim{opacity:.35}
@@ -150,7 +154,7 @@ function visAnc(id) { // nearest visible ancestor-or-self
 }
 
 // ---- drawing
-var root = document.getElementById("root"), sel = null, selEdge = null, hits = null;
+var root = document.getElementById("root"), sel = null, selEdge = null, hits = null, commitSel = null;
 function draw() {
   layout();
   while (root.firstChild) root.removeChild(root.firstChild);
@@ -193,6 +197,7 @@ function draw() {
     var p = pos[n.id]; if (!p) return;
     var cls = "node" + (n.diff === "changed" ? " changed" : n.diff === "context" ? " context" : "") + (n.top ? " top" : "") + (n.stub ? " stub" : "") + (n.blackbox ? " blackbox" : "") + (sel === n.id ? " sel" : "");
     if (hits) cls += hits[n.id] ? " hit" : " dim";
+    else if (commitSel !== null && n.diff !== "context") cls += (n.commits || []).indexOf(commitSel) >= 0 ? " hit" : " dim";
     var g = el("g", { "class": cls, transform: "translate(" + p.x + "," + p.y + ")", tabindex: "0" });
     g.appendChild(el("rect", { width: NW, height: NH, rx: 6 }));
     g.appendChild(el("text", { x: 8, y: 16 }, trunc(relName(n), 26)));
@@ -228,6 +233,7 @@ function showNode(n) {
   side.appendChild(dl([["path", n.path], ["definition", n.definition], ["top", n.top ? "yes" : ""], ["interface", n.interface ? "yes" : ""],
     ["stub", n.stub ? "yes" : ""], ["blackbox candidate", n.blackbox ? "yes" : ""], ["generate", (n.generate || []).join(" / ")],
     ["source", n.file ? n.file + (n.line ? ":" + n.line : "") : ""], ["children", kids[n.id].length + (n.children_total !== undefined && n.children_total !== kids[n.id].length ? " drawn of " + n.children_total : "")],
+    ["changed by", (n.commits || []).map(function (i) { var c = D.diff.commits[i]; return c ? c.sha.slice(0, 8) + " " + c.subject : ""; }).join("\n")],
     ["diff", n.diff === "changed" ? "definition changed by the diff" : n.diff === "context" ? "context (ancestor of a changed instance)" : n.diff === "inside" ? "inside a changed instance" : ""]]));
   if (n.params.length) { side.appendChild(h("h2", "Parameters")); side.appendChild(table(["name", "value", ""], n.params.map(function (p) { return [p.name, p.value, p.overridden ? "overridden" : ""]; }))); }
   if (n.ports.length) { side.appendChild(h("h2", "Port associations")); side.appendChild(table(["port", "dir", "actual"], n.ports.map(function (p) { return [p.port, p.dir, p.actual]; }))); }
@@ -257,6 +263,29 @@ function changes() {
   if (f.length) side.appendChild(table(["changed file", "mapped side"], f));
   if (D.diff.unmapped_files.length) side.appendChild(h("p", "Not in this build: " + D.diff.unmapped_files.join(", "), "mut"));
   if (D.diff.non_instance_declarations.length) side.appendChild(h("p", "Changed outside any module/interface (not drawn): " + D.diff.non_instance_declarations.join(", "), "mut"));
+  commitList();
+}
+function commitList() {
+  if (!D.diff || !D.diff.commits) return;
+  side.appendChild(h("h2", "Commits (" + D.diff.commits.length + ")"));
+  side.appendChild(h("p", "Click a commit to highlight the instances it changed; click it again to clear.", "mut"));
+  var counts = {};
+  D.nodes.forEach(function (n) { (n.commits || []).forEach(function (i) { counts[i] = (counts[i] || 0) + 1; }); });
+  var t = h("table"), tr = h("tr");
+  ["commit", "subject", "instances"].forEach(function (x) { tr.appendChild(h("th", x)); });
+  t.appendChild(tr);
+  D.diff.commits.forEach(function (c) {
+    var row = h("tr", undefined, "crow" + (commitSel === c.index ? " on" : ""));
+    row.tabIndex = 0;
+    row.appendChild(h("td", c.sha.slice(0, 8)));
+    row.appendChild(h("td", c.subject));
+    row.appendChild(h("td", c.changes_drawn_definitions ? String(counts[c.index] || 0) : "none drawn"));
+    function pick() { commitSel = commitSel === c.index ? null : c.index; draw(); clearSide(); changes(); }
+    row.addEventListener("click", pick);
+    row.addEventListener("keydown", function (ev) { if (ev.key === "Enter") pick(); });
+    t.appendChild(row);
+  });
+  side.appendChild(t);
 }
 function boundary() {
   if (!D.boundary || !D.boundary.length) return;

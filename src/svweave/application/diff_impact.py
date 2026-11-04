@@ -516,7 +516,34 @@ def collect_changes(
             d["port_changes"].append({"port": rep["qualified_name"], "connection_sites": sites})
     return {"top": top, "rel": rel, "diffs": diffs, "files": files_out, "unmapped": unmapped,
             "unattributed": unattributed, "affected": affected, "non_instance": non_instance,
-            "by_def": by_def}
+            "by_def": by_def, "snap_dir": snap_dir,
+            "by_logical": {f.logical_path: f for f in rec.files}}
+
+
+MAX_RANGE_COMMITS = 500
+_MARK = "\x01svw:"
+
+
+def commits_in_range(top: Path, base: str, head: str) -> tuple[list[dict[str, str]], bool]:
+    """Commits of ``base..head``, oldest first, at most MAX_RANGE_COMMITS (second value: cut).
+    The subject is repository text: data, capped, never interpreted."""
+    out = _git(top, ["log", "--reverse", "--format=%H%x00%s", f"{base}..{head}", "--"])
+    rows = []
+    for ln in out.decode("utf-8", "replace").splitlines():
+        sha, _, subject = ln.partition("\x00")
+        if sha:
+            rows.append({"sha": sha, "subject": subject[:200]})
+    return rows[:MAX_RANGE_COMMITS], len(rows) > MAX_RANGE_COMMITS
+
+
+def commits_touching(top: Path, base: str, head: str, path: str, first: int, last: int) -> list[str]:
+    """Commits of ``base..head`` that changed lines first..last (1-based, in the HEAD version)
+    of ``path``: git's own line-history tracing (``log -L``), which also sees deletions inside
+    the range. ``-s``: commit ids only, no patches."""
+    out = _git(top, ["log", "-s", "--format=%x01svw:%H", f"-L{first},{last}:{path}",
+                     f"{base}..{head}"])
+    return [ln[len(_MARK):].strip() for ln in out.decode("utf-8", "replace").splitlines()
+            if ln.startswith(_MARK)]
 
 
 def diff_impact(

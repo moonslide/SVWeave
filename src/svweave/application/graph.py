@@ -14,13 +14,21 @@ ever assigns it through ``textContent``.
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import re
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from svweave.application.diff_impact import DIFF_NOTE, check_ref, collect_changes
+from svweave.application.diff_impact import (
+    DIFF_NOTE,
+    MAX_RANGE_COMMITS,
+    check_ref,
+    collect_changes,
+    commits_in_range,
+    commits_touching,
+)
 from svweave.application.graph_template import render_html
 from svweave.application.impact import _names
 from svweave.application.options import WorkspaceOptions
@@ -434,8 +442,60 @@ def build_model(
     return model
 
 
+MAX_TRACED_DEFINITIONS = 200
+
+
+def _line_of(starts: list[int], offset: int) -> int:
+    """1-based line of byte ``offset`` given the byte offsets where lines start."""
+    return bisect.bisect_right(starts, offset)
+
+
+def _per_commit(
+    s: Any, ch: dict[str, Any], base: str, head: str, defs: set[str]
+) -> tuple[list[dict[str, Any]], dict[str, list[int]], list[str]]:
+    """Which commits of base..head changed each changed definition: git's line-history tracing
+    (``log -L``) over the definition's own line span in the HEAD version, which is exact only
+    when the build's snapshot of that file IS the head version (files[].side == "new"). Other
+    definitions stay unlabelled, with a warning; nothing is guessed."""
+    warns: list[str] = []
+    commits, cut = commits_in_range(ch["top"], base, head)
+    index = {c["sha"]: i for i, c in enumerate(commits)}
+    if cut:
+        warns.append(f"more than {MAX_RANGE_COMMITS} commits in {base}..{head}: only the oldest "
+                     f"{MAX_RANGE_COMMITS} are listed and attributed")
+    exact = {f["logical_path"]: f["path"] for f in ch["files"]
+             if f.get("side") == "new" and f.get("aligned") is True}
+    labels: dict[str, list[int]] = {}
+    unlabelled: list[str] = []
+    starts_of: dict[str, list[int]] = {}
+    for n, d in enumerate(sorted(defs)):
+        r = s.one("SELECT file, COALESCE(full_start, span_start) AS lo, "
+                  "COALESCE(full_end, span_end) AS hi FROM declarations "
+                  "WHERE build_id=? AND declaration_id=?", s.bid, d)
+        if (n >= MAX_TRACED_DEFINITIONS or r is None or r["file"] not in exact
+                or r["lo"] is None or r["hi"] is None):
+            unlabelled.append(d)
+            continue
+        lf = str(r["file"])
+        if lf not in starts_of:
+            data = (ch["snap_dir"] / ch["by_logical"][lf].snapshot_path).read_bytes()
+            starts_of[lf] = [0] + [i + 1 for i, b in enumerate(data) if b == 0x0A]
+        st = starts_of[lf]
+        lo, hi = int(r["lo"]), int(r["hi"])
+        first, last = _line_of(st, lo), _line_of(st, max(hi - 1, lo))
+        found = commits_touching(ch["top"], base, head, exact[lf], first, last)
+        labels[d] = sorted({index[sha] for sha in found if sha in index})
+    if unlabelled:
+        warns.append(
+            f"{len(unlabelled)} changed definition(s) carry no commit labels: per-commit "
+            "attribution needs the build's snapshot of their file to be the --diff-head version "
+            f"(build that revision), and at most {MAX_TRACED_DEFINITIONS} definitions are traced"
+        )
+    return commits, labels, warns
+
+
 def _diff_view(
-    s: Any, base: str, head: str | None, root_row: Any
+    s: Any, base: str, head: str | None, root_row: Any, *, per_commit: bool = False
 ) -> tuple[dict[str, Any], dict[str, Any] | None, list[str]]:
     """git diff -> changed definitions -> the instances to draw (:func:`diff_selection`). The
     selection is None when the diff reaches no instance (nothing to draw is an answer, not an
@@ -478,6 +538,17 @@ def _diff_view(
           "instances": totals.get(d, 0), "instances_drawn": 0} for d in defs),
         key=lambda x: str(x["qualified_name"]),
     )
+    commit_warns: list[str] = []
+    commits: list[dict[str, Any]] | None = None
+    if per_commit and head is not None:
+        commits, labels, commit_warns = _per_commit(s, ch, base, head, defs)
+        for x in changed:
+            x["commits"] = labels.get(x["declaration_id"])  # None: not attributable
+        used = {i for v in labels.values() for i in v}
+        for i, c in enumerate(commits):
+            c["index"] = i
+            c["sha"] = c["sha"][:12]
+            c["changes_drawn_definitions"] = i in used
     diff = {
         "base": base,
         "head": head or "working tree",
@@ -488,6 +559,8 @@ def _diff_view(
         "outside_root": outside,
         "summary": summary,
     }
+    if commits is not None:
+        diff["commits"] = commits
     if sel is None:
         diff["nothing_to_draw"] = sel_none_reason
     warns: list[str] = []
@@ -509,6 +582,12 @@ def _diff_view(
     if outside:
         warns.append(f"{outside} instance(s) of the changed definition(s) are outside "
                      "the instance and are not drawn")
+    if commits is not None:
+        idle = [c["sha"] for c in commits if not c["changes_drawn_definitions"]]
+        if idle:
+            warns.append(f"{len(idle)} commit(s) of the range change no drawn module/interface "
+                         "(e.g. a change undone later, a package, a file outside the build)")
+    warns += commit_warns
     return diff, sel, warns
 
 
@@ -523,7 +602,13 @@ def export_graph(
     instance: str | None = None,
     diff_base: str | None = None,
     diff_head: str | None = None,
+    per_commit: bool = False,
 ) -> Envelope:
+    if per_commit and (diff_base is None or diff_head is None):
+        raise SvwError(
+            ErrorCode.INVALID_CONFIG,
+            "per_commit needs diff_base and diff_head (a commit range; build the head revision)",
+        )
     if diff_base is not None:
         check_ref(diff_base, "diff_base")
     if diff_head is not None:
@@ -541,7 +626,8 @@ def export_graph(
         diff: dict[str, Any] | None = None
         warns: list[str] = []
         if diff_base is not None:
-            diff, sel, dwarns = _diff_view(s, diff_base, diff_head, root_row)
+            diff, sel, dwarns = _diff_view(s, diff_base, diff_head, root_row,
+                                           per_commit=per_commit)
             warns += dwarns
             if sel is None:  # nothing to draw: report it, write no page
                 warns.insert(0, f"nothing to draw for {diff['base']} -> {diff['head']}: "
@@ -568,6 +654,12 @@ def export_graph(
                     drawn[def_of[n["id"]]] += 1
             for x in diff["changed_definitions"]:
                 x["instances_drawn"] = drawn.get(x["declaration_id"], 0)
+            if "commits" in diff:  # each changed instance carries its definition's commits
+                by_def = {x["declaration_id"]: x.get("commits")
+                          for x in diff["changed_definitions"]}
+                for n in model["nodes"]:
+                    if n["diff"] == "changed":
+                        n["commits"] = by_def.get(def_of[n["id"]])
             diff["changed_definitions"].sort(
                 key=lambda x: (-x["instances_drawn"], str(x["qualified_name"])))
             model["diff"] = diff
@@ -577,7 +669,7 @@ def export_graph(
             )
         stem = "graph-" + s.bid[:12]
         if diff is not None:
-            key = f"{diff_base}\0{diff_head or ''}\0{instance or ''}"
+            key = f"{diff_base}\0{diff_head or ''}\0{instance or ''}\0{per_commit}"
             stem += "-diff-" + hashlib.sha256(key.encode()).hexdigest()[:10]
         elif root_row is not None:  # one default file per (build, root); a path is no file name
             stem += "-sub-" + hashlib.sha256(str(root_row["path"]).encode()).hexdigest()[:10]
