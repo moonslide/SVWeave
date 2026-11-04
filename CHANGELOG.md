@@ -16,6 +16,13 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   restricted to the subtree (GRF-I05 on the new `fixtures/language/grf_subtree` RTL); measured
   14.6 s -> 1.70 s CLI for one cluster at 41k instances (`scripts/benchmark_graph_subtree.py`,
   `evidence/bench/graph-subtree/`).
+* **Security fixes from the council review** (each reproduced before the fix, each with a test
+  that fails without it): diff-impact's git no longer reads user/system config, cannot reach a
+  transport (a partial clone's lazy fetch ran `remote.<x>.uploadpack` from the repository config
+  on the host) and refuses partial clones; its timeout now holds while git is silent; diff
+  prefixes are pinned. **Breaking:** `$VAR` expansion in filelists now also needs the variable in
+  the trusted `policy.json` `environment_allowlist` (a repository `svweave.yaml` could read any
+  variable, e.g. a token, and echo it in an error message to the MCP client).
 * **Graph export diff view** (`svweave graph export --diff-base REF [--diff-head REF]`, ADR-014
   amendment): only the instances of the modules/interfaces a git diff changes, with subtrees and
   connecting ancestors; per file the diff side matching the build's snapshot is mapped, so building

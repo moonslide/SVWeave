@@ -346,6 +346,10 @@ class Policy(_Strict):
     #: Accept approvals made through the non-qualified test-token path (never a human at a TTY).
     #: Only a human editing the trusted policy.json can set it; default off.
     allow_test_approvals: bool = False
+    #: Environment variables a repository profile may expand in path-like tokens. A profile's
+    #: own ``environment_allowlist`` can only narrow this list; default: none. (A repository-only
+    #: list let svweave.yaml read any variable, e.g. a token, and echo it in a path or error.)
+    environment_allowlist: list[NonEmptyStr] = Field(default_factory=list)
     execution: ExecutionPolicy = Field(default_factory=ExecutionPolicy)
 
     @model_validator(mode="after")
@@ -356,4 +360,6 @@ class Policy(_Strict):
             _check_path(r)
             if not r.startswith("/"):
                 raise ValueError(f"allowed_roots entries must be absolute paths, got {r!r}")
+        for e in self.environment_allowlist:
+            _check_name(e, "environment variable")
         return self

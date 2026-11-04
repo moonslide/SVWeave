@@ -71,6 +71,8 @@ class _Resolver:
         self.profile = profile
         self.environ = environ
         self.allow = set(profile.environment_allowlist)
+        # the trusted policy bounds what a repository profile may read (it can only narrow it)
+        self.policy_allow = set(ctx.policy.environment_allowlist)
         self.declared_ignores = {d.option: 0 for d in profile.ignored_options}  # zero-arg only
         self.ledger: list[LedgerEntry] = []
         self.issues: list[dict[str, Any]] = []
@@ -131,6 +133,17 @@ class _Resolver:
                     origin,
                     chain,
                     reason="env_not_allowlisted",
+                    variable=var,
+                )
+                ok = False
+            elif var not in self.policy_allow:
+                self._issue(
+                    ErrorCode.MISSING_INPUT,
+                    f"environment variable {var} is in the profile's environment_allowlist but "
+                    "not in the trusted policy's; only a person editing policy.json can allow it",
+                    origin,
+                    chain,
+                    reason="env_not_allowed_by_policy",
                     variable=var,
                 )
                 ok = False

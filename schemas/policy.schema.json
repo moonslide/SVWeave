@@ -272,6 +272,14 @@
       "title": "Editing Enabled",
       "type": "boolean"
     },
+    "environment_allowlist": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Environment Allowlist",
+      "type": "array"
+    },
     "execution": {
       "$ref": "#/$defs/ExecutionPolicy"
     },

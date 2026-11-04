@@ -891,6 +891,7 @@ root_mappings:
 | `network_enabled` | `false` | 後端沒有網路 |
 | `editing_enabled` | `false` | 總開關；編輯同時也需要 `svweave.yaml` 中的 `editing.enabled` |
 | `allow_test_approvals` | `false` | 接受未經資格認定的測試權杖核准路徑；只有人類編輯此檔案才能設定它 |
+| `environment_allowlist` | `[]` | profile 可在 filelist 路徑中展開的環境變數；profile 自己的 `environment_allowlist` 只能縮小這個範圍 |
 
 同一個受信任目錄還存放 `approval.key`（權限 0600）、`cursor.key`、核准記錄以及最近一次的後端探測記錄。
 

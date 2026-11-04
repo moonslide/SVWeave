@@ -157,6 +157,7 @@ def test_BLD_02_allowlisted_env_expansion(ws: Ws) -> None:
     ws.config(
         {"p": profile(source_inputs=fl("lists/with_env.f"), environment_allowlist=["RTL_DIR"])}
     )
+    ws.policy(environment_allowlist=["RTL_DIR"])  # the trusted policy must allow it too
     nm = resolve_profile(ws.ctx(), "p", {"RTL_DIR": "rtl", "UNRELATED": "zzz"})
     assert [s.path for s in nm.units[0].sources] == ["rtl/a.sv", "rtl/b.sv"]
     assert nm.units[0].sources[0].raw == "${RTL_DIR}/a.sv"
@@ -166,6 +167,7 @@ def test_BLD_02_unset_empty_or_unlisted_env_is_blocked_not_empty_string(ws: Ws) 
     ws.config(
         {"p": profile(source_inputs=fl("lists/with_env.f"), environment_allowlist=["RTL_DIR"])}
     )
+    ws.policy(environment_allowlist=["RTL_DIR"])
     for env in ({}, {"RTL_DIR": ""}):
         with pytest.raises(SvwError) as ei:
             resolve_profile(ws.ctx(), "p", env)
@@ -185,6 +187,7 @@ def test_BLD_02_default_environ_is_os_environ(ws: Ws, monkeypatch: pytest.Monkey
     ws.config(
         {"p": profile(source_inputs=fl("lists/with_env.f"), environment_allowlist=["RTL_DIR"])}
     )
+    ws.policy(environment_allowlist=["RTL_DIR"])
     assert resolve_profile(ws.ctx(), "p").units[0].sources[0].path == "rtl/a.sv"
 
 
@@ -783,3 +786,38 @@ def test_language_option_compat_rejects_other_vendors_and_free_text(ws: Ws) -> N
         )
         with pytest.raises(SvwError):
             resolve_profile(ws.ctx(), "p", {})
+
+def test_SEC_ENV01_a_repository_profile_cannot_read_a_variable_the_trusted_policy_does_not_allow(
+        ws: Ws) -> None:
+    """svweave.yaml is repository content: listing a variable there must not let it read (and
+    echo, in a path or an error message) e.g. a token from the gateway's environment."""
+    ws.write("lists/leak.f", "src/${SVW_FAKE_SECRET}.sv\n")
+    ws.config({"p": profile(source_inputs=fl("lists/leak.f"),
+                            environment_allowlist=["SVW_FAKE_SECRET"])})
+    secret = "s3cr3t-VALUE-12345"
+    with pytest.raises(SvwError) as ei:
+        resolve_profile(ws.ctx(), "p", {"SVW_FAKE_SECRET": secret})
+    e = ei.value
+    assert e.code == ErrorCode.MISSING_INPUT
+    assert [i["reason"] for i in e.details["issues"]] == ["env_not_allowed_by_policy"]
+    assert e.details["issues"][0]["variable"] == "SVW_FAKE_SECRET"
+    assert secret not in json.dumps({"m": str(e), "d": e.details})
+    ws.policy(environment_allowlist=["OTHER"])  # allowing a different variable changes nothing
+    with pytest.raises(SvwError) as ei:
+        resolve_profile(ws.ctx(), "p", {"SVW_FAKE_SECRET": secret})
+    assert secret not in json.dumps({"m": str(ei.value), "d": ei.value.details})
+
+
+def test_SEC_ENV02_policy_environment_allowlist_names_are_validated() -> None:
+    from pydantic import ValidationError
+
+    from svweave.config.models import Policy
+
+    ok = Policy.model_validate({"schema_version": "1.0", "allowed_roots": ["/x"],
+                                "environment_allowlist": ["RTL_DIR"]})
+    assert ok.environment_allowlist == ["RTL_DIR"]
+    assert Policy.model_validate({"schema_version": "1.0", "allowed_roots": ["/x"]}
+                                 ).environment_allowlist == []  # default: no variable at all
+    with pytest.raises(ValidationError):
+        Policy.model_validate({"schema_version": "1.0", "allowed_roots": ["/x"],
+                               "environment_allowlist": ["1BAD"]})

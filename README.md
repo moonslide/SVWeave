@@ -1293,6 +1293,7 @@ a `--policy` path inside the project tree is `POLICY_DENIED`.
 | `network_enabled` | `false` | no network for backends |
 | `editing_enabled` | `false` | master switch; editing also needs `editing.enabled` in `svweave.yaml` |
 | `allow_test_approvals` | `false` | accept the non-qualified test-token approval path; only a human editing this file can set it |
+| `environment_allowlist` | `[]` | environment variables a profile may expand in filelist paths; a profile's own `environment_allowlist` only narrows it |
 
 The same trusted directory holds `approval.key` (mode 0600), `cursor.key`, the approval records and
 the last backend probe record.

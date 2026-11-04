@@ -891,6 +891,7 @@ root_mappings:
 | `network_enabled` | `false` | 后端无网络 |
 | `editing_enabled` | `false` | 总开关；编辑还需要 `svweave.yaml` 中的 `editing.enabled` |
 | `allow_test_approvals` | `false` | 接受未经资格认定的测试令牌审批路径；只有人工编辑此文件才能设置 |
+| `environment_allowlist` | `[]` | profile 可在 filelist 路径中展开的环境变量；profile 自己的 `environment_allowlist` 只能缩小这个范围 |
 
 同一个受信目录中还保存 `approval.key`（权限 0600）、`cursor.key`、审批记录以及最近一次后端探测记录。
 
