@@ -58,6 +58,13 @@ build id, completeness and freshness on the page are the build's.
 * Measured on one host (`scripts/benchmark_graph_subtree.py`, see `docs/limitations.md` §8): the
   saving grows with the design; on a ~90-instance design the CLI time is Python start-up either way.
 
+## Amendment (2026-11-04): the default page is the complete topology
+The first version capped every page (`--max-instances 5000`, `--max-fanout 16`), so the default
+page silently left out signals (122 of them on the C906 SoC). The default is now no cap: every
+instance and every signal, as the users of the graph need the complete topology; the caps remain
+as explicit reductions, like `--instance` and `--diff-base`. The envelope warns about pages above
+20,000 instances or 64 MiB. Compilation was and is always of the whole design.
+
 ## Amendment (2026-11-04): diff view, `--diff-base` / `--diff-head`
 `svweave graph export --build B --diff-base REF [--diff-head REF] [--instance I]` draws only what a
 git diff changes, on the same immutable build (nothing is recompiled):

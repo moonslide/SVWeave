@@ -371,16 +371,15 @@ def graph_grp() -> None:
 @click.option(
     "--max-instances",
     type=int,
-    default=5000,
-    show_default=True,
-    help="Draw at most N instances, shallowest first.",
+    default=None,
+    help="Reduce: draw at most N instances, shallowest first (default: all, complete topology).",
 )
 @click.option(
     "--max-fanout",
     type=int,
-    default=16,
-    show_default=True,
-    help="Signals used by more instances are listed as hubs, not drawn.",
+    default=None,
+    help="Reduce: list signals used by more than N instances as hubs instead of edges "
+    "(default: every signal is drawn).",
 )
 @click.option(
     "--instance",
@@ -408,8 +407,8 @@ def graph_export_cmd(
     st: _State,
     build_id: str,
     name: str | None,
-    max_instances: int,
-    max_fanout: int,
+    max_instances: int | None,
+    max_fanout: int | None,
     instance: str | None,
     diff_base: str | None,
     diff_head: str | None,

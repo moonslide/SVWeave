@@ -462,3 +462,27 @@ def test_GRF_I13_an_instance_between_two_changed_ones_is_inside_not_context(
     assert all(marks[f"{cl}.g_core[{i}].u_core"] == "inside" for i in (0, 1))  # was "context"
     assert all(m == "changed" for p, m in marks.items() if p.endswith(("u_fetch", "u_wb")))
     assert "context" not in marks.values()
+
+
+def test_GRF_I14_the_default_page_is_the_complete_topology(tmp_path: Path) -> None:
+    """No cap by default: every instance and every signal is drawn (a cluster clock used by 21
+    instances was a hub, not drawn, under the former default --max-fanout 16). Caps are
+    explicit reductions."""
+    root, bid = _grf(tmp_path, clusters=2, cores=20)
+    total = 1 + 2 * (2 + 5 * 20) + 1
+    code, env = run(root, "graph", "export", "--build", bid)
+    assert code == 0
+    d = env["data"]
+    assert d["truncated"] is False and d["stats"]["instances_shown"] == total == 206
+    assert d["stats"]["max_instances"] is None and d["stats"]["max_fanout"] is None
+    assert d["stats"]["hub_signals"] == 0 and env["pagination"] == {
+        "limit": total, "next_cursor": None, "truncated": False}
+    assert not any("hubs" in w for w in env["warnings"])
+    page = _page_data(root / d["path"])
+    assert page["hubs"] == []
+    cl = "grf_soc.g_cl[0].u_cl"
+    clk = {to for frm, to, sig, _ in _edges(page) if sig == f"{cl}.clk" and frm == cl}
+    assert clk == {f"{cl}.g_core[{i}].u_core" for i in range(20)} | {f"{cl}.u_red"}
+    code, env = run(root, "graph", "export", "--build", bid, "--max-fanout", "16", "--name", "r")
+    assert code == 0 and f"{cl}.clk" in {h["signal"] for h in _page_data(
+        root / env["data"]["path"])["hubs"]}  # the reduction still works when asked for

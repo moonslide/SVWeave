@@ -170,10 +170,10 @@ svg{font-family:system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif
 <text x="907" y="448" class="mu s12">direct port association,</text>
 <text x="907" y="466" class="mu s12">oriented by port direction</text>
 <text x="907" y="488" class="tw b s12">bounds</text>
-<text x="907" y="507" class="mu s12">hubs over --max-fanout (16)</text>
-<text x="907" y="525" class="mu s12">listed, not drawn; at most</text>
-<text x="907" y="543" class="mu s12">--max-instances (5000),</text>
-<text x="907" y="561" class="mu s12">shallowest first</text>
+<text x="907" y="507" class="mu s12">default: complete topology,</text>
+<text x="907" y="525" class="mu s12">every instance and signal;</text>
+<text x="907" y="543" class="mu s12">--max-instances/--max-fanout</text>
+<text x="907" y="561" class="mu s12">are optional reductions</text>
 <text x="907" y="579" class="mu s12">file://, strict CSP, no server;</text>
 <text x="907" y="597" class="mu s12">not a netlist</text>
 <path d="M172,654 L172,694" class="l" marker-end="url(#mg)"/>

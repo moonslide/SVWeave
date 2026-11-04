@@ -16,6 +16,10 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   restricted to the subtree (GRF-I05 on the new `fixtures/language/grf_subtree` RTL); measured
   14.6 s -> 1.70 s CLI for one cluster at 41k instances (`scripts/benchmark_graph_subtree.py`,
   `evidence/bench/graph-subtree/`).
+* **Graph export draws the complete topology by default** (behaviour change): no `--max-instances`
+  (was 5000) and no `--max-fanout` (was 16) unless given; both are now opt-in reductions. On the
+  C906 SoC the default page went from 19,957 connections with 122 signals left out to 30,378
+  connections, none left out.
 * **Graph export `--per-commit`**: several small commits on one diff page; each changed instance
   lists the commits of `--diff-base..--diff-head` that changed its module (`git log -L`, deletions
   included), with a clickable commit list. Example on the C906 minimal SoC:

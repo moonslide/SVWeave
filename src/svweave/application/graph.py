@@ -40,8 +40,13 @@ from svweave.security.safeio import ensure_private_dir, write_under
 from svweave.storage.semantic import loads
 
 EXPORT_DIR = "exports"
-DEFAULT_MAX_INSTANCES = 5000
-DEFAULT_MAX_FANOUT = 16
+#: Defaults draw the COMPLETE topology: every instance and every signal as edges. A cap is an
+#: explicit reduction (``--max-instances``, ``--max-fanout``), like ``--instance``/``--diff-base``.
+DEFAULT_MAX_INSTANCES: int | None = None
+DEFAULT_MAX_FANOUT: int | None = None
+#: above these the page still holds everything, but the envelope says how to make it smaller
+LARGE_PAGE_INSTANCES = 20_000
+LARGE_PAGE_BYTES = 64 * 1024 * 1024
 MAX_PORTS_PER_INSTANCE = 200
 # bound for one ``IN (...)`` list (SQLite's default host-parameter limit is far above this)
 _SQL_CHUNK = 900
@@ -276,8 +281,8 @@ def diff_selection(s: Any, definition_ids: set[str], root_row: Any = None) -> di
 def build_model(
     s: Any,
     *,
-    max_instances: int,
-    max_fanout: int,
+    max_instances: int | None,
+    max_fanout: int | None,
     root_row: Any = None,
     selection: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -303,6 +308,7 @@ def build_model(
         pid = r["parent_id"]
         depth[r["instance_id"]] = 0 if pid is None or pid not in depth else depth[pid] + 1
     kept_rows = sorted(rows, key=lambda r: (depth[r["instance_id"]], r["ord"]))[:max_instances]
+    # (a slice with None keeps every row: no cap means the complete tree)
     kept = {r["instance_id"] for r in kept_rows}
     kept_rows = sorted(kept_rows, key=lambda r: r["ord"])
     by_path = {r["path"]: r["instance_id"] for r in rows}
@@ -345,7 +351,7 @@ def build_model(
         if partial and _owner_instance(m["path"], by_path) is None:
             boundary.append({"signal": m["path"], "instances": len(users)})
             continue
-        if len(users) > max_fanout:
+        if max_fanout is not None and len(users) > max_fanout:
             hubs.append({"signal": m["path"], "instances": len(users)})
             continue
         found = _owner_instance(m["path"], by_path)
@@ -608,8 +614,8 @@ def export_graph(
     request_id: str,
     *,
     name: str | None = None,
-    max_instances: int = DEFAULT_MAX_INSTANCES,
-    max_fanout: int = DEFAULT_MAX_FANOUT,
+    max_instances: int | None = DEFAULT_MAX_INSTANCES,
+    max_fanout: int | None = DEFAULT_MAX_FANOUT,
     instance: str | None = None,
     diff_base: str | None = None,
     diff_head: str | None = None,
@@ -628,10 +634,13 @@ def export_graph(
         check_ref(diff_head, "diff_head")
     if instance is not None and (not isinstance(instance, str) or not instance.strip()):
         raise SvwError(ErrorCode.INVALID_CONFIG, "instance must be a non-empty instance path or id")
-    if not isinstance(max_instances, int) or not 1 <= max_instances <= 100_000:
-        raise SvwError(ErrorCode.INVALID_CONFIG, "max_instances must be in 1..100000")
-    if not isinstance(max_fanout, int) or not 2 <= max_fanout <= 1000:
-        raise SvwError(ErrorCode.INVALID_CONFIG, "max_fanout must be in 2..1000")
+    if max_instances is not None and (
+            not isinstance(max_instances, int) or isinstance(max_instances, bool)
+            or max_instances < 1):
+        raise SvwError(ErrorCode.INVALID_CONFIG, "max_instances must be at least 1 (omit: no cap)")
+    if max_fanout is not None and (
+            not isinstance(max_fanout, int) or isinstance(max_fanout, bool) or max_fanout < 2):
+        raise SvwError(ErrorCode.INVALID_CONFIG, "max_fanout must be at least 2 (omit: no hubs)")
     with _session(opts, build_id) as s:
         root_row = resolve_root(s, instance) if instance is not None else None
         diff: dict[str, Any] | None = None
@@ -720,6 +729,13 @@ def export_graph(
                 f"{len(model['hubs'])} signal(s) referenced by more than {max_fanout} instances "
                 "are listed as hubs, not drawn as edges"
             )
+        if len(model["nodes"]) > LARGE_PAGE_INSTANCES or len(data) > LARGE_PAGE_BYTES:
+            warns.append(
+                f"large page: {len(model['nodes'])} instances, {len(model['edges'])} edges, "
+                f"{len(data) // (1024 * 1024)} MiB; a browser may be slow. It is the complete "
+                "topology; to reduce it use --instance, --diff-base, --max-instances or "
+                "--max-fanout"
+            )
         if model.get("boundary"):
             warns.append(
                 f"{len(model['boundary'])} signal(s) declared outside the subtree root are listed "
@@ -742,7 +758,9 @@ def export_graph(
                 "root": model.get("root"),
                 **({"diff": diff} if diff is not None else {}),
             },
-            pagination=Pagination(limit=max_instances, truncated=bool(model["truncated"])),
+            pagination=Pagination(
+                limit=max_instances if max_instances is not None else len(model["nodes"]),
+                truncated=bool(model["truncated"])),
             warnings=warns,
             extra_limits=limits,
             freshness=s.fresh(),

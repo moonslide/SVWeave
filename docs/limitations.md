@@ -340,8 +340,11 @@ the tested SHA; later documentation commits are not automatically native-tested.
 * Connection edges are shared-signal links from direct port associations, oriented by the declared
   port direction. They are not a netlist: no driver/load analysis, no bit level, no cross-hierarchy
   continuous assignments, `tran`/`alias`, or UVM runtime topology.
-* Signals used by more instances than `--max-fanout` are listed as hubs, not drawn; instances beyond
-  `--max-instances` are not drawn (shallowest first). Neither is proof of absence.
+* By default nothing is capped: the page is the complete topology (every instance, every signal).
+  Only when asked, signals used by more instances than `--max-fanout` are listed as hubs, not
+  drawn, and instances beyond `--max-instances` are not drawn (shallowest first); neither is proof
+  of absence. A complete page of a very large SoC can be too big for a browser (the envelope
+  warns above 20,000 instances or 64 MiB).
 * The page is a snapshot of one build and does not refresh. Layout is a plain tree; very large
   designs need `--max-instances` or collapsing to stay readable.
 * Only the user's browser renders it; the viewer is not part of the qualification gates.

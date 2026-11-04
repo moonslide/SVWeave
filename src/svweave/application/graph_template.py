@@ -128,6 +128,7 @@ if (m.completeness !== "COMPLETE") msgs.push("Analysis is " + m.completeness + "
 if (m.freshness !== "CURRENT") msgs.push("Freshness is " + m.freshness + ": the workspace changed since this build.");
 if (D.truncated) msgs.push("Truncated: " + D.stats.instances_shown + " of " + D.stats.instances_total + " instances shown (shallowest first).");
 if (D.hubs.length) msgs.push(D.hubs.length + " high-fanout signal(s) are listed in the side panel, not drawn.");
+if (!D.truncated && !D.hubs.length && !m.root && !D.diff) msgs.push("Complete topology: all " + D.nodes.length + " instances and all " + D.edges.length + " connections of this build are in the page; deeper levels start collapsed (expand all).");
 if (D.diff) msgs.push("Diff view (" + D.diff.base + " -> " + D.diff.head + "): " + D.stats.changed_instances + " instance(s) of " + D.diff.changed_definitions.length + " changed definition(s) are outlined in red with their subtrees; dashed ancestors are context and show only their drawn children.");
 else if (m.root) msgs.push("Subtree view of " + m.root + ": only this instance and its descendants were read; fan-out counts uses inside the subtree.");
 if (D.boundary && D.boundary.length) msgs.push(D.boundary.length + " signal(s) declared outside the subtree are listed in the side panel, not drawn.");
