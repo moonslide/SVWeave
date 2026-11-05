@@ -201,7 +201,7 @@ Slurm 22.05.9 與 MUNGE 0.5.18 已安裝於儲存庫外，但 MUNGE Unix stream 
 
 **開發者預覽版 v0.1.0-dev。UNQUALIFIED**，除非資格認定報告（`.svweave/qualification/report.json`，由 `scripts/qualify.py` 產生，證據位於 `evidence/` 之下）顯示 `ACCEPTED_STATIC_PREVIEW`。工具的「靜態預覽」狀態絕不代表模擬、形式驗證或 EDA 結果：除非你自行匯入證據，否則 `eda_compile`、`simulation` 與 `formal` 皆為 `NOT_RUN`，而匯入的證據是 `EXTERNAL_DECLARED`，SVWeave 永遠不會加以驗證。在依賴任何結果之前，請先閱讀 `docs/limitations.md`。
 
-**最近一次完整測試執行（2026-10-20，Linux x86_64，僅限這部主機）：** 以文件所述的離線程序（`vendor/`，含 Serena）安裝的全新副本，並以 `SVWEAVE_REQUIRE_BACKENDS=1` 執行：**1066 個通過、1 個略過、0 個失敗**；`ruff`、`mypy` 與 `svweave schema emit --check` 皆無問題。它涵蓋影響範圍、diff 影響、重新命名預覽與圖譜匯出工具，以及 2026-10-19/20 審查的修正（見 `CHANGELOG.md`）。
+**最近一次完整測試執行（2026-10-20，Linux x86_64，僅限這部主機；未留存紀錄：沒有保留 JUnit、日誌或 lock hash，因此不是 AGENTS 規則 12 意義上的證據）：** 以文件所述的離線程序（`vendor/`，含 Serena）安裝的全新副本，並以 `SVWEAVE_REQUIRE_BACKENDS=1` 執行：**1066 個通過、1 個略過、0 個失敗**；`ruff`、`mypy` 與 `svweave schema emit --check` 皆無問題。它涵蓋影響範圍、diff 影響、重新命名預覽與圖譜匯出工具，以及 2026-10-19/20 審查的修正（見 `CHANGELOG.md`）。
 
 **最近一次記錄的資格認定執行（2026-10-14，git HEAD `b6ba45c` 加上未提交的變更；加入上述工具之後尚未重新執行）：**
 
@@ -216,7 +216,7 @@ Slurm 22.05.9 與 MUNGE 0.5.18 已安裝於儲存庫外，但 MUNGE Unix stream 
 
 G0 不是單純的 PASS，因為 codebase-memory-mcp 與 Serena 的探測結果為 `DEGRADED`（在宣告的子集合之內），且擁有者尚未簽署豁免。證據副本位於 `evidence/qualification/`。這是單次執行的快照，不是常態性的宣稱；請重新執行 `scripts/qualify.py` 以取得你的程式碼樹的狀態。
 
-**在真實 SoC 上試用**（2026-10-20，不屬於測試套件）：一個以 Arm SSE-315 為基礎、共 3835 個 HDL 檔案（135 MiB）的設計，在 606 s 內完成建置（worker 尖峰 11 GB），得到 115,552 個實例與 605,874 個連接埠關聯；結果如實為 `PARTIAL`（閘級 PHY 模型中的編譯錯誤、未解析的參照、6637 個空的模組本體）。這次執行找出並修正了 `CHANGELOG.md` 中列出的實例陣列 id 衝突與過大的回應封包問題。
+**在真實 SoC 上試用**（2026-10-20，不屬於測試套件；單一主機上的一次性觀察，未保留證據檔，不是效能宣稱）：一個以 Arm SSE-315 為基礎、共 3835 個 HDL 檔案（135 MiB）的設計，在 606 s 內完成建置（worker 尖峰 11 GB），得到 115,552 個實例與 605,874 個連接埠關聯；結果如實為 `PARTIAL`（閘級 PHY 模型中的編譯錯誤、未解析的參照、6637 個空的模組本體）。這次執行找出並修正了 `CHANGELOG.md` 中列出的實例陣列 id 衝突與過大的回應封包問題。
 
 | 後端（於 `toolchain.lock.json` 中固定版本） | 角色 |
 |---|---|

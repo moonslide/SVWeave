@@ -303,7 +303,8 @@ simulation, formal or EDA result: `eda_compile`, `simulation` and `formal` are `
 import your own evidence, and imported evidence is `EXTERNAL_DECLARED`, never verified by SVWeave.
 Read `docs/limitations.md` before relying on any result.
 
-**Latest full test run (2026-10-20, Linux x86_64, this host only):** a fresh copy installed with the
+**Latest full test run (2026-10-20, Linux x86_64, this host only; unrecorded: no JUnit, log or lock
+hash of it was kept, so it is not evidence in the sense of AGENTS rule 12):** a fresh copy installed with the
 documented offline procedure (`vendor/`, Serena included) and run with `SVWEAVE_REQUIRE_BACKENDS=1`:
 **1066 passed, 1 skipped, 0 failed**; `ruff`, `mypy` and `svweave schema emit --check` clean. It
 covers the impact, diff-impact, rename-preview and graph-export tools and the fixes of the
@@ -326,7 +327,8 @@ declared subset) and the owner has not signed the waiver. Copies of the evidence
 `evidence/qualification/`. This is a snapshot of one run, not a standing claim; re-run
 `scripts/qualify.py` for the state of your tree.
 
-**Tried on a real SoC** (2026-10-20, not part of the test suite): an Arm SSE-315-based design of
+**Tried on a real SoC** (2026-10-20, not part of the test suite; a one-off observation on one
+host, no evidence file kept, not a performance claim): an Arm SSE-315-based design of
 3835 HDL files (135 MiB) built in 606 s (worker peak 11 GB) to 115,552 instances and 605,874 port
 associations; the result was honestly `PARTIAL` (compile errors in a gate-level PHY model,
 unresolved references, 6637 empty module bodies). Running it found and fixed the instance-array id
@@ -1672,8 +1674,9 @@ repository and `.toolchain/`, then run
 offline install/verify and individually isolated backends, but a trusted host controller without
 an outer network-isolation guarantee. Its narrower acceptance **passed at `cc931de` in run 40627613557**; it is not an
 end-to-end offline or physically air-gapped claim. See [ADR-016](docs/adr/ADR-016-dep01-trusted-host-controller.md).
-`scripts/gateway_lock_refresh.py` is a maintainer tool that regenerates the
-gateway wheelhouse section of the lock. Procedure: `docs/install.md`.
+`scripts/gateway_lock_refresh.py --online` is a maintainer tool that regenerates the
+gateway wheelhouse section of the lock (online; it refuses without `--online`). Network scope of
+the maintainer tools: `docs/security.md` section 6.
 
 **Sandbox.** Every backend, the pyslang worker included, starts through a `bwrap` argument array:
 read-only system and toolchain, read-write only to its candidate (where applicable) and its own

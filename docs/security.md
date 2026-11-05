@@ -133,7 +133,12 @@ in the repo). `SVWEAVE_TEST_CONFIRM_TOKEN` (test harness only; ignored on the co
 The backends have no network. The gateway has no listening socket (no HTTP, ADR-009); stdio MCP
 only. The **install phase** (`scripts/bootstrap_locked.py`) is the only code that downloads, from
 the URLs in `toolchain.lock.json`, and verifies SHA-256 before use. Normal operation never
-downloads and never updates.
+downloads and never updates. Two maintainer/CI tools outside the product also use the network,
+each only on an explicit step: `scripts/gateway_lock_refresh.py --online` (a maintainer
+regenerates the gateway wheelhouse pins; without `--online` it refuses, and a PyPI digest that
+differs from the downloaded wheel stops it before the lock is written) and
+`scripts/bootstrap_verilator.py` (GitHub Actions only, below `RUNNER_TEMP`: fetches the pinned
+Verilator commit, then builds it without network in bwrap; `docs/verilator_static_supplement.md`).
 
 What the installer executes, and how each piece is verified:
 

@@ -91,7 +91,8 @@ Choose one; none of them changes the lock:
    session whose GitHub access is scoped to the project's own repository answers the archive URL
    with "GitHub access to this repository is not enabled for this session"), the same bytes can be
    rebuilt from the locked commit: GitHub's tarball is `git archive` of the tag piped through
-   `gzip -n`. This reproduced the locked sha256 exactly (git 2.43, GNU gzip); any other result is
+   `gzip -n`. This reproduced the locked sha256 exactly (git 2.43, GNU gzip 1.12;
+   `evidence/uvm-archive-repro/README.md`); any other result is
    refused by the installer, so a different git or gzip cannot slip in different bytes.
 
    ```bash

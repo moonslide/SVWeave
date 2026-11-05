@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """(Re)generate the hash-pinned gateway-venv wheelhouse section of toolchain.lock.json (DEP-01).
 
-Online, run by a maintainer when the gateway runtime closure changes (not part of normal use):
+Online, run by a maintainer when the gateway runtime closure changes (not part of normal use,
+never product runtime; AGENTS rule 9 keeps downloads to scripts/bootstrap_locked.py, so this
+maintainer tool needs the explicit ``--online`` opt-in and rewrites a frozen pin only on purpose):
 
-  .venv/bin/python scripts/gateway_lock_refresh.py
+  .venv/bin/python scripts/gateway_lock_refresh.py --online
 
 Steps: ``uv pip compile --generate-hashes`` scripts/gateway-requirements.in ->
 scripts/gateway-requirements.txt; ``pip download`` the exact wheels for cp312 / manylinux_2_28
@@ -33,7 +35,12 @@ def sha256(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if args != ["--online"]:
+        print("gateway_lock_refresh.py downloads from PyPI and rewrites toolchain.lock.json; "
+              "a maintainer runs it deliberately with --online", file=sys.stderr)
+        return 2
     uv = str(REPO / ".venv/bin/uv")
     subprocess.run([uv, "pip", "compile", str(IN), "--generate-hashes", "--python-version", "3.12",
                     "--python-platform", "x86_64-manylinux_2_28", "--only-binary", ":all:",
@@ -56,7 +63,8 @@ def main() -> int:
             f"https://pypi.org/pypi/{name.replace('_', '-')}/{version}/json", timeout=60))
         url = next(u["url"] for u in meta["urls"] if u["filename"] == f.name)
         want = next(u["digests"]["sha256"] for u in meta["urls"] if u["filename"] == f.name)
-        assert want == sha256(f), f"{f.name}: PyPI digest != downloaded file"
+        if want != sha256(f):  # a real check: `python -O` strips an assert
+            raise SystemExit(f"{f.name}: PyPI digest != downloaded file; lock not written")
         wheels.append({"filename": f.name, "sha256": want, "source_url": url})
     lock = json.loads(LOCK.read_text())
     lock["gateway_wheelhouse"] = {

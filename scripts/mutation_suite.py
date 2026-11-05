@@ -595,7 +595,11 @@ def main(argv: list[str] | None = None) -> int:
             rc, out, dur = run(pytest_cmd(py, mut.tests), copy_root, env, a.timeout)
             failed = FAILED_RE.findall(out)
             tail = out.strip().splitlines()[-4:]
-            if rc == 1 and failed:
+            if rc == 1 and failed and a.no_baseline:
+                # without a green baseline a failing test may have been red already: never
+                # counted as killed (first council review, policy finding 8)
+                status = "UNVERIFIED"
+            elif rc == 1 and failed:
                 status = "KILLED"
             elif rc == 0:
                 status = "SURVIVED"
@@ -620,7 +624,10 @@ def main(argv: list[str] | None = None) -> int:
         "total": len(results), "killed": killed,
         "survived": [r["id"] for r in results if r["status"] == "SURVIVED"],
         "errors": [r["id"] for r in results if r["status"] == "ERROR"],
-        "all_killed": killed == len(MUTATIONS) and len(results) == len(MUTATIONS),
+        "baseline_checked": not a.no_baseline,
+        "unverified": [r["id"] for r in results if r["status"] == "UNVERIFIED"],
+        "all_killed": (killed == len(MUTATIONS) and len(results) == len(MUTATIONS)
+                       and not a.no_baseline),
         "baselines": baseline,
         "mutations": results,
     }

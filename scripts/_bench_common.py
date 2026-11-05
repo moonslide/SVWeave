@@ -4,6 +4,7 @@ contract (plan 22.3 mandatory targets, JSON schema, strict acceptance for G5).""
 from __future__ import annotations
 
 import hashlib
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -121,6 +122,17 @@ def validate_benchmark(bj: Any, *, current: dict[str, str] | None = None,
                        + (f": {rows[0].get('reason')}" if rows[0].get("reason") else ""))
         elif not isinstance(rows[0].get("measured"), (int, float)):
             why.append(f"target {t!r} is PASS but carries no measured value")
+        else:
+            # never trust the row's own label (rule 15): recompute it from measured and budget
+            m = re.fullmatch(r"<=\s*([0-9]+(?:\.[0-9]+)?)\s*(\S*)", str(rows[0].get("budget", "")))
+            unit = rows[0].get("unit")
+            if m is None:
+                why.append(f"target {t!r} has no parsable budget {rows[0].get('budget')!r}")
+            elif unit is not None and m.group(2) and unit != m.group(2):
+                why.append(f"target {t!r}: measured unit {unit!r} != budget unit {m.group(2)!r}")
+            elif float(rows[0]["measured"]) > float(m.group(1)):
+                why.append(f"target {t!r} is labelled PASS but measured {rows[0]['measured']} "
+                           f"exceeds its budget {rows[0]['budget']}")
     extra = sorted(set(by_target) - set(MANDATORY_TARGETS))
     for t in extra:
         if any(r["status"] != "PASS" for r in by_target[t]):

@@ -21,7 +21,8 @@ def good() -> dict[str, Any]:
         "corpus": {"scale": 1.0, "files": 500, "lines": 100374},
         "cold_build": {"ok_runs": 5}, "hot_queries": {}, "hot_search": {}, "disk_usage": {},
         "compare_plan_22_3": {"reference_corpus": True, "rows": [
-            {"target": t, "status": "PASS", "measured": 1.0} for t in bc.MANDATORY_TARGETS]},
+            {"target": t, "status": "PASS", "measured": 1.0, "budget": "<= 2.0 s", "unit": "s"}
+            for t in bc.MANDATORY_TARGETS]},
     }
 
 
@@ -74,3 +75,16 @@ def test_reduced_scale_and_too_few_cold_runs_are_rejected() -> None:
     b["cold_build"]["ok_runs"] = 3
     w = check(b)
     assert any("reference corpus" in x for x in w) and any("ok_runs" in x for x in w)
+
+
+def test_a_pass_label_over_its_budget_is_rejected() -> None:
+    """First council review (policy finding 7): G5 trusted each row's own PASS label."""
+    b = good()
+    b["compare_plan_22_3"]["rows"][0]["measured"] = 2.5  # over "<= 2.0 s", still labelled PASS
+    assert any("exceeds its budget" in w for w in check(b))
+    b = good()
+    b["compare_plan_22_3"]["rows"][0]["budget"] = "fast enough"
+    assert any("no parsable budget" in w for w in check(b))
+    b = good()
+    b["compare_plan_22_3"]["rows"][0]["unit"] = "ms"
+    assert any("unit" in w for w in check(b))
