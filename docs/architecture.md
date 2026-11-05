@@ -8,21 +8,42 @@ process control), `snapshot/`, `manifest/`, `config/`, `storage/` (SQLite), `sec
 (builds and updates included: `services.build_sync` / `update_sync` and the MCP job runner share
 `evidence.post_build`).
 
-Allowed dependency directions (pinned by `tests/unit/test_architecture_leftovers.py`, ARC-01):
+Allowed dependency directions. `tests/unit/test_architecture_leftovers.py` (ARC-01) parses every
+import of every module, imports inside functions included, and fails on any direction not in this
+table; the same test refuses a cycle in the table and any import cycle between modules other than
+the two known ones below.
 
-* `domain/` imports nothing of SVWeave above it; `config/`, `snapshot/`, `storage/` and
-  `security/` import only `domain/` and each other (`storage/paths.py` is the leaf that names the
-  database).
-* `editing/` (write safety: candidate tree hashing `tree.py`, the exact-range patch
-  `exact_range.py`, approval, journal, CAS) never imports `application/`, `gateway/` or a backend
-  adapter. Backend adapters import `editing/` (the Serena guard re-exports its helpers), never
-  the reverse.
-* `adapters/` never imports `orchestration/`; `orchestration/` composes the adapters (the
-  toolchain and capability models live in `adapters/toolchain.py` and `adapters/capability.py`,
-  re-exported by `orchestration/`).
-* `execution/` imports `domain/`, `storage/` and `security/` only; `application/` drives it.
-* Envelope redaction is `security/redaction.py` (shared by CLI and MCP, no gateway import);
-  the one hardened git runner for untrusted repositories is `security/git.py`.
+| Layer | May import |
+|---|---|
+| `domain/` | nothing of SVWeave |
+| `security/` | `domain/` |
+| leaves: `storage/paths.py`, `storage/lock.py` | `domain/` |
+| leaves: `execution/ledger.py`, `execution/models.py` (attempt records) | `domain/`, storage leaves |
+| `config/` | `domain/`, `security/` |
+| `manifest/` | `config/`, `domain/` |
+| `snapshot/` | `config/`, `domain/`, `manifest/`, `security/`, storage leaves |
+| `storage/` (database, migrations, GC) | `domain/`, `snapshot/`, both leaf groups |
+| `editing/` (write safety) | `config/`, `domain/`, `security/`, `snapshot/`, `storage/` |
+| `adapters/` | `config/`, `domain/`, `editing/`, `manifest/`, `security/`, `snapshot/`, `storage/` |
+| `orchestration/` | `adapters/`, `domain/`, `security/` |
+| `execution/` (runners) | `adapters/`, `config/`, `domain/`, `manifest/`, `security/`, `snapshot/`, the leaves |
+| `application/` | everything above except `gateway/` and the surfaces |
+| `gateway/` | `application/`, `domain/`, `security/` |
+| surfaces `cli.py`, `server.py`, `launcher.py` | the layers they wire (see the test) |
+
+So: nothing below `application/` imports `application/`, `gateway/` or a surface; `editing/`
+never imports `application/`, `gateway/`, a backend adapter, `orchestration/` or `execution/`
+(the adapters import `editing/`; the Serena guard re-exports its helpers); `adapters/` never
+imports `orchestration/`, which composes them (the toolchain and capability models live in
+`adapters/toolchain.py` and `adapters/capability.py`, re-exported by `orchestration/`).
+`storage/db.py` records snapshots and execution attempts, so it imports `snapshot/models.py` and
+the attempt records; `execution/` reaches the database file name and the locks only through the
+leaves. Envelope redaction is `security/redaction.py` (shared by CLI and MCP, no gateway
+import); the one hardened git runner for untrusted repositories is `security/git.py`.
+
+Known cycles (both through an import inside a function): `application/doctor.py` loads
+`doctor_wiring.py`, which registers the backend checks with it; `execution/remote_bootstrap.py`
+loads `execution/control.py`, which takes its record type from it.
 
 ```
 src/svweave/
