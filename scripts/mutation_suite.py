@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Critical mutation suite (plan 20.5, release gate "Critical invariants").
 
-Thirty-nine deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
+Forty deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
 the M12–M22 extra write-safety rules, M23–M26 Slurm boundaries, and M27 shared-launcher workspace
 binding, plus M28–M29 verified incremental-snapshot reuse, M30 the complete change list of
 the roll-forward input gate and M31 the verified candidate snapshot of edit validate M32 the recorded state directory, M33 no-follow writes into external roots and M34–M39 the
 commit freeze check, approval binding, test-token, expiry and key-mode checks and the
-roll-forward journal/patch match. They are injected, one at a time, into a THROWAWAY COPY of the
+roll-forward journal/patch match, and M40 the exact-range patch's expected bytes. They are injected, one at a time, into a THROWAWAY COPY of the
 repository. For each one the mapped test subset is run against the copy; a mutation is ``KILLED`` when the subset
 fails (pytest exit 1 with at least one FAILED test) and ``SURVIVED`` when it stays green. Anything
 else (patch anchor missing, syntax/collection error, timeout, red baseline) is ``ERROR`` and is
@@ -495,6 +495,14 @@ MUTATIONS: list[Mutation] = [
                "    if txn.patch_hash is None or txn.base_snapshot_id is None:  # " + MARK + ":M39\n")],
         ["tests/fault_injection/test_recover_gates.py::"
          "test_a3_roll_forward_of_a_journal_for_another_patch_is_refused"],
+    ),
+    m(
+        "M40", "the exact-range patch replaces bytes that differ from the expected hash",
+        "20.5 #5 neighbour (ADR-012); first council review, architecture finding 4",
+        [Patch("src/svweave/editing/exact_range.py",
+               "    if hashlib.sha256(data[start_byte:end_byte]).hexdigest() != expected_sha256:\n",
+               "    if False:  # " + MARK + ":M40\n")],
+        ["tests/unit/test_adapters_serena.py", "tests/unit/test_edit_slang_symbol.py"],
     ),
 ]
 

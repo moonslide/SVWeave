@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from svweave.application.doctor import CheckResult
+from svweave.domain.checks import CheckResult, failed_check
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.states import BackendAvailability
 from svweave.orchestration.registry import BACKEND_NAMES, BackendRegistry
@@ -23,8 +23,7 @@ _STATUS = {
 }
 
 
-def _fail(name: str, err: SvwError) -> CheckResult:
-    return CheckResult(name=name, status="FAIL", code=err.code.value, message=err.message, details=err.details)
+_fail = failed_check
 
 
 def static_checks(tc: Toolchain) -> list[CheckResult]:

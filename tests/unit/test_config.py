@@ -10,6 +10,7 @@ import pytest
 import yaml
 from pydantic import BaseModel
 
+from svweave.application.schemas import SCHEMA_MODELS, check_schemas, emit_schemas, schema_text
 from svweave.config.loader import (
     load_local_config,
     load_manifest,
@@ -18,7 +19,6 @@ from svweave.config.loader import (
 )
 from svweave.config.models import LocalConfig, Manifest, Policy
 from svweave.config.paths import PathPolicy, glob_match
-from svweave.config.schemas import SCHEMA_MODELS, check_schemas, emit_schemas, schema_text
 from svweave.domain.errors import ErrorCode, SvwError
 from tests.conftest import FIXTURES, POLICY, Ws, manifest_dict, profile
 

@@ -22,7 +22,7 @@ from scripts import ci_wheel_smoke
 
 from svweave.application.toolchain import find_lock
 from svweave.domain.errors import ErrorCode, SvwError
-from svweave.orchestration import toolchain as T
+from svweave.adapters import toolchain as T
 
 REPO = Path(__file__).resolve().parents[2]
 ASSETS = (
@@ -81,7 +81,7 @@ def test_DEP_01_detached_package_finds_its_own_assets(
 ) -> None:
     site = tmp_path / "venv" / "lib" / "python3.12" / "site-packages"
     runtime = _stage_assets(site)
-    monkeypatch.setattr(T, "__file__", str(site / "svweave" / "orchestration" / "toolchain.py"))
+    monkeypatch.setattr(T, "__file__", str(site / "svweave" / "adapters" / "toolchain.py"))
     monkeypatch.delenv(T.ENV_ROOT, raising=False)
     project = tmp_path / "unrelated-hdl-project"
     project.mkdir()
@@ -101,7 +101,7 @@ def test_SEC_03_detached_package_never_adopts_ancestor_lock(
 ) -> None:
     # This ancestor was selected by the old parents[3] source-layout assumption.
     site = tmp_path / "python3.12" / "site-packages"
-    monkeypatch.setattr(T, "__file__", str(site / "svweave" / "orchestration" / "toolchain.py"))
+    monkeypatch.setattr(T, "__file__", str(site / "svweave" / "adapters" / "toolchain.py"))
     monkeypatch.delenv(T.ENV_ROOT, raising=False)
     (tmp_path / "python3.12").mkdir()
     shutil.copyfile(REPO / T.LOCK_NAME, tmp_path / "python3.12" / T.LOCK_NAME)
@@ -123,7 +123,7 @@ def test_SEC_03_explicit_shared_install_overrides_bundled_assets_and_fails_close
 ) -> None:
     site = tmp_path / "site-packages"
     _stage_assets(site)
-    monkeypatch.setattr(T, "__file__", str(site / "svweave" / "orchestration" / "toolchain.py"))
+    monkeypatch.setattr(T, "__file__", str(site / "svweave" / "adapters" / "toolchain.py"))
     shared = tmp_path / "shared-install"
     shared.mkdir()
     for name in (T.LOCK_NAME, T.REPORT_NAME):

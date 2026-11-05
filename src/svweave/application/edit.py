@@ -26,7 +26,6 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from svweave.adapters.serena.guard import tree_hashes
 from svweave.application.build import DB_FILENAME, run_build, run_build_on_record
 from svweave.application.options import WorkspaceOptions
 from svweave.application.semantic_common import require_build
@@ -68,7 +67,7 @@ from svweave.editing.diffing import (
     patch_hash,
     patch_record,
 )
-from svweave.editing.models import KEY_PATTERN, PrepareRequest
+from svweave.editing.models import KEY_PATTERN, Confirmation, PrepareRequest
 from svweave.editing.plan import (
     declared_files,
     denied,
@@ -81,6 +80,7 @@ from svweave.editing.plan import (
     slang_scope_escape,
 )
 from svweave.editing.store import Txn, TxnStore, new_txn_id, now_iso, valid_txn_id
+from svweave.editing.tree import tree_hashes
 from svweave.manifest.resolver import resolve_profile
 from svweave.snapshot.capture import capture_snapshot, check_freshness, load_record, snapshots_dir
 from svweave.snapshot.models import SnapshotRecord
@@ -837,14 +837,6 @@ def _validation_envelope(
 
 
 # ------------------------------------------------------------------------------ approve
-@dataclass(frozen=True)
-class Confirmation:
-    """What the human typed and how it was obtained (``tty`` or the unqualified ``test_token``)."""
-
-    typed: str
-    method: str
-
-
 def approve(
     opts: WorkspaceOptions,
     request_id: str,

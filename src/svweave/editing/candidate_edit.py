@@ -17,9 +17,9 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any, Protocol
 
-from svweave.adapters.serena.guard import EditOutcome, apply_exact_range
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import sha256_hex
+from svweave.editing.exact_range import EditOutcome, apply_exact_range
 from svweave.editing.plan import ResolvedEdit, denied
 
 SERENA_KIND = "function"

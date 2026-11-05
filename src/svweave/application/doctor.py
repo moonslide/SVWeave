@@ -9,9 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Literal
-
-from pydantic import BaseModel
 
 from svweave.application.options import WorkspaceOptions
 from svweave.config.context import (
@@ -23,19 +20,14 @@ from svweave.config.context import (
 from svweave.config.loader import load_local_config, load_manifest, load_policy
 from svweave.config.models import LocalConfig, Manifest, Policy
 from svweave.config.trusted import load_trusted_policy, policy_path_for
+
+# CheckResult/Status are defined in domain.checks and re-exported here for importers
+from svweave.domain.checks import CheckResult as CheckResult
+from svweave.domain.checks import Status as Status
+from svweave.domain.checks import failed_check
 from svweave.domain.envelope import AnalysisCoverage, Envelope, ErrorInfo, Outcome
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.states import Completeness, Freshness
-
-Status = Literal["PASS", "FAIL", "WARN", "SKIP"]
-
-
-class CheckResult(BaseModel):
-    name: str
-    status: Status
-    code: str | None = None
-    message: str = ""
-    details: dict[str, object] = {}
 
 
 @dataclass
@@ -63,10 +55,7 @@ def register_check(fn: Check) -> Check:
     return fn
 
 
-def _fail(name: str, err: SvwError) -> CheckResult:
-    return CheckResult(
-        name=name, status="FAIL", code=err.code.value, message=err.message, details=err.details
-    )
+_fail = failed_check
 
 
 @register_check

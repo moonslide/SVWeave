@@ -18,6 +18,7 @@ from svweave.application.doctor import run_doctor
 from svweave.application.init import init_workspace
 from svweave.application.options import WorkspaceOptions
 from svweave.application.runner import execute, exit_code
+from svweave.application.schemas import check_schemas, emit_schemas
 from svweave.application.session import Session
 from svweave.application.use_cases import (
     cache_gc,
@@ -25,7 +26,6 @@ from svweave.application.use_cases import (
     create_snapshot,
     resolve_manifest,
 )
-from svweave.config.schemas import check_schemas, emit_schemas
 from svweave.domain.cursor import MAX_RESPONSE_BYTES
 from svweave.domain.envelope import (
     AnalysisCoverage,
@@ -54,8 +54,7 @@ class _State:
         return Session(self.opts, use_graph=use_graph)
 
     def emit(self, env: Envelope, code: int | None = None) -> None:
-        from svweave.gateway.tools import redact_envelope
-        from svweave.security.redaction import Redactor
+        from svweave.security.redaction import Redactor, redact_envelope
 
         env = redact_envelope(env, Redactor([self.opts.root]))
         text = env.to_json(indent=None if self.compact else 2)

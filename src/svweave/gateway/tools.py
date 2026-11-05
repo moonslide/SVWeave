@@ -25,7 +25,7 @@ from svweave.application.session import Session
 from svweave.domain.envelope import Envelope, Outcome, error_envelope, new_request_id
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.gateway import schemas
-from svweave.security.redaction import Redactor
+from svweave.security.redaction import redact_envelope
 
 MAX_REQUEST_BYTES = 64 * 1024
 
@@ -446,49 +446,6 @@ def is_tool_error(env: Envelope) -> bool:
     return env.outcome is Outcome.ERROR or (env.outcome is Outcome.BLOCKED and not env.data)
 
 
-#: keys whose string value is verbatim source/diff text: a path-like substring there is code, not a
-#: host path, so it is returned as is (the snapshot bytes are the data the user asked for)
-_VERBATIM_KEYS = frozenset({"text", "snippet", "diff"})
-
-
-def _scrub(obj: Any, redactor: Redactor, key: str | None = None) -> Any:
-    """Recursive text-only redaction of structured output (host paths and secrets in strings).
-    Unlike ``Redactor.value`` it never blanks a value because of its KEY name."""
-    if isinstance(obj, str):
-        return obj if key in _VERBATIM_KEYS else redactor.text(obj)
-    if isinstance(obj, dict):
-        return {k: _scrub(v, redactor, k if isinstance(k, str) else None) for k, v in obj.items()}
-    if isinstance(obj, list | tuple):
-        return [_scrub(v, redactor, key) for v in obj]
-    return obj
-
-
-_PATH_FIELDS = ("violations", "reasons", "limitations", "stderr_tail", "error", "run_dir")
-
-
-def redact_envelope(env: Envelope, redactor: Redactor, *, deep: bool = False) -> Envelope:
-    """Defense in depth (SEC-04): scrub host paths/secrets from the envelope's free text
-    (warnings, error, analysis_coverage.limitations) and from the known path-bearing ``data``
-    fields (blocked-build ``violations``, reasons, stderr tails...). ``deep`` (the MCP gateway)
-    scrubs EVERY string of ``data`` except verbatim source/diff text; the local CLI keeps the
-    paths it prints on purpose (policy locations, run directories) unless they sit in a known
-    path-bearing field."""
-    d = env.model_copy(deep=True)
-    d.warnings = [redactor.text(w) for w in d.warnings]
-    if d.error is not None:
-        d.error.message = redactor.text(d.error.message)
-        d.error.details = redactor.value(d.error.details) if d.error.details else {}
-    if d.analysis_coverage is not None:
-        d.analysis_coverage.limitations = [redactor.text(x) for x in d.analysis_coverage.limitations]
-        if d.analysis_coverage.scope:
-            d.analysis_coverage.scope = redactor.text(d.analysis_coverage.scope)
-    if deep:
-        d.data = _scrub(d.data, redactor)
-    else:
-        for k in _PATH_FIELDS:
-            if k in d.data:
-                d.data[k] = _scrub(d.data[k], redactor, k)
-    return d
 
 
 class Gateway:

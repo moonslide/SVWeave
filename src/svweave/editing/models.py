@@ -6,6 +6,7 @@ trusted local store (``editing.approval``), never of a request.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -20,6 +21,15 @@ HEX64 = r"^[0-9a-f]{64}$"
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+@dataclass(frozen=True)
+class Confirmation:
+    """What the human typed and how it was obtained (``tty`` or the unqualified ``test_token``).
+    In ``editing/`` (not the application layer) so ``editing.confirm`` needs no upward import."""
+
+    typed: str
+    method: str
 
 
 class SymbolReplacement(_Strict):
