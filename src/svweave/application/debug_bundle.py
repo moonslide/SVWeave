@@ -19,7 +19,7 @@ from typing import Any
 
 from svweave import __version__
 from svweave.application.options import WorkspaceOptions
-from svweave.application.report import _lock_hash
+from svweave.application.report import lock_hash
 from svweave.application.semantic_common import build_envelope, report_of, require_build
 from svweave.config.paths import is_within
 from svweave.domain.envelope import Envelope
@@ -193,7 +193,7 @@ def make_bundle(
                     "diagnostic_outcome",
                 )
             },
-            "toolchain_lock_hash": _lock_hash(ctx.project_root),
+            "toolchain_lock_hash": lock_hash(ctx.project_root),
             "versions": {"svweave": __version__, "python": platform.python_version()},
             "semantic_digest": digest,
             "reproduce": [

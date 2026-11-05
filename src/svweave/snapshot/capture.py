@@ -481,7 +481,7 @@ def remove_snapshot_dir(path: Path) -> None:
         _force_rmtree(path)
 
 
-def _content_matches(final: Path, files: list[SnapFile]) -> bool:
+def content_matches(final: Path, files: list[SnapFile]) -> bool:
     """True when ``final`` holds exactly the bytes just captured (every file re-hashed, regular,
     not a link). A snapshot directory that already exists is not trusted by its name alone: its id
     is computable from public facts, so a pre-seeded ``.svweave/`` could hold other bytes."""
@@ -497,7 +497,7 @@ def _content_matches(final: Path, files: list[SnapFile]) -> bool:
     return True
 
 
-def _record_matches(final: Path, record: SnapshotRecord) -> bool:
+def record_matches(final: Path, record: SnapshotRecord) -> bool:
     """The stored ``snapshot.json`` describes exactly what was captured (later reads trust it:
     freshness, byte offsets); a planted one with the right id but another spec is not reused."""
     try:
@@ -618,8 +618,8 @@ def _capture(
             final = root / sid
             with snapshot_publish_lock(ctx):
                 if final.exists() or final.is_symlink():
-                    if (not final.is_symlink() and _content_matches(final, files)
-                            and _record_matches(final, record)):
+                    if (not final.is_symlink() and content_matches(final, files)
+                            and record_matches(final, record)):
                         remove_snapshot_dir(tmp)
                         # same bytes, but THIS call's metadata (profile, config): the stored record
                         # may have been written for another profile with the same inputs

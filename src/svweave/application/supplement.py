@@ -35,7 +35,7 @@ LIMITATIONS = [
 ]
 
 
-def _read(ctx: WorkspaceContext, path: Path, limit: int) -> bytes:
+def read_bounded(ctx: WorkspaceContext, path: Path, limit: int) -> bytes:
     # Policy checks do not replace fd-relative no-follow reads (including all parents).
     if ".." in path.parts:
         raise SvwError(EC.PATH_NOT_ALLOWED, "supplement paths may not contain '..'")
@@ -49,7 +49,7 @@ def _read(ctx: WorkspaceContext, path: Path, limit: int) -> bytes:
     return data
 
 
-def _encode(data: dict[str, Any]) -> bytes:
+def encode_record(data: dict[str, Any]) -> bytes:
     return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
 
 
@@ -73,8 +73,8 @@ def import_verilator(
     opts: WorkspaceOptions, tree: Path, meta: Path, tool_version: str, request_id: str
 ) -> Envelope:
     ctx = opts.load()
-    tree_bytes = _read(ctx, tree, TREE_LIMIT)
-    meta_bytes = _read(ctx, meta, META_LIMIT)
+    tree_bytes = read_bounded(ctx, tree, TREE_LIMIT)
+    meta_bytes = read_bounded(ctx, meta, META_LIMIT)
     inventory = parse_tree(tree_bytes, meta_bytes, tool_version)
     record = {
         "schema_version": "svw-external-static-1",
@@ -83,7 +83,7 @@ def import_verilator(
         "build_id": None,
         "inventory": inventory,
     }
-    encoded = _encode(record)
+    encoded = encode_record(record)
     if len(encoded) > RECORD_LIMIT:
         raise SvwError(EC.RESOURCE_LIMIT, "supplement inventory exceeds storage limit")
     sid = hashlib.sha256(encoded).hexdigest()
@@ -122,7 +122,7 @@ def show_verilator(
     if not is_sha256_hex(supplement_id) or not 1 <= limit <= 100 or offset < 0:
         raise SvwError(EC.INVALID_CONFIG, "invalid supplement id or pagination bounds")
     ctx = opts.load()
-    raw = _read(ctx, Path(f"{STORE}/{supplement_id}/record.json"), RECORD_LIMIT)
+    raw = read_bounded(ctx, Path(f"{STORE}/{supplement_id}/record.json"), RECORD_LIMIT)
     if hashlib.sha256(raw).hexdigest() != supplement_id:
         raise SvwError(EC.INVALID_CONFIG, "supplement content hash mismatch")
     try:
@@ -144,7 +144,7 @@ def show_verilator(
         ("tree.json", TREE_LIMIT, "tree_sha256"),
         ("meta.json", META_LIMIT, "meta_sha256"),
     ]:
-        artifact = _read(ctx, Path(f"{STORE}/{supplement_id}/{filename}"), maximum)
+        artifact = read_bounded(ctx, Path(f"{STORE}/{supplement_id}/{filename}"), maximum)
         if hashlib.sha256(artifact).hexdigest() != inv.get(key):
             raise SvwError(EC.INVALID_CONFIG, "supplement audit artifact hash mismatch")
         artifacts[filename] = artifact
@@ -156,7 +156,7 @@ def show_verilator(
         "build_id": None,
         "inventory": validated,
     }
-    if raw != _encode(expected):
+    if raw != encode_record(expected):
         raise SvwError(
             EC.INVALID_CONFIG, "stored supplement differs from validated artifact inventory"
         )

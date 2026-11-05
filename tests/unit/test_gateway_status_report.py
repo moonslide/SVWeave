@@ -142,9 +142,9 @@ def test_cursor_key_lives_in_the_trusted_dir_not_the_repo(ws: Ws) -> None:
     assert p.is_file() and (p.stat().st_mode & 0o777) == 0o600
     assert not (ctx.state_dir / "cursor.key").exists()
     assert str(ctx.project_root) not in str(p)
-    from svweave.application import queries
+    from svweave.application.semantic_read import workspace_cursor_key
 
-    assert queries._cursor_key(ctx) == key  # noqa: SLF001
+    assert workspace_cursor_key(ctx) == key
 
 
 # ------------------------------------------------------------------------------ status facts

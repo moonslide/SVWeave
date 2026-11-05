@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from svweave.application.impact import _closure, _fit, _twins
+from svweave.application.semantic_read import closure as _closure
+from svweave.application.semantic_read import fit_lists as _fit
+from svweave.application.semantic_read import twins as _twins
 
 
 def test_IMP_U01_closure_is_breadth_first_shortest_level_and_loop_safe() -> None:

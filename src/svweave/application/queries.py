@@ -17,15 +17,36 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from svweave.application.keys import cursor_key
 from svweave.application.options import WorkspaceOptions
-from svweave.application.semantic_common import build_envelope, freshness_of, require_build
-from svweave.config.context import WorkspaceContext
+from svweave.application.semantic_common import build_envelope
+from svweave.application.semantic_read import (  # the shared query core
+    QuerySession as _S,
+)
+from svweave.application.semantic_read import (
+    decl_dto as _decl_dto,
+)
+from svweave.application.semantic_read import (
+    decl_rows_by_location as _decl_rows_by_location,
+)
+from svweave.application.semantic_read import (
+    gap_limits as _gap_limits,
+)
+from svweave.application.semantic_read import (
+    inst_dto as _inst_dto,
+)
+from svweave.application.semantic_read import (
+    qualified_names as _qualified,
+)
+from svweave.application.semantic_read import (
+    resolve_instance as _resolve_instance,
+)
+from svweave.application.semantic_read import (
+    session as _session,
+)
 from svweave.domain.cursor import (
     MAX_RESPONSE_BYTES,
     check_limit,
@@ -35,12 +56,9 @@ from svweave.domain.cursor import (
 )
 from svweave.domain.envelope import Envelope, ErrorInfo, Outcome, Pagination
 from svweave.domain.errors import ErrorCode, SvwError
-from svweave.domain.ids import is_sha256_hex
 from svweave.domain.locations import Encoding, LineIndex, byte_to_lsp
-from svweave.domain.states import Freshness
 from svweave.snapshot.capture import snapshots_dir
 from svweave.snapshot.models import SnapFile
-from svweave.storage.db import DB_FILENAME, Database
 from svweave.storage.semantic import loads
 
 LOCATION_CONVENTION = {
@@ -54,65 +72,9 @@ MAX_SPECIALIZATIONS = 20
 
 
 # ---------------------------------------------------------------------------------- session
-class _S:
-    def __init__(self, ctx: WorkspaceContext, db: Database, build: sqlite3.Row, key: bytes) -> None:
-        self.ctx, self.db, self.build, self.key = ctx, db, build, key
-        self._fresh: Freshness | None = None
-
-    def fresh(self) -> Freshness:
-        """Freshness is computed ONCE per query (it is the expensive part of an envelope)."""
-        if self._fresh is None:
-            self._fresh = freshness_of(self.ctx, self.db, self.build)
-        return self._fresh
-
-    @property
-    def bid(self) -> str:
-        return str(self.build["build_id"])
-
-    def rows(self, sql: str, *args: Any) -> list[sqlite3.Row]:
-        return self.db.conn.execute(sql, args).fetchall()
-
-    def one(self, sql: str, *args: Any) -> sqlite3.Row | None:
-        r: sqlite3.Row | None = self.db.conn.execute(sql, args).fetchone()
-        return r
-
-    def count(self, sql: str, *args: Any) -> int:
-        return int(self.db.conn.execute(sql, args).fetchone()[0])
-
-
-def _cursor_key(ctx: WorkspaceContext) -> bytes:
-    """Workspace secret in the trusted dir (outside the repo), shared with svw_search."""
-    return cursor_key(ctx)
-
-
-@contextmanager
-def _session(opts: WorkspaceOptions, build_id: str) -> Iterator[_S]:
-    ctx = opts.load()
-    with Database(ctx.state_dir / DB_FILENAME) as db:
-        build = require_build(db, build_id)
-        yield _S(ctx, db, build, _cursor_key(ctx))
 
 
 # ---------------------------------------------------------------------------------- DTOs
-def _decl_dto(r: sqlite3.Row) -> dict[str, Any]:
-    macro = loads(r["macro"])
-    return {
-        "symbol_id": r["symbol_id"],
-        "declaration_id": r["declaration_id"],
-        "kind": r["kind"],
-        "name": r["name"],
-        "qualified_name": r["qualified_name"],
-        "scope": r["scope"],
-        "type": r["type"],
-        "compilation_unit": r["compilation_unit"],
-        "library": r["library"],
-        "location": loads(r["loc"]),
-        "full_span": None
-        if r["full_start"] is None
-        else {"start": r["full_start"], "end": r["full_end"]},
-        "macro_origin": macro,
-        "attrs": loads(r["attrs"]) or {},
-    }
 
 
 def _ref_dto(r: sqlite3.Row, qn: dict[str, tuple[str, str]]) -> dict[str, Any]:
@@ -130,49 +92,6 @@ def _ref_dto(r: sqlite3.Row, qn: dict[str, tuple[str, str]]) -> dict[str, Any]:
         else {"qualified_name": cont[0], "kind": cont[1], "declaration_id": r["container_id"]},
         "context": loads(r["context"]) or {},
     }
-
-
-def _inst_dto(r: sqlite3.Row, depth: int | None = None) -> dict[str, Any]:
-    d = {
-        "instance_id": r["instance_id"],
-        "path": r["path"],
-        "hierarchical_path": r["hier_path"],
-        "path_components": loads(r["components"]),
-        "parent_id": r["parent_id"],
-        "definition": r["definition"],
-        "definition_declaration_id": r["definition_declaration_id"],
-        "specialization": r["specialization"],
-        "parameters": loads(r["parameters"]) or [],
-        "generate_context": loads(r["generate_context"]) or [],
-        "is_top": bool(r["is_top"]),
-        "is_interface": bool(r["is_interface"]),
-        "is_stub": bool(r["is_stub"]),
-        "stub_name": r["stub_name"],
-        "blackbox_candidate": bool(r["blackbox_candidate"]),
-        "location": loads(r["loc"]),
-        "bound_from": loads(r["bind"]),
-    }
-    if depth is not None:
-        d["depth"] = depth
-    return d
-
-
-def _qualified(s: _S, ids: set[str]) -> dict[str, tuple[str, str]]:
-    if not ids:
-        return {}
-    out: dict[str, tuple[str, str]] = {}
-    ids_l = sorted(ids)
-    for i in range(0, len(ids_l), 500):
-        chunk = ids_l[i : i + 500]
-        q = ",".join("?" for _ in chunk)
-        for r in s.rows(
-            f"SELECT declaration_id, qualified_name, kind FROM declarations "
-            f"WHERE build_id=? AND declaration_id IN ({q})",
-            s.bid,
-            *chunk,
-        ):
-            out[r["declaration_id"]] = (r["qualified_name"], r["kind"])
-    return out
 
 
 # ---------------------------------------------------------------------------------- paging
@@ -325,34 +244,6 @@ def _item_id(it: dict[str, Any]) -> str | None:
 
 
 # ---------------------------------------------------------------------------------- symbol
-def _decl_rows_by_location(s: _S, file: str, byte: int) -> list[sqlite3.Row]:
-    ids: dict[str, sqlite3.Row] = {}
-    for r in s.rows(
-        "SELECT * FROM declarations WHERE build_id=? AND file=? AND span_start<=? AND ?<span_end",
-        s.bid,
-        file,
-        byte,
-        byte,
-    ):
-        ids[r["declaration_id"]] = r
-    refs = s.rows(
-        'SELECT target_id FROM "references" WHERE build_id=? AND file=? AND span_start<=? '
-        "AND ?<span_end AND target_id IS NOT NULL",
-        s.bid,
-        file,
-        byte,
-        byte,
-    )
-    for ref in refs:
-        if ref["target_id"] not in ids:
-            d = s.one(
-                "SELECT * FROM declarations WHERE build_id=? AND declaration_id=?",
-                s.bid,
-                ref["target_id"],
-            )
-            if d is not None:
-                ids[d["declaration_id"]] = d
-    return list(ids.values())
 
 
 def symbol(
@@ -508,20 +399,6 @@ def symbol(
 
 
 # ---------------------------------------------------------------------------------- references
-def _gap_limits(s: _S) -> list[str]:
-    rows = s.rows(
-        "SELECT kind, COUNT(*) n FROM coverage_gaps WHERE build_id=? GROUP BY kind", s.bid
-    )
-    msgs = {
-        "generic_class_not_specialized": "{n} generic class(es) never specialized: references "
-        "inside their bodies are not extracted",
-        "definition_not_elaborated": "{n} module/interface definition(s) not elaborated under the "
-        "tops: references inside them are not extracted (inactive_for_profile)",
-        "library_member_not_loaded": "{n} library member(s) never loaded: not analysed",
-        "stub_boundary": "{n} stub/blackbox boundary instance(s): internals unknown",
-        "empty_module_body": "{n} instance(s) of modules with an empty body (possible blackbox)",
-    }
-    return [msgs[r["kind"]].format(n=r["n"]) for r in rows if r["kind"] in msgs]
 
 
 def references(
@@ -615,34 +492,6 @@ def references(
 
 
 # ---------------------------------------------------------------------------------- hierarchy
-def _resolve_instance(s: _S, ref: str) -> sqlite3.Row:
-    if is_sha256_hex(ref):
-        r = s.one("SELECT * FROM instances WHERE build_id=? AND instance_id=?", s.bid, ref)
-        if r is not None:
-            return r
-    cleaned = ref.strip()
-    rows = s.rows(
-        "SELECT * FROM instances WHERE build_id=? AND (path=? OR hier_path=? OR TRIM(path)=? "
-        "OR TRIM(hier_path)=?) ORDER BY ord",
-        s.bid,
-        ref,
-        ref,
-        cleaned,
-        cleaned,
-    )
-    if not rows:
-        raise SvwError(
-            ErrorCode.MISSING_INPUT,
-            f"unknown instance {ref!r}",
-            {"reason": "instance_missing", "instance": ref},
-        )
-    if len(rows) > 1:
-        raise SvwError(
-            ErrorCode.AMBIGUOUS_SYMBOL,
-            f"{len(rows)} instances match {ref!r}",
-            {"candidates": [{"instance_id": r["instance_id"], "path": r["path"]} for r in rows]},
-        )
-    return rows[0]
 
 
 def hierarchy(

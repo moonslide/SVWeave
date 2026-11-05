@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from svweave.application.build import _run_build_with_capture
+from svweave.application.build import run_build_with_capture
 from svweave.application.options import WorkspaceOptions
 from svweave.config.context import WorkspaceContext
 from svweave.domain.cursor import MAX_RESPONSE_BYTES
@@ -164,7 +164,7 @@ def run_update(
         return rec
 
     try:
-        env = _run_build_with_capture(opts, profile, request_id, capture=capture)
+        env = run_build_with_capture(opts, profile, request_id, capture=capture)
     except SvwError as err:
         if captured is None:
             raise  # preserve pre-capture guard and failure behavior

@@ -32,23 +32,41 @@ import hashlib
 import re
 from typing import Any
 
-from svweave.application.impact import (
-    _enclosing,
-    _fit,
-    _names,
-    _owner_definition,
-    _twins,
-    _with_twins,
-)
 from svweave.application.options import WorkspaceOptions
 from svweave.application.queries import (
     LOCATION_CONVENTION,
-    _decl_dto,
-    _decl_rows_by_location,
-    _gap_limits,
-    _session,
 )
 from svweave.application.semantic_common import build_envelope
+from svweave.application.semantic_read import (
+    decl_dto as _decl_dto,
+)
+from svweave.application.semantic_read import (
+    decl_rows_by_location as _decl_rows_by_location,
+)
+from svweave.application.semantic_read import (
+    enclosing as _enclosing,
+)
+from svweave.application.semantic_read import (
+    fit_lists as _fit,
+)
+from svweave.application.semantic_read import (
+    gap_limits as _gap_limits,
+)
+from svweave.application.semantic_read import (
+    names_of as _names,
+)
+from svweave.application.semantic_read import (
+    owner_definition as _owner_definition,
+)
+from svweave.application.semantic_read import (
+    session as _session,
+)
+from svweave.application.semantic_read import (
+    twins as _twins,
+)
+from svweave.application.semantic_read import (
+    with_twins as _with_twins,
+)
 from svweave.domain.cursor import MAX_RESPONSE_BYTES, check_limit
 from svweave.domain.envelope import Envelope, ErrorInfo, Outcome, Pagination
 from svweave.domain.errors import ErrorCode, SvwError

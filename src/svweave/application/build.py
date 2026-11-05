@@ -171,14 +171,14 @@ def run_build(
     (exclusive non-blocking build lock, shared by the CLI and the MCP job manager). With
     ``expected_snapshot_id`` the build stops with STALE_SNAPSHOT when the captured snapshot differs.
     ``test_fault`` is a TEST-ONLY hook that is never read from configuration."""
-    return _run_build_with_capture(
+    return run_build_with_capture(
         opts, profile, request_id, reuse=reuse, handle=handle, on_job=on_job,
         test_fault=test_fault, job_id=job_id, expected_snapshot_id=expected_snapshot_id,
         expected_execution_fingerprint=expected_execution_fingerprint,
     )
 
 
-def _run_build_with_capture(
+def run_build_with_capture(
     opts: WorkspaceOptions,
     profile: str | None,
     request_id: str,

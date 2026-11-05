@@ -28,7 +28,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from svweave.application.graph_codec import encode as encode_page
-from svweave.application.graph_template import render_html
+from svweave.application.graph_template import dumps_safe, render_html
+from svweave.application.semantic_read import QuerySession, rows_in
 
 INDEX = "index.html"
 DEFAULT_PAGE_BUDGET = 5000
@@ -159,7 +160,7 @@ def search_index(rows: list[Any], pages: list[Page]) -> dict[str, Any]:
 
 
 def build_pages(
-    s: Any,
+    s: QuerySession,
     start_rows: list[Any],
     *,
     budget: int,
@@ -174,8 +175,6 @@ def build_pages(
     (``c-<hash>.js``, ``svwChunk(<page data>);``) that the page loads into the same drawing when
     a portal is opened. Same cut, same disjoint parts; only the index page's CSP also admits
     scripts from its own directory ('self'), which the loading needs on file://."""
-    from svweave.application.graph import _rows_in
-    from svweave.application.graph_template import dumps_safe
 
     light = s.rows("SELECT instance_id, parent_id, path, ord FROM instances WHERE build_id=? "
                    "ORDER BY ord", s.bid)
@@ -196,8 +195,8 @@ def build_pages(
     total = sum(size[x] for x in start)
     for i, pg in enumerate(pages):
         if lazy:
-            region = _rows_in(s, "SELECT * FROM instances WHERE build_id=? AND instance_id IN ({})",
-                              pg.members)
+            region = rows_in(s, "SELECT * FROM instances WHERE build_id=? AND instance_id IN ({})",
+                             pg.members)
             model = model_of(region)
             portal_ids = set(pg.portals)
             for n in model["nodes"]:
@@ -217,8 +216,8 @@ def build_pages(
         trail = (crumbs[pg.parent] if pg.parent is not None else []) + [
             [path_of[pg.roots[0]] if pg.parent is not None else "index", pg.file]]
         crumbs.append(trail)
-        region = _rows_in(s, "SELECT * FROM instances WHERE build_id=? AND instance_id IN ({})",
-                          pg.members)
+        region = rows_in(s, "SELECT * FROM instances WHERE build_id=? AND instance_id IN ({})",
+                         pg.members)
         model = model_of(region)
         portal_set = set(pg.portals)
         for n in model["nodes"]:

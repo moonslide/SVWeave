@@ -17,6 +17,7 @@ from svweave.adapters.slang.runner import WorkerHandle
 from svweave.application import queries as Q
 from svweave.application.build import cancel_job
 from svweave.application.runner import exit_code
+from svweave.application.semantic_read import workspace_cursor_key
 from svweave.domain.cursor import MAX_RESPONSE_BYTES, encode_cursor
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.storage.lock import workspace_lock
@@ -109,7 +110,7 @@ def test_API_02_cursor_is_bound_to_build_query_and_key(tmp_path: Path) -> None:
             Q.hierarchy(opts(w), b1, "r", limit=3, cursor=bad)
     # a validly signed cursor past the end: empty page, not 'complete'
     ctx = opts(w).load()
-    key = Q._cursor_key(ctx)
+    key = workspace_cursor_key(ctx)
     from svweave.domain.cursor import query_hash
 
     qh = query_hash("hierarchy", {"instance": None, "top": None, "depth": None})

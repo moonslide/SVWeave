@@ -32,18 +32,45 @@ from svweave.application.impact import (
     DEFAULT_LIST,
     DEFINITION_KINDS,
     MAX_DEPTH,
-    _closure_items,
-    _definition_graph,
-    _fit,
-    _instances_of,
-    _names,
-    _owner_definition,
-    _references_of,
-    _twins,
 )
 from svweave.application.options import WorkspaceOptions
-from svweave.application.queries import _decl_dto, _gap_limits, _session
 from svweave.application.semantic_common import build_envelope
+from svweave.application.semantic_read import (
+    QuerySession,
+)
+from svweave.application.semantic_read import (
+    closure_items as _closure_items,
+)
+from svweave.application.semantic_read import (
+    decl_dto as _decl_dto,
+)
+from svweave.application.semantic_read import (
+    definition_graph as _definition_graph,
+)
+from svweave.application.semantic_read import (
+    fit_lists as _fit,
+)
+from svweave.application.semantic_read import (
+    gap_limits as _gap_limits,
+)
+from svweave.application.semantic_read import (
+    instances_of as _instances_of,
+)
+from svweave.application.semantic_read import (
+    names_of as _names,
+)
+from svweave.application.semantic_read import (
+    owner_definition as _owner_definition,
+)
+from svweave.application.semantic_read import (
+    references_of as _references_of,
+)
+from svweave.application.semantic_read import (
+    session as _session,
+)
+from svweave.application.semantic_read import (
+    twins as _twins,
+)
 from svweave.domain.cursor import MAX_RESPONSE_BYTES, check_limit
 from svweave.domain.envelope import Envelope, Pagination
 from svweave.domain.errors import ErrorCode, SvwError
@@ -248,7 +275,7 @@ def _new_version(top: Path, path: str, head: str | None) -> bytes | None:
 
 
 def collect_changes(
-    s: Any, *, base: str, head: str | None, repo: str | None, new_side: bool = False
+    s: QuerySession, *, base: str, head: str | None, repo: str | None, new_side: bool = False
 ) -> dict[str, Any]:
     """Read the git diff and attribute its changed ranges to declarations of the build behind
     session ``s``; shared by :func:`diff_impact` and the graph diff view. ``base``/``head`` must

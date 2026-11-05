@@ -18,7 +18,7 @@ import bisect
 import hashlib
 import os
 from collections import defaultdict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from typing import Any
 
 from svweave.application.diff_impact import (
@@ -40,10 +40,24 @@ from svweave.application.graph_atlas import INDEX as ATLAS_INDEX
 from svweave.application.graph_atlas import build_pages as build_atlas_pages
 from svweave.application.graph_codec import encode as encode_page
 from svweave.application.graph_template import render_html
-from svweave.application.impact import _names
 from svweave.application.options import WorkspaceOptions
-from svweave.application.queries import _gap_limits, _resolve_instance, _session
 from svweave.application.semantic_common import build_envelope
+from svweave.application.semantic_read import (
+    QuerySession,
+    rows_in,
+)
+from svweave.application.semantic_read import (
+    gap_limits as _gap_limits,
+)
+from svweave.application.semantic_read import (
+    names_of as _names,
+)
+from svweave.application.semantic_read import (
+    resolve_instance as _resolve_instance,
+)
+from svweave.application.semantic_read import (
+    session as _session,
+)
 from svweave.domain.envelope import Envelope, Pagination
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.states import EvidenceKind
@@ -119,7 +133,7 @@ def _owner_instance(sig_path: str, by_path: dict[str, str]) -> tuple[str, str] |
             return sig_path[:end], iid
 
 
-def _owned_in_build(s: Any, sig_paths: list[str]) -> set[str]:
+def _owned_in_build(s: QuerySession, sig_paths: list[str]) -> set[str]:
     """Those of ``sig_paths`` that an instance of the build declares (some proper dotted prefix
     is an instance path); the others belong to no instance (package / $unit variables)."""
     prefixes: dict[str, list[str]] = defaultdict(list)
@@ -138,20 +152,12 @@ def _ord(r: Any) -> tuple[int, int]:
     return (0, 0) if o is None else (1, int(o))
 
 
-def _chunks(items: list[str]) -> Iterator[list[str]]:
-    for i in range(0, len(items), _SQL_CHUNK):
-        yield items[i : i + _SQL_CHUNK]
+def _rows_in(s: QuerySession, sql: str, ids: list[str]) -> list[Any]:
+    """:func:`semantic_read.rows_in` with this module's chunk (read at call time: tests lower it)."""
+    return rows_in(s, sql, ids, _SQL_CHUNK)
 
 
-def _rows_in(s: Any, sql: str, ids: list[str]) -> list[Any]:
-    """``sql`` has one ``{}`` for an ``IN (...)`` list; run it per chunk of ``ids``."""
-    out: list[Any] = []
-    for part in _chunks(ids):
-        out.extend(s.rows(sql.format(",".join("?" * len(part))), s.bid, *part))
-    return out
-
-
-def _load_full(s: Any) -> tuple[list[Any], list[Any], Callable[[list[Any]], dict[str, str]]]:
+def _load_full(s: QuerySession) -> tuple[list[Any], list[Any], Callable[[list[Any]], dict[str, str]]]:
     rows = s.rows("SELECT * FROM instances WHERE build_id=? ORDER BY ord", s.bid)
     bindings = s.rows("SELECT * FROM port_bindings WHERE build_id=? ORDER BY ord", s.bid)
 
@@ -164,7 +170,7 @@ def _load_full(s: Any) -> tuple[list[Any], list[Any], Callable[[list[Any]], dict
     return rows, bindings, kinds
 
 
-def resolve_root(s: Any, root: str) -> Any:
+def resolve_root(s: QuerySession, root: str) -> Any:
     """The instance row named by ``root`` (exact path first: indexed; else the shared resolver,
     which also accepts an instance id or a hierarchical path and refuses an ambiguous name)."""
     rows = s.rows("SELECT * FROM instances WHERE build_id=? AND path=?", s.bid, root)
@@ -184,7 +190,7 @@ def resolve_root(s: Any, root: str) -> Any:
 
 
 def _load_subtree(
-    s: Any, root_row: Any
+    s: QuerySession, root_row: Any
 ) -> tuple[list[Any], list[Any], Callable[[list[Any]], dict[str, str]]]:
     """Only the rows of ``root_row`` and its descendants. The subtree is the closure of the stored
     ``parent_id`` links (indexed), never a path-prefix guess; port bindings come by primary key and
@@ -192,7 +198,7 @@ def _load_subtree(
     return _load_rows(s, [root_row, *_descendants(s, [str(root_row["instance_id"])])])
 
 
-def _descendants(s: Any, ids: list[str]) -> list[Any]:
+def _descendants(s: QuerySession, ids: list[str]) -> list[Any]:
     """Rows of every descendant of the instances ``ids`` (closure of the parent_id links)."""
     out: list[Any] = []
     level = ids
@@ -206,7 +212,7 @@ def _descendants(s: Any, ids: list[str]) -> list[Any]:
 
 
 def _load_rows(
-    s: Any, rows: list[Any]
+    s: QuerySession, rows: list[Any]
 ) -> tuple[list[Any], list[Any], Callable[[list[Any]], dict[str, str]]]:
     """Port bindings (by primary key) and, lazily, the kinds of the declarations they reference,
     for exactly the instance ``rows``."""
@@ -235,7 +241,7 @@ def _load_rows(
     return rows, bindings, kinds
 
 
-def diff_selection(s: Any, definition_ids: set[str], root_row: Any = None) -> dict[str, Any]:
+def diff_selection(s: QuerySession, definition_ids: set[str], root_row: Any = None) -> dict[str, Any]:
     """The instances a diff view draws: every instance of a changed definition (``changed``) with
     its whole subtree (``inside``), plus the ancestors that connect them (``context``) up to
     ``root_row`` or, without one, up to their lowest common ancestor. Instances of a changed
@@ -314,7 +320,7 @@ def diff_selection(s: Any, definition_ids: set[str], root_row: Any = None) -> di
 
 
 def build_model(
-    s: Any,
+    s: QuerySession,
     *,
     max_instances: int | None,
     max_fanout: int | None,
@@ -511,7 +517,7 @@ def _line_of(starts: list[int], offset: int) -> int:
 
 
 def _per_commit(
-    s: Any, ch: dict[str, Any], base: str, head: str, defs: set[str]
+    s: QuerySession, ch: dict[str, Any], base: str, head: str, defs: set[str]
 ) -> tuple[list[dict[str, Any]], dict[str, list[int]], list[str]]:
     """Which commits of base..head changed each changed definition: git's line-history tracing
     (``log -L``) over the definition's own line span in the HEAD version, which is exact only
@@ -555,7 +561,7 @@ def _per_commit(
 
 
 def _diff_view(
-    s: Any, base: str, head: str | None, root_row: Any, *, per_commit: bool = False
+    s: QuerySession, base: str, head: str | None, root_row: Any, *, per_commit: bool = False
 ) -> tuple[dict[str, Any], dict[str, Any] | None, list[str]]:
     """git diff -> changed definitions -> the instances to draw (:func:`diff_selection`). The
     selection is None when the diff reaches no instance (nothing to draw is an answer, not an
@@ -653,7 +659,7 @@ def _diff_view(
     return diff, sel, warns
 
 
-def _page_meta(s: Any, limits: list[str]) -> dict[str, Any]:
+def _page_meta(s: QuerySession, limits: list[str]) -> dict[str, Any]:
     """What every page states about its evidence (rule 5): build, snapshot, completeness,
     freshness, provenance and the limitations of the envelope that wrote it."""
     return {
@@ -669,7 +675,7 @@ def _page_meta(s: Any, limits: list[str]) -> dict[str, Any]:
 
 
 def _export_atlas(
-    s: Any,
+    s: QuerySession,
     request_id: str,
     *,
     root_row: Any,

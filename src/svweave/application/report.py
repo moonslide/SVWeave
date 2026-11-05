@@ -40,7 +40,7 @@ def _git_commit(root: Path) -> str | None:
     return sha or None
 
 
-def _lock_hash(root: Path) -> str | None:
+def lock_hash(root: Path) -> str | None:
     try:
         return hashlib.sha256(find_lock(root).read_bytes()).hexdigest()
     except (SvwError, OSError):
@@ -83,7 +83,7 @@ def build_report(session: Session, request_id: str, build_id: str) -> Envelope:
         report: dict[str, Any] = {
             "svweave_version": __version__,
             "source_commit": _git_commit(ctx.project_root) or "NO_COMMIT",
-            "toolchain_lock_hash": _lock_hash(ctx.project_root),
+            "toolchain_lock_hash": lock_hash(ctx.project_root),
             "qualified_platform": f"{platform.system()} {platform.machine()} "
             f"python {platform.python_version()} (not a qualification claim)",
             "qualified_feature_subset": "static preview subset in docs/supported_features.md "

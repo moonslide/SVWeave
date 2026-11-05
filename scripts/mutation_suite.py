@@ -407,7 +407,7 @@ MUTATIONS: list[Mutation] = [
         "M31", "edit validate reuses a candidate snapshot directory found on disk unverified",
         "A3 (beyond 20.5); council review 2 2026-11-04",
         [Patch("src/svweave/editing/candsnap.py",
-               "        if (not final.is_symlink() and _content_matches(final, files)\n",
+               "        if (not final.is_symlink() and content_matches(final, files)\n",
                "        if (not final.is_symlink()  # " + MARK + ":M31\n")],
         ["tests/unit/test_snapshot_trust.py::"
          "test_SEC_SNP05_validate_never_reuses_a_planted_candidate_snapshot"],

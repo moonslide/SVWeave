@@ -16,9 +16,9 @@ from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import sha256_hex
 from svweave.security.safeio import read_regular_under
 from svweave.snapshot.capture import (
-    _content_matches,
-    _record_matches,
+    content_matches,
     load_record,
+    record_matches,
     remove_snapshot_dir,
     snapshot_id_for,
     snapshot_publish_lock,
@@ -84,8 +84,8 @@ def _derive(
         # an existing directory is reused only when it holds exactly these bytes and this record
         # (its id is computable from public facts; a planted one would make validate compile
         # other bytes than the candidate's); otherwise it is replaced by a verified copy
-        if (not final.is_symlink() and _content_matches(final, files)
-                and _record_matches(final, rec)):
+        if (not final.is_symlink() and content_matches(final, files)
+                and record_matches(final, rec)):
             return load_record(final)
         remove_snapshot_dir(final)
     tmp = root / f".tmp-{uuid.uuid4().hex}"
