@@ -143,3 +143,22 @@ def test_SEC_DIF05_per_commit_git_log_never_runs_the_repository_gpg_program(tmp_
     assert [c["sha"] for c in dimp.commits_in_range(repo, "HEAD~1", "HEAD")[0]] == [sha]
     assert dimp.commits_touching(repo, "HEAD~1", "HEAD", "a.sv", 1, 3) == [sha]
     assert not marker.exists(), "repository config made SVWeave's git log run gpg.program"
+
+
+def test_SEC_DIF07_the_working_tree_new_side_never_leaves_the_repository(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """First council review (test-evidence finding 3): the guards of the working-tree new side (a
+    link leaving the repository, a non-regular file, the size cap) were untested."""
+    repo = tmp_path / "r"
+    repo.mkdir()
+    (repo / "in.sv").write_bytes(b"module a; endmodule\n")
+    secret = tmp_path / "secret.txt"
+    secret.write_bytes(b"outside the repository\n")
+    (repo / "out.sv").symlink_to(secret)
+    (repo / "dir.sv").mkdir()
+    assert dimp._new_version(repo, "in.sv", None) == b"module a; endmodule\n"
+    assert dimp._new_version(repo, "out.sv", None) is None
+    assert dimp._new_version(repo, "../secret.txt", None) is None
+    assert dimp._new_version(repo, "dir.sv", None) is None
+    monkeypatch.setattr(dimp, "MAX_DIFF_BYTES", 4)
+    assert dimp._new_version(repo, "in.sv", None) is None

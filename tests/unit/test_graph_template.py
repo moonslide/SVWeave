@@ -6,6 +6,7 @@ import json
 import re
 
 from svweave.application.graph_template import dumps_safe, render_html
+from tests.node_support import node_or_skip
 
 HOSTILE = '</script><script>alert(1)</script><!-- &     "quote" \\'
 
@@ -67,14 +68,10 @@ def test_GRF_U05_the_viewer_script_parses_as_javascript(tmp_path) -> None:  # ty
     """The template is a Python string: an escape like "\\n" in the JS silently becomes a real
     newline and breaks every page (it happened once, unseen by the substring checks above). Parse
     the rendered script with node's own parser."""
-    import shutil
     import subprocess
 
-    import pytest
 
-    node = shutil.which("node")
-    if node is None:
-        pytest.skip("node is required to parse the viewer script")
+    node = node_or_skip("parse the viewer script")
     page = render_html({"nodes": [], "edges": [], "hubs": [], "meta": {}})
     script = page.split("<script>")[1].split("</script>")[0]
     f = tmp_path / "viewer.js"

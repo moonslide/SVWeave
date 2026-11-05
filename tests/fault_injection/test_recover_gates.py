@@ -136,3 +136,20 @@ def test_a3_a_foreign_change_behind_twenty_own_changes_is_still_refused(
     e = refused(ws, tid)
     assert e.code is ErrorCode.EDIT_CONFLICT and e.details["reason"] == "workspace_changed"
     assert [c["path"] for c in e.details["changed"]] == ["rtl/defs.svh"]
+
+
+def test_a3_roll_forward_of_a_journal_for_another_patch_is_refused(ws: EditWs) -> None:
+    """First council review (test-evidence finding 6): the journal_patch_mismatch gate had no
+    negative test; the journal must describe exactly the approved patch."""
+    import json
+    import os
+
+    tid, h, _ = two_file_txn(ws)
+    crash(ws, tid, h)
+    jp = ws.root / ".svweave" / "journal" / f"{tid}.json"
+    j = json.loads(jp.read_text())
+    j["patch_hash"] = "e" * 64  # a journal that belongs to another patch
+    os.chmod(jp, 0o600)
+    jp.write_text(json.dumps(j, indent=2, sort_keys=True) + "\n")
+    e = refused(ws, tid)
+    assert e.code is ErrorCode.APPROVAL_REQUIRED and e.details["reason"] == "journal_patch_mismatch"

@@ -75,7 +75,9 @@ def test_GRF_I03_limits_hubs_and_refusals(tmp_path: Path) -> None:
     assert code == 0 and env["data"]["truncated"] is True
     assert any(w.startswith("truncated:") for w in env["warnings"])
     cut = _page_data(root / env["data"]["path"])
-    assert [n["depth"] for n in cut["nodes"]] == sorted(n["depth"] for n in cut["nodes"])[: len(cut["nodes"])]
+    # shallowest first, exactly: the top and two of the four lanes, not a pre-order prefix
+    # [top, lane0, its SVA bind] (first council review, test-evidence finding 9)
+    assert [n["depth"] for n in cut["nodes"]] == [0, 1, 1]
     for bad in (["--name", "../x"], ["--name", "a/b"], ["--name", ".hidden"], ["--max-fanout", "1"],
                 ["--max-instances", "0"]):
         code, e = run(root, "graph", "export", "--build", bid, *bad)
@@ -211,12 +213,12 @@ def test_GRF_I06_subtree_root_resolution_limits_and_refusals(tmp_path: Path) -> 
 # ------------------------------------------------------------------ diff view (--diff-base)
 # git diff -> changed module/interface definitions -> their instances with subtrees, plus the
 # ancestors that connect them (context). Expectations derived from the grf_subtree RTL.
-def _git_grf(tmp_path: Path, cores: int = 2) -> Path:
+def _git_grf(tmp_path: Path, cores: int = 2, clusters: int = 2) -> Path:
     from tests.integration.helpers import lang_ws
     from tests.integration.test_diff_impact import git
 
     w = lang_ws(tmp_path, "grf_subtree", "grf_soc", top_parameters=[
-        {"top": "grf_soc", "name": "CLUSTERS", "value": "2"},
+        {"top": "grf_soc", "name": "CLUSTERS", "value": str(clusters)},
         {"top": "grf_soc", "name": "CORES", "value": str(cores)},
     ])
     (w.root / ".gitignore").write_text(".svweave/\n")
@@ -776,3 +778,113 @@ def test_GRF_I21_per_commit_limits_are_reported(tmp_path: Path,
     assert any("carry no commit labels" in w and "at most 1 definitions" in w
                for w in env["warnings"])
     assert sum(1 for x in d["changed_definitions"] if x.get("commits") is not None) == 1
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I22_a_build_of_a_third_revision_is_mapped_approximately_and_says_so(
+        tmp_path: Path) -> None:
+    """First council review (test-evidence finding 2): the approximate (unaligned) mapping of the
+    graph diff view was never exercised: the build's snapshot equals neither side of the diff."""
+    from tests.integration.test_diff_impact import git
+
+    root = _git_grf(tmp_path)
+    _edit(root, "grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];")
+    git(root, "commit", "-q", "-am", "X")
+    _edit(root, "grf_reduce.sv", "acc += din[i*W+:W];", "acc -= din[i*W+:W];")  # a third version
+    bid = _build(root)
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~1",
+                    "--diff-head", "HEAD")
+    assert code == 0, env.get("error")
+    files = {f["path"]: f for f in env["data"]["diff"]["files"]}
+    assert files["grf_reduce.sv"]["aligned"] is not True
+    assert any("match neither side" in w for w in env["warnings"])
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I23_commit_to_commit_on_a_build_of_the_head_maps_the_new_side_exactly(
+        tmp_path: Path) -> None:
+    """test-evidence finding 3: the `head is not None` branch of the new side (cat-file of the
+    head blob) ran in no test."""
+    from tests.integration.test_diff_impact import git
+
+    root = _git_grf(tmp_path)
+    _edit(root, "grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];")
+    git(root, "commit", "-q", "-am", "X")
+    bid = _build(root)  # the build IS the head revision
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~1",
+                    "--diff-head", "HEAD")
+    assert code == 0, env.get("error")
+    f = {x["path"]: x for x in env["data"]["diff"]["files"]}["grf_reduce.sv"]
+    assert (f["side"], f["aligned"]) == ("new", True)
+    assert not any("match neither side" in w for w in env["warnings"])
+    names = {x["qualified_name"] for x in env["data"]["diff"]["changed_definitions"]}
+    assert names == {"grf_reduce"}
+
+
+def test_GRF_I24_resolve_root_says_absence_is_no_proof_on_a_partial_build(tmp_path: Path) -> None:
+    """test-evidence finding 8 (rule 5): the PARTIAL-build branch of --instance was untested."""
+    from tests.conftest import Ws, profile
+
+    w = Ws(tmp_path / "ws")
+    w.write("rtl/t.sv", "module leaf(input logic i); endmodule\n"
+                        "module top; logic a; assign a = 1'b0; leaf u(.i(a)); endmodule\n")
+    w.config({"p": profile(source_inputs=[{"kind": "file", "path": "rtl/t.sv"}],
+                           top_modules=["top"])})
+    w.policy()
+    code, b = run(w.root, "build", "--profile", "p")
+    assert b["analysis_coverage"]["completeness"] == "PARTIAL", b  # empty module body: a stub
+    code, env = run(w.root, "graph", "export", "--build", b["build_id"], "--instance", "top.nope",
+                    "--allow-partial")
+    assert env["error"]["code"] == "MISSING_INPUT"
+    assert env["error"]["details"]["reason"] == "instance_missing"
+    assert "not proof" in env["error"]["message"]
+
+
+def test_GRF_I25_the_chunked_sql_path_draws_the_same_page(tmp_path: Path,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """test-evidence finding 12: the IN-list chunking (_SQL_CHUNK = 900) never ran under pytest;
+    with a chunk of 7 every subtree read is split in many queries."""
+    import svweave.application.graph as G
+
+    root, bid = _grf(tmp_path, clusters=2, cores=4)
+    cl = "grf_soc.g_cl[1].u_cl"
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", cl, "--name", "one")
+    ref = _page_data(root / env["data"]["path"])
+    monkeypatch.setattr(G, "_SQL_CHUNK", 7)
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", cl, "--name", "many")
+    got = _page_data(root / env["data"]["path"])
+    assert len(got["nodes"]) > 7 and _edges(got) == _edges(ref)
+    assert [n["path"] for n in got["nodes"]] == [n["path"] for n in ref["nodes"]]
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I26_changed_instances_under_two_tops_have_no_common_ancestor(tmp_path: Path) -> None:
+    """test-evidence finding 13: changed chains with no common ancestor (a multi-top build)."""
+    from tests.conftest import Ws, profile
+    from tests.integration.test_diff_impact import git
+
+    w = Ws(tmp_path / "ws")
+    w.write("rtl/a.sv", "module la(input logic i, output logic o); assign o = i; endmodule\n"
+                        "module ta; logic x, y; assign x = 1'b0; la u(.i(x), .o(y)); endmodule\n")
+    w.write("rtl/b.sv", "module lb(input logic i, output logic o); assign o = i; endmodule\n"
+                        "module tb; logic x, y; assign x = 1'b0; lb u(.i(x), .o(y)); endmodule\n")
+    w.write(".gitignore", ".svweave/\n")
+    w.config({"p": profile(source_inputs=[{"kind": "file", "path": "rtl/a.sv"},
+                                          {"kind": "file", "path": "rtl/b.sv"}],
+                           top_modules=["ta", "tb"])})
+    w.policy()
+    git(w.root, "init", "-q", "-b", "main")
+    git(w.root, "add", "-A")
+    git(w.root, "commit", "-q", "-m", "base")
+    for f, m in (("rtl/a.sv", "la"), ("rtl/b.sv", "lb")):
+        p = w.root / f
+        p.write_text(p.read_text().replace(f"module {m}(input logic i, output logic o); assign o = i;",
+                                           f"module {m}(input logic i, output logic o); assign o = ~i;"))
+    code, b = run(w.root, "build", "--profile", "p")
+    assert code == 0, b.get("error")
+    code, env = run(w.root, "graph", "export", "--build", b["build_id"], "--diff-base", "HEAD")
+    assert code == 0, env.get("error")
+    data = _page_data(w.root / env["data"]["path"])
+    marks = _marks(data)
+    assert marks == {"ta": "context", "ta.u": "changed", "tb": "context", "tb.u": "changed"}
+    assert sorted(n["path"] for n in data["nodes"] if n["parent"] is None) == ["ta", "tb"]

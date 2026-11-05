@@ -4,7 +4,6 @@ decoder is the twin of the Python one."""
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -13,6 +12,7 @@ import pytest
 
 from svweave.application.graph_codec import FORMAT, decode, encode
 from svweave.application.graph_template import _PAGE
+from tests.node_support import node_or_skip
 
 HOSTILE = '</script><script>alert(1)</script> &   "q"'
 
@@ -86,9 +86,7 @@ def test_GRF_C02_encode_refuses_what_it_cannot_represent() -> None:
 
 
 def test_GRF_C03_the_javascript_decoder_matches_the_python_decoder(tmp_path: Path) -> None:
-    node = shutil.which("node")
-    if node is None:
-        pytest.skip("node is required to run the viewer's decoder")
+    node = node_or_skip("run the viewer's decoder")
     script = _PAGE.split("// codec-begin")[1].split("// codec-end")[0]
     enc = encode(sample())
     runner = tmp_path / "run.js"
@@ -123,9 +121,7 @@ def test_GRF_C04_the_viewer_knows_every_optional_node_key_and_the_sample_uses_th
 
 def test_GRF_C05_the_viewer_accepts_exactly_the_file_names_the_atlas_writes(tmp_path: Path) -> None:
     """The names graph_atlas writes and the viewer's link/script guards are one contract."""
-    node = shutil.which("node")
-    if node is None:
-        pytest.skip("node is required to run the viewer's guards")
+    node = node_or_skip("run the viewer's guards")
     from svweave.application.graph_atlas import chunk_file, page_file
 
     body = _PAGE.split("<script>\n", 1)[1]

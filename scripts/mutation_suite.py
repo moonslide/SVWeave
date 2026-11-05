@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Critical mutation suite (plan 20.5, release gate "Critical invariants").
 
-Thirty-three deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
+Thirty-nine deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
 the M12–M22 extra write-safety rules, M23–M26 Slurm boundaries, and M27 shared-launcher workspace
 binding, plus M28–M29 verified incremental-snapshot reuse, M30 the complete change list of
-the roll-forward input gate and M31 the verified candidate snapshot of edit validate M32 the recorded state directory and M33 no-follow writes into external roots. They are injected, one at a time, into a THROWAWAY COPY of the
+the roll-forward input gate and M31 the verified candidate snapshot of edit validate M32 the recorded state directory, M33 no-follow writes into external roots and M34–M39 the
+commit freeze check, approval binding, test-token, expiry and key-mode checks and the
+roll-forward journal/patch match. They are injected, one at a time, into a THROWAWAY COPY of the
 repository. For each one the mapped test subset is run against the copy; a mutation is ``KILLED`` when the subset
 fails (pytest exit 1 with at least one FAILED test) and ``SURVIVED`` when it stays green. Anything
 else (patch anchor missing, syntax/collection error, timeout, red baseline) is ``ERROR`` and is
@@ -436,6 +438,63 @@ MUTATIONS: list[Mutation] = [
                "    p = ctx.to_abs(logical)  # " + MARK + ":M33\n"
                "    safeio.write_under(p.parent, p.name, data, mode, durable=True)\n")],
         ["tests/unit/test_external_root_writes.py"],
+    ),
+    m(
+        "M34", "commit writes candidate bytes that changed after validation (freeze check removed)",
+        "20.5 #6 neighbour; EDT-04; first council review, test-evidence finding 4",
+        [Patch("src/svweave/application/edit.py",
+               "            fz.failures\n"
+               "            or fz.patch_hash != txn.patch_hash\n"
+               "            or fz.tree_hash != txn.record.get(\"candidate\", {}).get(\"validated_tree_hash\")\n"
+               "        ):\n",
+               "            False  # " + MARK + ":M34\n        ):\n")],
+        ["tests/unit/test_edit_commit.py::"
+         "test_edt04_replacing_patch_bytes_after_approval_invalidates_it"],
+    ),
+    m(
+        "M35", "a signed approval authorizes another transaction (binding check removed)",
+        "20.5 #6 neighbour; SEC-06; first council review, test-evidence finding 4",
+        [Patch("src/svweave/editing/approval.py",
+               "        if body.get(k) != v:\n            raise need(\"approval_binding_mismatch\", field=k)\n",
+               "        if False:  # " + MARK + ":M35\n"
+               "            raise need(\"approval_binding_mismatch\", field=k)\n")],
+        ["tests/unit/test_edit_commit.py::"
+         "test_sec06_approval_of_another_transaction_cannot_be_reused"],
+    ),
+    m(
+        "M36", "a test-token approval is accepted without the trusted policy flag",
+        "20.5 #6 neighbour; F5; first council review, test-evidence finding 4",
+        [Patch("src/svweave/editing/approval.py",
+               "    if body.get(\"method\") != \"tty\" and not allow_test_approvals:\n",
+               "    if False:  # " + MARK + ":M36\n")],
+        ["tests/unit/test_edit_review_fixes.py::test_f5_test_approvals_need_the_trusted_policy_flag"],
+    ),
+    m(
+        "M37", "an expired approval is still honoured",
+        "20.5 #6 neighbour; SEC-06; first council review, test-evidence finding 4",
+        [Patch("src/svweave/editing/approval.py",
+               "    if (now or _utcnow()) >= exp:\n",
+               "    if False:  # " + MARK + ":M37\n")],
+        ["tests/unit/test_edit_commit.py::test_sec06_expired_approval"],
+    ),
+    m(
+        "M38", "an approval key readable by others is used (key mode check removed)",
+        "20.5 #6 neighbour; F9; first council review, test-evidence finding 4",
+        [Patch("src/svweave/editing/approval.py",
+               "        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o077:\n",
+               "        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid():  # " + MARK
+               + ":M38\n")],
+        ["tests/unit/test_edit_review_fixes.py::test_f9_approval_key_must_be_private_and_owned",
+         "tests/unit/test_edit_review_fixes.py::test_f9_unsafe_key_blocks_commit"],
+    ),
+    m(
+        "M39", "roll-forward applies a journal written for another patch",
+        "A3 (beyond 20.5); first council review, test-evidence finding 6",
+        [Patch("src/svweave/application/edit.py",
+               "    if txn.patch_hash is None or txn.base_snapshot_id is None or j.patch_hash != txn.patch_hash:\n",
+               "    if txn.patch_hash is None or txn.base_snapshot_id is None:  # " + MARK + ":M39\n")],
+        ["tests/fault_injection/test_recover_gates.py::"
+         "test_a3_roll_forward_of_a_journal_for_another_patch_is_refused"],
     ),
 ]
 

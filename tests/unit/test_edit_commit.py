@@ -160,7 +160,10 @@ def test_sec06_approval_of_another_transaction_cannot_be_reused(ws: EditWs) -> N
     h2 = E.validate(ws.opts, "r", transaction_id=t2).data["patch_hash"]
     (ws.trusted() / "approvals" / f"{t2}.json").write_bytes(
         (ws.trusted() / "approvals" / f"{t1}.json").read_bytes())
-    assert code_of(commit, ws, t2, h2).code is ErrorCode.APPROVAL_REQUIRED
+    e = code_of(commit, ws, t2, h2)
+    assert e.code is ErrorCode.APPROVAL_REQUIRED
+    # it is the binding that refuses it (the copied HMAC is valid): test-evidence review 1
+    assert e.details["reason"] == "approval_binding_mismatch", e.details
     assert b'"task hello"' in ws.read("rtl/pkg.sv")
 
 
