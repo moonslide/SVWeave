@@ -514,3 +514,45 @@ def test_f6_abort_takes_the_workspace_lock(ws: EditWs) -> None:
     assert x.code is ErrorCode.EDIT_CONFLICT and x.details["reason"] == "workspace_busy"
     assert st(ws, tid) == "CANDIDATE_READY" and (ws.root / ".svweave/candidates" / tid).exists()
     assert E.abort(ws.opts, "r", transaction_id=tid).data["state"] == "ABORTED"
+
+
+@pytest.mark.parametrize("bad", ["nothex", "A" * 64, "a" * 63, ""])
+def test_f7_cli_commit_names_a_malformed_patch_hash_not_the_derived_key(
+        ws: EditWs, bad: str) -> None:
+    """Third council review: the CLI derived its default commit key from --patch-hash, so a
+    malformed hash was reported as a bad request_key."""
+    import json
+
+    from click.testing import CliRunner
+
+    from svweave.cli import cli
+
+    out = CliRunner().invoke(cli, ["--root", str(ws.root), "--compact", "edit", "commit",
+                                   "--transaction", "txn-" + "a" * 20, "--patch-hash", bad])
+    env = json.loads(out.stdout)
+    assert out.exit_code == 2 and env["error"]["code"] == "INVALID_CONFIG", env
+    assert env["error"]["details"]["field"] == "--patch-hash"
+
+
+
+def test_SEC_SNP07_gc_cannot_run_between_the_candidate_snapshot_and_its_build(
+        ws: EditWs, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Third council review: the derivation's shared hold ended before the candidate build took
+    its own, so a `svweave gc` in between could delete the candidate snapshot."""
+    from svweave.storage.lock import WorkspaceBusy, workspace_lock
+
+    base = ws.build()
+    real = E.run_build_on_record
+    seen: list[str] = []
+
+    def probe(opts: Any, profile: Any, rec: Any, request_id: str, **kw: Any) -> Any:
+        try:  # what gc does: exclusive, non-blocking
+            with workspace_lock(ws.w.ctx().state_dir, exclusive=True, blocking=False):
+                seen.append("gc could run")
+        except WorkspaceBusy:
+            seen.append("gc excluded")
+        return real(opts, profile, rec, request_id, **kw)
+
+    monkeypatch.setattr(E, "run_build_on_record", probe)
+    to_approval(ws, base, [ws.range_edit("rtl/pkg.sv", *TASK)], serena=False)
+    assert seen and set(seen) == {"gc excluded"}, seen

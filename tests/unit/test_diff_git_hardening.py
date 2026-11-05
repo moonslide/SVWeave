@@ -209,3 +209,45 @@ def test_SEC_DIF09_a_working_tree_diff_runs_no_repository_hook_and_leaves_the_in
     # setup check: plain git with the same repository does run the hook
     git("-C", str(repo), "diff", "HEAD", "--")
     assert marker.exists(), "setup: plain git diff must run post-index-change here"
+
+
+def test_SEC_DIF10_the_users_own_safe_directory_still_applies_a_repositorys_never(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Third council review: with the user's config hidden, a repository another user owns (a
+    shared project space the person marked `safe.directory`) lost its commit in the report.
+    Only the system/global entries count: one in the repository's own config is ignored."""
+
+    import svweave.security.git as G
+    from svweave.application.report import _git_commit
+
+    repo = tmp_path / "shared"
+    repo.mkdir()
+    env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path), "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+           "GIT_COMMITTER_EMAIL": "t@t"}
+    for a in (["init", "-q", "-b", "main"], ["commit", "-q", "--allow-empty", "-m", "c"]):
+        subprocess.run(["git", "-C", str(repo), *a], env=env, check=True, capture_output=True)
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], env=env, check=True,
+                          capture_output=True, text=True).stdout.strip()
+    real_env = G.untrusted_repo_env
+    # git's own test knob: treat the repository as owned by someone else (no chown needed)
+    monkeypatch.setattr(G, "untrusted_repo_env",
+                        lambda path=None: {**real_env(path), "GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"})
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("GIT_CONFIG_GLOBAL", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    G.user_safe_directories.cache_clear()
+    try:
+        # the repository marks itself safe: ignored (only protected config counts)
+        subprocess.run(["git", "-C", str(repo), "config", "safe.directory", str(repo)], env=env,
+                       check=True)
+        assert _git_commit(repo) is None
+        G.user_safe_directories.cache_clear()
+        (home / ".gitconfig").write_text(f"[safe]\n\tdirectory = {repo}\n")
+        assert G.user_safe_directories() == (str(repo),)
+        assert _git_commit(repo) == head
+    finally:
+        G.user_safe_directories.cache_clear()

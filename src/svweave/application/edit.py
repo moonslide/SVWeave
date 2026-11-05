@@ -612,11 +612,15 @@ def _run_profile_validation(
             "but is not auto-committable (plan 12.4)",
         })
     brec, _ = _base_rec(ctx, base_env.snapshot_id or "")
-    crec = derive_candidate_snapshot(ctx, brec, changed)
-    if crec is None:
-        failures.append({"reason": "profile_does_not_cover_edit", "profile": profile})
-        return out
-    cand_env = run_build_on_record(opts, profile, crec, request_id, publish=False)
+    # one shared hold from deriving the candidate snapshot to the build that reads it: GC
+    # (exclusive, non-blocking) backs off in between (third council review: the derivation's
+    # own hold ended before the build took its own)
+    with workspace_lock(ctx.state_dir):
+        crec = derive_candidate_snapshot(ctx, brec, changed)
+        if crec is None:
+            failures.append({"reason": "profile_does_not_cover_edit", "profile": profile})
+            return out
+        cand_env = run_build_on_record(opts, profile, crec, request_id, publish=False)
     out["candidate_snapshot_id"] = crec.snapshot_id
     if cand_env.build_id is None or (cand_env.error and cand_env.outcome in (Outcome.ERROR, Outcome.BLOCKED)):
         failures.append({"reason": "candidate_build_failed", "profile": profile,
@@ -1257,12 +1261,18 @@ def _post_apply(
         # published"); a later failing profile must not leave an earlier pointer moved
         from svweave.application.semantic_common import freshness_of
 
-        for prof, bid, old in to_publish:
+        for prof, bid, _old in to_publish:
             db.publish_build(bid, prof)  # a shared build_id must move THIS profile's pointer
+        # informational, and only after EVERY pointer moved: a failure here must not leave an
+        # earlier profile published and a later one not (third council review)
+        for prof, _bid, old in to_publish:
             verified[prof]["old_build_id"] = old
-            verified[prof]["old_build_freshness"] = (
-                freshness_of(ctx, db, require_build(db, old)).value if old else None
-            )
+            try:
+                verified[prof]["old_build_freshness"] = (
+                    freshness_of(ctx, db, require_build(db, old)).value if old else None
+                )
+            except (SvwError, OSError, ValueError):
+                verified[prof]["old_build_freshness"] = Freshness.UNKNOWN.value
     if failures:
         def mut_fail(r: dict[str, Any]) -> None:
             r.setdefault("commit", {})["post_apply"] = {

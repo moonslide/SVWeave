@@ -46,3 +46,38 @@ def test_EDT_PUB01_post_apply_publishes_every_validate_profile_of_a_shared_build
     assert new_p == new_q != bp["build_id"]
     assert _pointer(w.root, "p") == new_p
     assert _pointer(w.root, "q") == new_q, "the second profile's pointer was not moved"
+
+
+def test_EDT_PUB02_a_failing_old_freshness_leaves_no_profile_half_published(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Third council review: computing the old build's freshness inside the publish loop raised
+    after the first profile's pointer had moved, leaving the second profile unpublished."""
+    import svweave.application.semantic_common as SC
+
+    w = demo_ws(tmp_path, editing=True)
+    m = yaml.safe_load((w.root / "svweave.yaml").read_text())
+    m["profiles"]["q"] = dict(m["profiles"]["p"])
+    m["editing"]["validate_profiles"] = ["p", "q"]
+    (w.root / "svweave.yaml").write_text(yaml.safe_dump(m, sort_keys=False))
+    code, bp = run(w.root, "build", "--profile", "p")
+    assert code == 0
+    code, bq = run(w.root, "build", "--profile", "q")
+    assert code == 0 and bq["build_id"] == bp["build_id"]
+    old = str(bp["build_id"])
+    real = SC.freshness_of
+
+    def failing_once_published(ctx, db, build, **kw):  # type: ignore[no-untyped-def]
+        row = db.conn.execute(
+            "SELECT build_id FROM published_pointer WHERE profile='p'").fetchone()
+        if str(build["build_id"]) == old and row is not None and str(row[0]) != old:
+            raise OSError("snapshot record unreadable")  # only after p's pointer moved
+        return real(ctx, db, build, **kw)
+
+    monkeypatch.setattr(SC, "freshness_of", failing_once_published)
+    code, env = preview(w.root, old, "--name", "demo_lane.data_o", "--to", "data_out")
+    assert code == 0 and env["data"]["ready_for_edit_request"] is True, env.get("error")
+    out = apply_through_edit_loop(w.root, env["data"]["edit_request"])
+    assert out["post_apply_status"] == "VERIFIED"
+    assert out["post_apply"]["p"]["old_build_freshness"] == "UNKNOWN"
+    new = out["post_apply"]["p"]["build_id"]
+    assert _pointer(w.root, "p") == _pointer(w.root, "q") == new

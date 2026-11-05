@@ -6,6 +6,7 @@ private metadata copy but takes its environment from :func:`untrusted_repo_env`.
 from __future__ import annotations
 
 import contextlib
+import functools
 import os
 import selectors
 import signal
@@ -64,6 +65,33 @@ def untrusted_repo_env(path: str | None = None) -> dict[str, str]:
     }
 
 
+#: repository-selecting variables never passed to the config lookup below
+_REPO_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_NAMESPACE")
+
+
+@functools.lru_cache(maxsize=1)
+def user_safe_directories() -> tuple[str, ...]:
+    """The person's own ``safe.directory`` entries, from their SYSTEM and GLOBAL git config only
+    (a repository's own config can never add one), read once outside any repository. The
+    hardened runner hides that config, but an owner's explicit decision to trust a repository
+    another user owns (a shared project space) still applies: passed as command-line config,
+    which git treats as protected (third council review: the report lost its commit there).
+    Trusting it runs nothing from it: hooks, fsmonitor, transport and programs stay off."""
+    env = {k: v for k, v in os.environ.items() if k not in _REPO_ENV}
+    env.update(LC_ALL="C", GIT_TERMINAL_PROMPT="0")
+    out: list[str] = []
+    for scope in ("--system", "--global"):
+        try:
+            r = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                ["git", "config", scope, "--get-all", "safe.directory"], cwd="/", env=env,
+                stdin=subprocess.DEVNULL, capture_output=True, timeout=5, check=False)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if r.returncode == 0:
+            out += [v for v in r.stdout.decode("utf-8", "replace").splitlines() if len(v) < 4096]
+    return tuple(out[:64])
+
+
 def kill_group(proc: subprocess.Popen[bytes]) -> None:
     with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(proc.pid, signal.SIGKILL)
@@ -83,6 +111,8 @@ def run_git(
     argv = ["git", "-C", str(repo)]
     for kv in HARDENED_CONFIG:
         argv += ["-c", kv]
+    for d in user_safe_directories():
+        argv += ["-c", f"safe.directory={d}"]
     argv += ["--no-pager", *args]
     try:
         proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell, refs validated by check_ref

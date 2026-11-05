@@ -1165,19 +1165,19 @@ def edit_approve(
 def edit_commit(st: _State, transaction_id: str, patch_hash: str, request_key: str | None) -> None:
     """Apply an approved transaction (compare-and-set, journal, post-apply verification)."""
     from svweave.application import edit as edit_mod
+    from svweave.domain.ids import is_sha256_hex
 
-    key = request_key or f"commit-{transaction_id}-{patch_hash[:12]}"
-    st.emit(
-        st.run(
-            lambda rid: edit_mod.commit(
-                st.opts,
-                rid,
-                transaction_id=transaction_id,
-                expected_patch_hash=patch_hash,
-                request_key=key,
-            )
-        )
-    )
+    def run(rid: str) -> Envelope:
+        # checked before the default key is derived from it: a malformed hash was reported as a
+        # bad request_key (third council review)
+        if not is_sha256_hex(patch_hash):
+            raise SvwError(EC.INVALID_CONFIG, "--patch-hash must be the 64-hex patch hash shown "
+                           "by `svweave edit validate`", {"field": "--patch-hash"})
+        key = request_key or f"commit-{transaction_id}-{patch_hash[:12]}"
+        return edit_mod.commit(st.opts, rid, transaction_id=transaction_id,
+                               expected_patch_hash=patch_hash, request_key=key)
+
+    st.emit(st.run(run))
 
 
 @edit_grp.command("abort")

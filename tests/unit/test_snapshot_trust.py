@@ -3,6 +3,7 @@ on disk is trusted by neither its name nor its record (council review 2). Captur
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -140,8 +141,19 @@ def test_SEC_SNP06_gc_cannot_run_while_a_candidate_snapshot_is_written(
                 seen.append("gc could run")
         except WorkspaceBusy:
             seen.append("gc excluded")
+        # the publish lock serialises the check-then-replace with other publishers (third
+        # council review: this test did not cover it)
+        fd = os.open(ctx.state_dir / "snapshot.publish.lock", os.O_RDWR | os.O_NOFOLLOW)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            seen.append("another publisher could run")
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except BlockingIOError:
+            seen.append("publishers serialised")
+        finally:
+            os.close(fd)
         return real(*a, **kw)  # type: ignore[arg-type]
 
     monkeypatch.setattr(cs, "_derive", probe)
     assert cs.derive_candidate_snapshot(ctx, base, {"rtl/a.sv": b"module a; wire w; endmodule\n"})
-    assert seen == ["gc excluded"]
+    assert seen == ["gc excluded", "publishers serialised"]
