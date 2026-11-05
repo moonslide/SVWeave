@@ -65,15 +65,14 @@
 
 前两次审查留下的所有项目都已处理，并按项目负责人 2026-11-05 的决定进行：批准 `--lazy` 的 CSP 放宽（ADR-014）；SVWeave 只信任它自己创建或由人认领的 `.svweave/`（**破坏性变更：** 每个既有工作区请运行一次 `svweave init --adopt-state`）；第一次审查的遗留项目也一并处理。内容包括修正（共享构建的发布、候选快照在锁内创建、request key 校验、写入外部根目录时不跟随链接、用法错误也输出 envelope、doctor 退出码、qualify 关卡）、新测试与 mutation M32–M40，以及不改变行为的重构（公开的查询核心、单一 git runner、写入安全代码移到 `editing/`、图谱导出拆分、查看器改为 JavaScript 文件、`docs/architecture.md`）。在 `de0e6fe` 验证（run5，一个 4 CPU 云端 session，不是 CI，`SVWEAVE_REQUIRE_BACKENDS=1`）：unit + contract 1793 通过，4 个 BLOCKED 与之前相同；fault injection 21、integration 240、acceptance 12、browser 1 通过；mutation **40/40 KILLED**。第一次运行（run4）发现了一个测试 helper 的回归，记录保留。细节：[evidence/council-review-followup-2026-11-05](evidence/council-review-followup-2026-11-05/README.md)。
 
-随后针对该状态（`41e99df`）进行的第三次六位专家审查发现了新问题，**目前尚未修正**，其中包括：
-- 强化过的 git runner 没有停用仓库 hook，因此对连同 `.git/` 一起交付的仓库，`svw_diff_impact` 可能运行其 `.git/hooks/post-index-change`（已复现）；
-- 当 `project.root` 不是 `.` 时，`svweave init` 与工作区加载记录的是不同的 `.svweave/`，`--adopt-state` 会认领错误的目录；
-- `doctor` 的备援路径会在被拒绝的 `.svweave/` 内进行 probe；
-- 状态记录不涵盖目录内容（recovery rollback 写入 journal 字节时没有 commit 的关卡）；
-- `schema emit` 在错误 envelope 时退出码为 0；
-- git 失败时 qualify 的 dirty-tree 关卡会放行。
+随后针对该状态（`41e99df`）进行的第三次六位专家审查发现了新问题；其中高严重度与已确认的中严重度项目现在都**已修正**，各有测试：
+- 强化过的 git runner 停用仓库 hook，且不再刷新 index（对连同 `.git/` 一起交付的仓库，`svw_diff_impact` 原本可能运行其 `.git/hooks/post-index-change`；修正前先复现）；
+- `svweave init --adopt-state` 认领的是每个命令使用的 `.svweave/`（`<project.root>/.svweave`）；状态记录改为 `.svweave/` 内的随机 token（不再比对 device/inode），登记过程加锁串行化，组或其他人可写的状态目录会被拒绝；
+- 没有通过验证的工作区时，`doctor` 的 probe 状态不会写进项目；
+- `edit recover --rollback` 与 roll-forward 有相同的关卡，并从验证过的 base snapshot 读取原始字节，不跟随链接；
+- `schema emit` 出错时退出码不为 0，`git status` 失败时 qualify 关卡会拦下，MCP launcher 会打印 `--adopt-state` 提示。
 
-所有发现、严重度与已确认的部分：[evidence/council-review-3-2026-11-05](evidence/council-review-3-2026-11-05/README.md)。这不是 `scripts/qualify.py` 的资格认定运行。
+新增 mutation M41–M45。在 `aaecbee` 验证（run7，一个 4 CPU 云端 session，不是 CI，`SVWEAVE_REQUIRE_BACKENDS=1`）：unit + contract 1804 通过，4 个 BLOCKED 与之前相同；fault injection 26、integration 240、acceptance 12、browser 1 通过；mutation **45/45 KILLED**。前一次运行（run6）发现了一个过时的测试假设，记录保留。仍未处理：项目负责人对 `--lazy` CSP 批准的可验证记录（H4）、仓库写进已登记 `.svweave/` 的文件（M1 的内容部分），以及架构／文档项目。细节：[evidence/council-review-3-2026-11-05](evidence/council-review-3-2026-11-05/README.md)。这不是 `scripts/qualify.py` 的资格认定运行。
 
 ### 第二次 Council review：修正与已验证的运行（2026-11-04）
 

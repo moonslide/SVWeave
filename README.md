@@ -90,19 +90,26 @@ fault injection 21, integration 240, acceptance 12, browser 1 passed; mutations 
 A first run (run4) caught a regression in a test helper and is kept. Details:
 [evidence/council-review-followup-2026-11-05](evidence/council-review-followup-2026-11-05/README.md).
 
-A third six-specialist review of that state (`41e99df`) then found new issues, **open and not
-fixed yet**, among them:
-- the hardened git runner does not disable repository hooks, so `svw_diff_impact` can run
-  `.git/hooks/post-index-change` of a repository delivered with its `.git/` (reproduced);
-- `svweave init` and the workspace loader record different `.svweave/` directories when
-  `project.root` is not `.`, so `--adopt-state` adopts the wrong one;
-- `doctor`'s fallback probes inside a refused `.svweave/`;
-- the state record does not cover the directory's contents (recovery rollback writes journal
-  bytes without the commit gates);
-- `schema emit` exits 0 on error envelopes;
-- the qualify dirty-tree gate passes when git fails.
+A third six-specialist review of that state (`41e99df`) found new issues; the high ones and the
+confirmed medium ones are now **fixed**, each with a test:
+- the hardened git runner turns repository hooks off and never refreshes the index
+  (`svw_diff_impact` could run `.git/hooks/post-index-change` of a repository delivered with its
+  `.git/`; reproduced first);
+- `svweave init --adopt-state` adopts the `.svweave/` every command uses (`<project.root>/.svweave`);
+  the state record is a random token inside `.svweave/` (no device/inode numbers), registration is
+  serialized, and a state directory writable by group or others is refused;
+- `doctor` without a verified workspace keeps probe state out of the project;
+- `edit recover --rollback` has roll-forward's gates and reads the original bytes from the
+  validated base snapshot without following links;
+- `schema emit` exits non-zero on errors, the qualify gate blocks when `git status` fails, and
+  the MCP launcher prints the `--adopt-state` hint.
 
-All findings, with severity and what was confirmed:
+New mutations M41–M45. Verified at `aaecbee` (run7, one 4-CPU cloud session, not CI,
+`SVWEAVE_REQUIRE_BACKENDS=1`): unit + contract 1804 passed with the same 4 BLOCKED as before,
+fault injection 26, integration 240, acceptance 12, browser 1 passed; mutations **45/45 KILLED**.
+The run before it (run6) caught a stale test assumption and is kept. Still open: a verifiable
+record of the owner's `--lazy` CSP approval (H4), files a repository writes into a recorded
+`.svweave/` (M1, content part), and architecture/documentation items. Details:
 [evidence/council-review-3-2026-11-05](evidence/council-review-3-2026-11-05/README.md). Not a
 `scripts/qualify.py` qualification run.
 

@@ -7,8 +7,10 @@ read-only, from a clean worktree of `origin/main` whose `AGENTS.md` was the trus
 reviewers could not run commands; the findings marked **reproduced** or **confirmed in code** were
 checked by the author afterwards, the others are the reviewers' code reading.
 
-**Status: reported, not fixed yet.** This round recorded the findings (the project owner asked
-for test, review, README update and push); fixes follow separately.
+**Status (2026-11-05): H1, H2, H3 and the confirmed mediums M1 (rollback part), M2, M3, M4, M5,
+M6 and M11 are fixed** at `673fdb4`/`b916eda`/`aaecbee` and verified in run7 (below); H4, the
+content part of M1, M7–M10 and most Low items are still open. The findings as reported are kept
+unchanged below.
 
 ## High
 
@@ -47,3 +49,56 @@ for test, review, README update and push); fixes follow separately.
 ## Checked and found sound (reviewers' summary)
 
 The semantic_read refactor keeps the old semantics; `editing/tree.py` and `editing/exact_range.py` are byte-identical moves; graph split, codec, search index and page reader are consistent; the viewer hash and CSP are correct; the request-key LIKE escaping, the per-profile publish, the no-follow read helpers, snapshot record validation, search's real-directory check, the gpg/fsmonitor/transport overrides, the sandbox bind rules, the doctor ranking, `--no-baseline`, the benchmark budget recheck and `gateway_lock_refresh.py --online` hold. run5's JUnit files contain every new test; M32–M40 are real kills with green baselines.
+
+## Fixes (2026-11-05, `673fdb4`, `b916eda`, `aaecbee`; verified in run7)
+
+The project owner approved fixing H1, H2, H3 and the rollback checks first, then a full run.
+Each fix below has a test; "fails on the previous code" was checked by running the new tests
+against `8bb9bda`'s `src/` (unit tests) or by the mutation that removes the fix (where the old
+code cannot be imported in place: the fault-injection tests start the real `python -I` slang
+worker, which imports the current `src/`).
+
+| # | Change | Tests | Fails on the previous code |
+|---|---|---|---|
+| H1 | `HARDENED_CONFIG` adds `core.hooksPath=/dev/null` and `diff.autoRefreshIndex=false`: no repository hook runs and a read never rewrites the index | SEC-DIF09 (real git: a `post-index-change` hook, index bytes and mtime) | yes; mutation M44 (both lines removed) KILLED |
+| H2 | `svweave init` resolves the state directory like the workspace loader (`<project.root>/.svweave`, `--manifest` honoured), records and adopts that one; a `project.root` outside the manifest directory is left to the first command (`data.state_dir.deferred`) | SEC-STA06 | yes |
+| M2 | the record is a random token in `.svweave/.svweave-id` whose sha256 the trusted directory keeps, keyed by real path; no device/inode; a first-format record is accepted once and rewritten | SEC-STA04 (replaced, forged, linked token; own backup restored), SEC-STA07 | STA07 yes; STA04 is new behaviour, its check pinned by mutation M43 KILLED |
+| — | registration decisions serialized by a lock in the trusted directory (found while checking the token change: two first commands could leave one's token next to the other's record) | SEC-STA10 (two processes, forced interleaving) | yes (on `673fdb4`) |
+| M11 | a state directory writable by group or others, or a `.svweave` that is not a directory, is refused; registration makes it 0700 | SEC-STA08 | yes |
+| H3 | `doctor` without a verified workspace keeps backend probe state in a private temporary directory, removed afterwards | `test_f7_doctor_without_a_verified_workspace_keeps_probe_state_out_of_the_project` | yes |
+| M1 (rollback part) | `edit recover --rollback` has roll-forward's gates (editing enabled, trusted location, current policy, approval at commit start, journal of this transaction naming only approved files) and reads base bytes from the validated base snapshot record with no link followed | `test_rb_*` (5 tests) | mutations M41 (gates removed) and M42 (link-following read) KILLED |
+| M3 | `qualify.py` blocks when `git status` fails (`tree_state: unknown`) | QUAL-03b | yes |
+| M4 | `schema emit` exits with the error's code | IF-02b | yes |
+| M5 | `svweave-mcp` and `svweave serve` print the error's hint; the refusal message names the upgrade case; `doctor` names a refused state directory `state_dir` | SEC-STA09 | yes |
+| M6 | swap-after-check tests for the source writer and the recovery writer with an external root | SEC-EXT03, SEC-EXT04 | no: they cover a property the code already had; mutation M45 (writer alone reverted) KILLED |
+
+Low items also closed: a regular file named `.svweave` is refused with `state_dir_not_directory`
+(was NotADirectoryError); the record's temporary file has a random name; run6 records the
+exported environment, `git status` before/after and the node/Playwright versions
+(`run7/commands.txt`, `run7/git_status_*.txt`, `run7/host_versions.txt`).
+
+## Still open
+
+* **H4**: the owner's approval of the `--lazy` CSP relaxation needs a verifiable form outside the
+  branch (e.g. the PR approval); only the owner can give it.
+* **M1 (content part)**: the record vouches for the directory, not every file in it; files a
+  repository writes into a registered `.svweave/` (e.g. `git pull` overwriting ignored files that
+  upstream force-added) are still read as SVWeave's, behind the existing per-record checks.
+* **M7–M10** (architecture docs vs ARC-01, the PARTIAL caveat in the shared resolvers, trusted-
+  directory file owners, `queries.py` and private cross-module access) and the remaining Low items.
+
+## Verification
+
+Two recorded runs in one 4-CPU cloud session (not CI), each with `SVWEAVE_REQUIRE_BACKENDS=1
+SVWEAVE_REQUIRE_NODE=1` exported (browser step also `SVWEAVE_REQUIRE_BROWSER=1`); commands in
+`runN/commands.txt`, per-step exit codes in `runN/steps.txt`, JUnit files and logs next to them.
+
+| Run | Commit | Result |
+|---|---|---|
+| [run6](run6/RESULT.md) | `b916eda` | **FAILED** (kept): one integration test asserted that a newly recorded state directory is empty; it now holds the token. Test assumption fixed in `aaecbee`. Everything else as in run7 |
+| run7 | `aaecbee` | ruff, mypy, schema check, lock verify clean; unit + contract 1804 passed, plus the same 4 BLOCKED as run5 (JUnit: 3 failures, 1 error: required tests that cannot execute on this host, by design under `SVWEAVE_REQUIRE_BACKENDS=1`); fault injection 26, integration 240, acceptance 12, browser 1 passed; mutations **45/45 KILLED** with green baselines; no backend process left; working tree clean before and after (only `run7/` itself) |
+
+The 4 BLOCKED tests: `test_f10_python_bind_is_narrowed_to_exe_stdlib_and_libpython` (interpreter
+under `/usr`), the two `test_DEP_01_actual_*` artifact builds (hatchling 1.29.0 not installed
+offline) and `test_N6_unreadable_lookup_dir_raises_instead_of_dropping_subtree` (runs as root).
+BLOCKED is not PASS. This is not a `scripts/qualify.py` qualification run.

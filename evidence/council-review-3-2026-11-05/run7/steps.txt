@@ -1,0 +1,11 @@
+ruff rc=0 wall_s=0
+mypy rc=0 wall_s=0
+schema_check rc=0 wall_s=1
+lock_verify rc=0 wall_s=1
+unit_contract rc=1 wall_s=138
+fault_injection rc=0 wall_s=16
+integration rc=0 wall_s=434
+acceptance rc=0 wall_s=33
+browser rc=0 wall_s=6
+mutation rc=0 wall_s=648
+DONE
