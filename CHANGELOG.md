@@ -67,6 +67,26 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   the error's code (an INTERNAL or POLICY_DENIED error exited 0); `scripts/qualify.py` blocks
   when `git status` fails (the tree's state is unknown; `tree_state` in the report). The source
   writer's own no-follow is pinned by a swap-after-check test (mutation M45).
+* **Fixes after PR #2 for the third council review's remaining findings** (each with a test;
+  not yet in a recorded full run, see `2026_1105_hand_off.md`): every shared resolver (impact,
+  rename preview, hierarchy, connections, assertions, symbol, references) says "absence is not
+  proof" for a target missing from a build that is not COMPLETE (`details.completeness`,
+  `absence_is_proof: false`); the files of the trusted directory (approval key, cursor key, probe
+  record, state record) are created and read by one set of helpers. **Behaviour change:** a
+  group/other-readable `cursor.key` is refused (`cursor_key_untrusted`) instead of silently
+  tightened (delete it; outstanding cursors stop working), and a trusted directory inside the
+  project tree is refused when the workspace loads; Click usage-error envelopes are redacted,
+  name the option as typed (`--out`) and a bare `svweave` says "missing command" instead of
+  carrying the help text; `.svweave/svweave.db` (and `-wal`/`-shm`/`-journal`) and the lock files
+  are not opened through links (`state_file_not_regular`); rename, diff impact, per-commit labels
+  and LSP positions read snapshot bytes without following links and check the hash
+  (`snapshot_file_invalid`); a missing directory under a no-follow read is `FileNotFoundError`,
+  not POLICY_DENIED; post-apply moves every profile's pointer before computing the old build's
+  freshness; the hardened git runner honours the person's own `safe.directory` from the
+  system/global config; `svweave edit commit` validates `--patch-hash` before deriving the default
+  key; `edit validate` holds one shared lock from the candidate snapshot to its build; ARC-01
+  checks every import (lazy ones included) against the table in `docs/architecture.md`.
+  `scripts/record_verification_run.sh` is the recorded-run script.
 * **Fixes from the second council review** (each with a test that fails without it):
   `--per-commit`'s `git log` ran the repository's `gpg.program` for a signed commit when the
   repository config set `log.showSignature` (reproduced; signature checks, ext-diff and textconv

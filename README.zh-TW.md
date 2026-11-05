@@ -61,7 +61,7 @@
 
 ## 狀態
 
-**待辦與交接（2026-11-05）：** [2026_1105_hand_off.md](2026_1105_hand_off.md) 依建議順序列出所有尚未處理的項目：需要專案負責人決定的事（`--lazy` CSP 核准的可驗證紀錄、PR 與合併、`AGENTS.md` 的修改、舊格式狀態紀錄、`init` 的新行為），接著是安全與正確性、架構與文件、測試證據，並說明怎麼驗證與注意事項。專案仍是 developer preview、UNQUALIFIED：這個分支上沒有跑過 `scripts/qualify.py`。
+**狀態與待辦（2026-11-05）：** PR #2 已合併。其後的 commit（在分支 `claude/partial-compile-html-1eyxxd` 上，尚未開 PR）處理了第三次審查的 M7、M8、M9 與安全、正確性項目（所有共用 resolver 都說明「找不到不代表不存在」、受信任目錄的檔案只有一個擁有者、讀 snapshot 不跟隨連結且檢查雜湊、candidate snapshot 外加鎖、ARC-01 固定的 import 矩陣），並依負責人的決定刪除第一版狀態紀錄。這些改動**還沒有**經過有紀錄的完整驗證：最後一次是 `aaecbee` 的 run7；合併後只跑了 ruff、mypy 與 unit、contract、fault-injection（1863 通過、4 skipped，沒有存成 evidence）。[2026_1105_hand_off.md](2026_1105_hand_off.md) 依建議順序列出尚未處理的項目：用 `scripts/record_verification_run.sh` 跑 run8、第四次 council review、負責人對 `--lazy` CSP 核准的可驗證紀錄（H4，在 PR #2 留言，尚未留）、M10，以及架構、文件與測試證據項目；並說明怎麼驗證與注意事項。專案仍是 developer preview、UNQUALIFIED：這個分支上沒有跑過 `scripts/qualify.py`。
 
 ### 兩次審查的後續處理與第三次 Council review（2026-11-05）
 

@@ -74,12 +74,19 @@ compare-and-set write (TB4). Dashed lines are trust boundaries TB1 to TB4.*
 
 ## Status
 
-**Open work and hand-off (2026-11-05):** [2026_1105_hand_off.md](2026_1105_hand_off.md) (in
-Traditional Chinese) lists everything still open, in the suggested order: decisions for the project
-owner (a verifiable record of the `--lazy` CSP approval, PR and merge, the `AGENTS.md` edits, the
-first-format state record, `init`'s new behaviour), then security and correctness, architecture
-and documentation, and test-evidence items; plus how to verify and known pitfalls. The project
-stays a developer preview, UNQUALIFIED: `scripts/qualify.py` has not been run on this branch.
+**State and open work (2026-11-05):** PR #2 is merged. Commits after it (on branch
+`claude/partial-compile-html-1eyxxd`, no PR yet) close the third review's leftovers M7, M8, M9 and the
+security and correctness items (absence caveat in every shared resolver, one owner for the
+trusted-directory files, snapshot reads that follow no link and check the hash, a lock around the
+candidate snapshot, an import matrix pinned by ARC-01) and drop the first-format state record
+per the owner's decision. They have **not** been through a recorded full run: the last one is run7 at
+`aaecbee`; after the merge only ruff, mypy and the unit, contract and fault-injection suites were run
+(1863 passed, 4 skipped, not saved as evidence). [2026_1105_hand_off.md](2026_1105_hand_off.md) (in
+Traditional Chinese) lists what is still open in the suggested order: run8 with
+`scripts/record_verification_run.sh`, a fourth council review, the owner's verifiable record of the
+`--lazy` CSP approval (H4, a comment on PR #2 that has not been posted), M10 and the architecture,
+documentation and test-evidence items; plus how to verify and known pitfalls. The project stays a
+developer preview, UNQUALIFIED: `scripts/qualify.py` has not been run on this branch.
 
 ### Follow-up of both reviews and third council review (2026-11-05)
 
