@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 from svweave.application.graph_template import dumps_safe, render_html
 from tests.node_support import node_or_skip
@@ -77,4 +78,26 @@ def test_GRF_U05_the_viewer_script_parses_as_javascript(tmp_path) -> None:  # ty
     f = tmp_path / "viewer.js"
     f.write_text(script)
     r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-800:]
+
+
+def test_GRF_U06_the_viewer_is_a_javascript_file_and_its_optional_keys_come_from_the_codec(
+        tmp_path: Path) -> None:
+    """Second council review (architecture 3/4): the viewer lived in a non-raw Python string
+    (escapes doubled by hand, not lintable) and its optional node keys were a second copy."""
+    import json as _json
+    import subprocess
+
+    from svweave.application import graph_template as gt
+    from svweave.application.graph_codec import OPTIONAL_KEYS
+
+    js = (Path(gt.__file__).parent / "graph_viewer.js").read_text()
+    assert js.count("@@SVWEAVE_OPTIONAL_KEYS@@") == 1
+    filled = js.replace("@@SVWEAVE_OPTIONAL_KEYS@@", _json.dumps(list(OPTIONAL_KEYS)))
+    assert f"<script>{filled}</script>" in gt._PAGE  # exactly the file is inlined (and hashed)
+    assert '"use strict";' not in Path(gt.__file__).read_text()  # no JavaScript left in Python
+    node = node_or_skip("parse the viewer file")
+    f = tmp_path / "viewer.js"
+    f.write_text(filled)
+    r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True, check=False)
     assert r.returncode == 0, r.stderr[-800:]

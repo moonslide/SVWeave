@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import re
 import stat
 from pathlib import Path
 from typing import Any
@@ -17,14 +15,10 @@ pytestmark = pytest.mark.integration
 
 
 def _page_data(path: Path) -> dict[str, Any]:
-    m = re.search(r'<script id="data" type="application/json">(.*?)</script>', path.read_text(), re.S)
-    assert m
-    from svweave.application.graph_codec import FORMAT, decode
+    from svweave.application.graph_codec import FORMAT, read_page
 
-    raw = json.loads(m.group(1))
-    assert raw.get("format") == FORMAT  # pages are written compact (svweave-graph/2)
-    data: dict[str, Any] = decode(raw)
-    return data
+    assert f'"format":"{FORMAT}"' in path.read_text()  # pages are written compact
+    return read_page(path.read_text())
 
 
 def _built(tmp_path: Path, **kw: Any) -> tuple[Path, str]:
@@ -545,15 +539,12 @@ def test_GRF_I15_the_atlas_pages_together_are_exactly_the_complete_topology(
         union += sorted(_edges(pg))
     assert len(union) == len(set(union)) and set(union) == _edges(whole)
     # the index page's search covers every instance and points at the page that shows it
-    srch = index["atlas_search"]
-    paths: list[str] = []
-    for i in range(len(srch["p"])):
-        rel = srch["s"][srch["r"][i]]
-        paths.append(paths[srch["p"][i]] + "." + rel if srch["p"][i] >= 0 else rel)
-    assert sorted(paths) == sorted(wnodes)
-    for i, path in enumerate(paths):
-        on = pages[srch["pages"][srch["pg"][i]]]
-        assert path in {n["path"] for n in on["nodes"] if "portal" not in n}
+    from svweave.application.graph_codec import decode_search
+
+    found = decode_search(index["atlas_search"])
+    assert sorted(p for p, _ in found) == sorted(wnodes)
+    for path, file in found:
+        assert path in {n["path"] for n in pages[file]["nodes"] if "portal" not in n}
 
 
 def test_GRF_I16_atlas_refusals_and_a_subtree_atlas(tmp_path: Path) -> None:
@@ -579,12 +570,9 @@ def test_GRF_I16_atlas_refusals_and_a_subtree_atlas(tmp_path: Path) -> None:
 
 
 def _chunk_data(path: Path) -> dict[str, Any]:
-    from svweave.application.graph_codec import decode
+    from svweave.application.graph_codec import read_chunk
 
-    text = path.read_text()
-    assert text.startswith("svwChunk(") and text.endswith(");\n")
-    data: dict[str, Any] = decode(json.loads(text[len("svwChunk("):-3]))
-    return data
+    return read_chunk(path.read_text())
 
 
 def test_GRF_I17_lazy_one_page_plus_parts_is_the_complete_topology(tmp_path: Path) -> None:
@@ -760,7 +748,7 @@ def test_GRF_I21_per_commit_limits_are_reported(tmp_path: Path,
                                                 monkeypatch: pytest.MonkeyPatch) -> None:
     """Council review 2: the commit-range cap and the traced-definition cap were untested."""
     import svweave.application.diff_impact as dimp
-    import svweave.application.graph as G
+    import svweave.application.graph_diff as G
 
     root = _git_grf(tmp_path)
     _commit_series(root)
@@ -844,7 +832,7 @@ def test_GRF_I25_the_chunked_sql_path_draws_the_same_page(tmp_path: Path,
                                                           monkeypatch: pytest.MonkeyPatch) -> None:
     """test-evidence finding 12: the IN-list chunking (_SQL_CHUNK = 900) never ran under pytest;
     with a chunk of 7 every subtree read is split in many queries."""
-    import svweave.application.graph as G
+    import svweave.application.graph_model as G
 
     root, bid = _grf(tmp_path, clusters=2, cores=4)
     cl = "grf_soc.g_cl[1].u_cl"

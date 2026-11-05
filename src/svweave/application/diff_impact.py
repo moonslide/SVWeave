@@ -25,6 +25,7 @@ import hashlib
 import os
 import re
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +77,7 @@ from svweave.domain.envelope import Envelope, Pagination
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.security.git import HARDENED_CONFIG, LOG_SAFE, run_git
 from svweave.snapshot.capture import load_record, snapshots_dir
+from svweave.snapshot.models import SnapFile
 
 DIFF_NOTE = (
     "old-side line ranges of the git diff mapped onto the build's snapshot; exact only for files "
@@ -274,9 +276,29 @@ def _new_version(top: Path, path: str, head: str | None) -> bytes | None:
         return f.read()
 
 
+@dataclass(frozen=True)
+class Changes:
+    """What :func:`collect_changes` found (second council review, architecture finding 7: it was
+    an untyped 11-key dict). ``top``/``rel``/``snap_dir``/``by_logical`` are the git top-level, the
+    project's path in it, the build's snapshot directory and its files, for callers that read
+    further revisions (per-commit labels)."""
+
+    top: Path
+    rel: str
+    diffs: list[FileDiff]
+    files: list[dict[str, Any]]
+    unmapped: list[dict[str, Any]]
+    unattributed: list[dict[str, Any]]
+    affected: list[dict[str, Any]]
+    non_instance: list[dict[str, Any]]
+    by_def: dict[str, dict[str, Any]]
+    snap_dir: Path
+    by_logical: dict[str, SnapFile]
+
+
 def collect_changes(
     s: QuerySession, *, base: str, head: str | None, repo: str | None, new_side: bool = False
-) -> dict[str, Any]:
+) -> Changes:
     """Read the git diff and attribute its changed ranges to declarations of the build behind
     session ``s``; shared by :func:`diff_impact` and the graph diff view. ``base``/``head`` must
     already have passed :func:`check_ref`.
@@ -432,10 +454,10 @@ def collect_changes(
                 *ids,
             )
             d["port_changes"].append({"port": rep["qualified_name"], "connection_sites": sites})
-    return {"top": top, "rel": rel, "diffs": diffs, "files": files_out, "unmapped": unmapped,
-            "unattributed": unattributed, "affected": affected, "non_instance": non_instance,
-            "by_def": by_def, "snap_dir": snap_dir,
-            "by_logical": {f.logical_path: f for f in rec.files}}
+    return Changes(top=top, rel=rel, diffs=diffs, files=files_out, unmapped=unmapped,
+                   unattributed=unattributed, affected=affected, non_instance=non_instance,
+                   by_def=by_def, snap_dir=snap_dir,
+                   by_logical={f.logical_path: f for f in rec.files})
 
 
 MAX_RANGE_COMMITS = 500
@@ -483,9 +505,9 @@ def diff_impact(
     lim = DEFAULT_LIST if limit is None else check_limit(limit)
     with _session(opts, build_id) as s:
         ch = collect_changes(s, base=base, head=head, repo=repo)
-        top, rel, diffs = ch["top"], ch["rel"], ch["diffs"]
-        files_out, unmapped, unattributed = ch["files"], ch["unmapped"], ch["unattributed"]
-        affected, non_instance, by_def = ch["affected"], ch["non_instance"], ch["by_def"]
+        top, rel, diffs = ch.top, ch.rel, ch.diffs
+        files_out, unmapped, unattributed = ch.files, ch.unmapped, ch.unattributed
+        affected, non_instance, by_def = ch.affected, ch.non_instance, ch.by_def
         graphs = _definition_graph(s)
         up, down = graphs
         names = _names(s, set(by_def))

@@ -30,7 +30,6 @@ import datetime as dt
 import hashlib
 import json
 import os
-import re
 import shutil
 import statistics
 import subprocess
@@ -48,7 +47,6 @@ REPO = Path(__file__).resolve().parents[1]
 FIXTURE = REPO / "fixtures" / "language" / "grf_subtree"
 SVWEAVE = REPO / ".venv" / "bin" / "svweave"
 CLI_TIMEOUT_S = 900.0
-_DATA = re.compile(r'<script id="data" type="application/json">(.*?)</script>', re.S)
 
 MANIFEST = """\
 schema_version: "1.0"
@@ -111,13 +109,12 @@ def _cli(root: Path, args: list[str]) -> tuple[float, int, dict[str, Any]]:
 
 
 def _page(path: Path) -> dict[str, Any]:
-    m = _DATA.search(path.read_text())
-    if not m:
-        raise SystemExit(f"no data block in {path}")
-    from svweave.application.graph_codec import decode
+    from svweave.application.graph_codec import read_page
 
-    data: dict[str, Any] = decode(json.loads(m.group(1)))
-    return data
+    try:
+        return read_page(path.read_text())
+    except ValueError as e:
+        raise SystemExit(f"{path}: {e}") from e
 
 
 def equivalence(full: dict[str, Any], sub: dict[str, Any], root: str) -> list[str]:

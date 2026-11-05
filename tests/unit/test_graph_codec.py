@@ -107,16 +107,16 @@ def test_GRF_C03_the_javascript_decoder_matches_the_python_decoder(tmp_path: Pat
 
 
 def test_GRF_C04_the_viewer_knows_every_optional_node_key_and_the_sample_uses_them_all() -> None:
-    """Council review 2: a key added to graph_codec._OPTIONAL but not to the viewer would be
+    """Council review 2: a key added to graph_codec.OPTIONAL_KEYS but not to the viewer would be
     dropped silently in the browser (GRF-C03 only covers keys its sample happens to use)."""
     import re
 
-    from svweave.application.graph_codec import _OPTIONAL
+    from svweave.application.graph_codec import OPTIONAL_KEYS
 
     js = re.search(r"var OPTIONAL = \[(.*?)\];", _PAGE)
-    assert js and [x.strip().strip('"') for x in js.group(1).split(",")] == list(_OPTIONAL)
+    assert js and [x.strip().strip('"') for x in js.group(1).split(",")] == list(OPTIONAL_KEYS)
     used = {k for n in sample()["nodes"] for k in n}
-    assert set(_OPTIONAL) <= used
+    assert set(OPTIONAL_KEYS) <= used
 
 
 def test_GRF_C05_the_viewer_accepts_exactly_the_file_names_the_atlas_writes(tmp_path: Path) -> None:

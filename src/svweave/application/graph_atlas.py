@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from svweave.application.graph_codec import encode as encode_page
+from svweave.application.graph_codec import encode_search
 from svweave.application.graph_template import dumps_safe, render_html
 from svweave.application.semantic_read import QuerySession, rows_in
 
@@ -132,31 +133,11 @@ def search_index(rows: list[Any], pages: list[Page]) -> dict[str, Any]:
             home.setdefault(m, i)
         for r in pg.roots:
             home[r] = i
-    pos: dict[str, int] = {}
-    paths: dict[str, str] = {}
-    strings: list[str] = []
-    sidx: dict[str, int] = {}
-    cols: dict[str, list[int]] = {"p": [], "r": [], "pg": []}
-    for r in rows:
-        iid = str(r["instance_id"])
-        if iid not in home:
-            continue
-        own = str(r["path"])
-        parent = str(r["parent_id"]) if r["parent_id"] is not None else None
-        if parent in pos and own.startswith(paths[parent] + "."):
-            pi, rel = pos[parent], own[len(paths[parent]) + 1 :]
-        else:
-            pi, rel = -1, own
-        pos[iid] = len(cols["pg"])
-        paths[iid] = own
-        if rel not in sidx:
-            sidx[rel] = len(strings)
-            strings.append(rel)
-        cols["p"].append(pi)
-        cols["r"].append(sidx[rel])
-        cols["pg"].append(home[iid])
-    return {"pages": [pg.file for pg in pages], "parent": [-1 if pg.parent is None else pg.parent
-                                                          for pg in pages], "s": strings, **cols}
+    items = [(str(r["instance_id"]), None if r["parent_id"] is None else str(r["parent_id"]),
+              str(r["path"]), home[str(r["instance_id"])])
+             for r in rows if str(r["instance_id"]) in home]
+    return encode_search(items, [pg.file for pg in pages],
+                         [-1 if pg.parent is None else pg.parent for pg in pages])
 
 
 def build_pages(
