@@ -159,14 +159,8 @@ def freshness_of(
     unpublished (running, failed, PARTIAL) does not demote the published build. ``strict`` skips the stat fast path."""
     sid = build["snapshot_id"]
     sdir = snapshots_dir(ctx) / sid
-    snap_row = db.conn.execute(
-        "SELECT gc_state FROM snapshots WHERE snapshot_id=?", (sid,)
-    ).fetchone()
-    if (
-        snap_row is None
-        or snap_row["gc_state"] == "DELETED"
-        or not (sdir / "snapshot.json").is_file()
-    ):
+    gc_state = db.snapshot_gc_state(sid)
+    if gc_state is None or gc_state == "DELETED" or not (sdir / "snapshot.json").is_file():
         return Freshness.HISTORICAL
     key = (str(ctx.state_dir), str(build["build_id"]))
     rec = _RECORDS.get((key[0], sid))

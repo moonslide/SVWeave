@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from svweave.adapters.slang.runner import WorkerHandle
-from svweave.application.build import DB_FILENAME, require_execution_fingerprint, run_build
+from svweave.application.build import require_execution_fingerprint, run_build
 from svweave.application.events import EventLog, read_events
 from svweave.application.evidence import record_static_for
 from svweave.application.options import WorkspaceOptions
@@ -34,7 +34,7 @@ from svweave.domain.ids import new_job_id
 from svweave.domain.states import ACTIVE_JOB_STATES, JobLifecycle
 from svweave.execution.ledger import ensure_reconciled, job_requires_reconciliation
 from svweave.execution.slurm import ensure_available
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 from svweave.storage.lock import WorkspaceBusy, build_lock
 
 log = logging.getLogger("svweave.gateway")

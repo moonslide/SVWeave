@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from svweave.application.build import DB_FILENAME, _run_build_with_capture
+from svweave.application.build import _run_build_with_capture
 from svweave.application.options import WorkspaceOptions
 from svweave.config.context import WorkspaceContext
 from svweave.domain.cursor import MAX_RESPONSE_BYTES
@@ -19,7 +19,7 @@ from svweave.domain.ids import is_sha256_hex
 from svweave.manifest.models import NormalizedManifest
 from svweave.snapshot.incremental import capture_snapshot_incremental, load_baseline_record
 from svweave.snapshot.models import SnapshotRecord
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 
 MAX_CHANGED_FILES = 200
 LIMITATIONS = [

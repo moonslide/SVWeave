@@ -17,15 +17,16 @@ from svweave.application import graph, queries
 from svweave.application import impact as impact_mod
 from svweave.application import rename as rename_mod
 from svweave.application import status as status_mod
+from svweave.application.exports import check_export_name, write_export
 from svweave.application.search import svw_search
 from svweave.application.session import Session
 from svweave.domain.envelope import AnalysisCoverage, Envelope, ErrorInfo, Outcome
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import is_sha256_hex
 from svweave.domain.states import Completeness, Freshness
-from svweave.security.safeio import ensure_private_dir, require_real_dir, write_under
+from svweave.security.safeio import require_real_dir
 from svweave.snapshot.capture import check_freshness, load_record, snapshots_dir
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 
 JOB_LIMITATIONS = [
     "A finished job says the worker ran, not that the design is correct; read analysis_coverage "
@@ -187,11 +188,9 @@ def search(
         )
     ctx = session.opts.load()
     sdir = snapshots_dir(ctx) / snapshot_id
-    with Database(ctx.state_dir / "svweave.db") as db:
-        row = db.conn.execute(
-            "SELECT gc_state FROM snapshots WHERE snapshot_id=?", (snapshot_id,)
-        ).fetchone()
-    if row is None or row["gc_state"] != "PRESENT" or not (sdir / "snapshot.json").is_file():
+    with Database(ctx.state_dir / DB_FILENAME) as db:
+        gc_state = db.snapshot_gc_state(snapshot_id)
+    if gc_state != "PRESENT" or not (sdir / "snapshot.json").is_file():
         raise SvwError(
             ErrorCode.MISSING_INPUT,
             f"snapshot {snapshot_id} not found",
@@ -341,12 +340,8 @@ def rename_preview(
     write_spec: str | None = None,
 ) -> Envelope:
     clean_text(new_name=new_name, symbol_id=symbol_id, file=file, name=name, write_spec=write_spec)
-    if write_spec is not None and (
-        write_spec.startswith(".") or not graph._SAFE_NAME.fullmatch(write_spec + ".json")
-    ):
-        raise SvwError(
-            ErrorCode.INVALID_CONFIG, "write_spec must match [A-Za-z0-9._-]+ (no path)", {}
-        )
+    if write_spec is not None:
+        check_export_name(write_spec + ".json", "write_spec")
     env = rename_mod.rename_preview(
         session.opts,
         build_id,
@@ -364,10 +359,8 @@ def rename_preview(
             env.warnings.append("write_spec: nothing written, the preview has blockers")
         else:
             ctx = session.opts.load()
-            exports = ensure_private_dir(ctx.state_dir, graph.EXPORT_DIR)
             payload = (json.dumps(req, indent=2, sort_keys=True) + "\n").encode("utf-8")
-            write_under(exports, write_spec + ".json", payload)
-            env.data["spec_path"] = f".svweave/{graph.EXPORT_DIR}/{write_spec}.json"
+            env.data["spec_path"] = write_export(ctx.state_dir, write_spec + ".json", payload)
     return env
 
 

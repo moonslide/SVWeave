@@ -17,6 +17,7 @@ from typing import Any
 from svweave.domain.ids import canonical_json
 from svweave.execution.ledger import ExecutionLedger
 from svweave.execution.models import AttemptRecord
+from svweave.storage.paths import DB_FILENAME
 
 _ID = re.compile(r"[A-Za-z0-9_.-]{1,256}\Z")
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
@@ -51,10 +52,10 @@ def _references(state: Path, limit: int) -> tuple[dict[str, tuple[str, str, str]
     except FileNotFoundError:
         return {}, "ABSENT"
     try:
-        if any(_present(rootfd, "svweave.db" + suffix) for suffix in ("-wal", "-shm", "-journal")):
+        if any(_present(rootfd, DB_FILENAME + suffix) for suffix in ("-wal", "-shm", "-journal")):
             return {}, "BUSY_OR_UNCHECKED_JOURNAL"
         try:
-            dbfd = os.open("svweave.db", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=rootfd)
+            dbfd = os.open(DB_FILENAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=rootfd)
         except FileNotFoundError:
             return {}, "ABSENT"
         try:
@@ -91,11 +92,11 @@ def _references(state: Path, limit: int) -> tuple[dict[str, tuple[str, str, str]
             finally:
                 connection.close()
             after = os.fstat(dbfd)
-            named = os.stat("svweave.db", dir_fd=rootfd, follow_symlinks=False)
+            named = os.stat(DB_FILENAME, dir_fd=rootfd, follow_symlinks=False)
             if (before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
                     after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns
             ) or named.st_ino != before.st_ino or any(
-                _present(rootfd, "svweave.db" + suffix) for suffix in ("-wal", "-shm", "-journal")
+                _present(rootfd, DB_FILENAME + suffix) for suffix in ("-wal", "-shm", "-journal")
             ):
                 return {}, "CHANGED_DURING_INSPECTION"
             return references, read_status

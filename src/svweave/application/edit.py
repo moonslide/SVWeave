@@ -26,7 +26,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from svweave.application.build import DB_FILENAME, run_build, run_build_on_record
+from svweave.application.build import run_build, run_build_on_record
 from svweave.application.options import WorkspaceOptions
 from svweave.application.semantic_common import require_build
 from svweave.application.toolchain import compute_toolchain
@@ -84,7 +84,7 @@ from svweave.editing.tree import tree_hashes
 from svweave.manifest.resolver import resolve_profile
 from svweave.snapshot.capture import capture_snapshot, check_freshness, load_record, snapshots_dir
 from svweave.snapshot.models import SnapshotRecord
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 from svweave.storage.lock import WorkspaceBusy, workspace_lock
 
 __all__ = [

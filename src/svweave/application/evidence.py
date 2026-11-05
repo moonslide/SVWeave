@@ -25,7 +25,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from svweave.application.build import DB_FILENAME
 from svweave.application.keys import cursor_key
 from svweave.application.options import WorkspaceOptions
 from svweave.application.queries import fit_items, flag_oversize
@@ -48,7 +47,7 @@ from svweave.domain.envelope import (
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import canonical_hash, is_sha256_hex
 from svweave.domain.states import Completeness, EvidenceKind, Freshness
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 
 HEX64 = r"^[0-9a-f]{64}$"
 MAX_MANIFEST_BYTES = 1 << 20

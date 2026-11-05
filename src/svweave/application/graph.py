@@ -17,7 +17,6 @@ from __future__ import annotations
 import bisect
 import hashlib
 import os
-import re
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -29,6 +28,12 @@ from svweave.application.diff_impact import (
     collect_changes,
     commits_in_range,
     commits_touching,
+)
+from svweave.application.exports import (
+    EXPORT_DIR,
+    check_export_name,
+    exports_dir,
+    write_export,
 )
 from svweave.application.graph_atlas import DEFAULT_PAGE_BUDGET, MIN_PORTAL
 from svweave.application.graph_atlas import INDEX as ATLAS_INDEX
@@ -45,7 +50,6 @@ from svweave.domain.states import EvidenceKind
 from svweave.security.safeio import ensure_private_dir, write_under
 from svweave.storage.semantic import loads
 
-EXPORT_DIR = "exports"
 #: Defaults draw the COMPLETE topology: every instance and every signal as edges. A cap is an
 #: explicit reduction (``--max-instances``, ``--max-fanout``), like ``--instance``/``--diff-base``.
 DEFAULT_MAX_INSTANCES: int | None = None
@@ -62,7 +66,6 @@ _SQL_CHUNK = 900
 # declaration kinds that name a signal; parameters, genvars and the like are never connectivity
 _SIGNAL_KINDS = frozenset({"net", "variable", "port"})
 
-_SAFE_NAME = re.compile(r"[A-Za-z0-9._-]{1,120}")
 
 GRAPH_NOTE = (
     "connection edges are derived from direct port associations: two instances share a signal "
@@ -682,9 +685,7 @@ def _export_atlas(
     if root_row is not None:
         stem += "-" + hashlib.sha256(str(root_row["path"]).encode()).hexdigest()[:10]
     dirname = name or stem
-    if not _SAFE_NAME.fullmatch(dirname) or dirname.startswith("."):
-        raise SvwError(ErrorCode.INVALID_CONFIG, "--name must match [A-Za-z0-9._-]+ (no path)",
-                       {"field": "--name"})
+    check_export_name(dirname, "--name")
     start = [root_row] if root_row is not None else s.rows(
         "SELECT * FROM instances WHERE build_id=? AND parent_id IS NULL ORDER BY ord", s.bid)
     limits = _gap_limits(s) + [GRAPH_NOTE, LAZY_NOTE if lazy else ATLAS_NOTE]
@@ -695,8 +696,7 @@ def _export_atlas(
             s, max_instances=None, max_fanout=None, region_rows=region),
         lazy=lazy,
     )
-    exports = ensure_private_dir(s.ctx.state_dir, EXPORT_DIR)
-    out = ensure_private_dir(exports, dirname)
+    out = ensure_private_dir(exports_dir(s.ctx.state_dir), dirname)
     for entry in os.scandir(out):  # pages of an earlier, different cut must not linger
         if entry.is_file(follow_symlinks=False) and entry.name not in files and (
                 (entry.name.startswith("p-") and entry.name.endswith(".html"))
@@ -850,9 +850,7 @@ def export_graph(
         elif root_row is not None:  # one default file per (build, root); a path is no file name
             stem += "-sub-" + hashlib.sha256(str(root_row["path"]).encode()).hexdigest()[:10]
         fname = f"{name or stem}.html"
-        if not _SAFE_NAME.fullmatch(fname) or fname.startswith("."):
-            raise SvwError(ErrorCode.INVALID_CONFIG, "--name must match [A-Za-z0-9._-]+ (no path)",
-                       {"field": "--name"})
+        check_export_name(fname, "--name")
         limits = _gap_limits(s) + [GRAPH_NOTE]
         if diff is not None:
             limits += [DIFF_VIEW_NOTE, DIFF_NOTE]
@@ -865,8 +863,7 @@ def export_graph(
             meta["diff"] = f"{diff['base']} -> {diff['head']}"
         page = render_html(encode_page({"meta": meta, **model}))
         data = page.encode("utf-8")
-        exports = ensure_private_dir(s.ctx.state_dir, EXPORT_DIR)
-        write_under(exports, fname, data)
+        write_export(s.ctx.state_dir, fname, data)
         if model["truncated"]:
             warns.append(
                 f"truncated: {model['stats']['instances_shown']} of "

@@ -47,11 +47,9 @@ from svweave.manifest.models import NormalizedManifest
 from svweave.manifest.resolver import resolve_profile, write_manifest
 from svweave.snapshot.capture import capture_snapshot, snapshots_dir
 from svweave.snapshot.models import SnapshotRecord
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 from svweave.storage.lock import WorkspaceBusy, build_lock, workspace_lock
 from svweave.storage.semantic import dumps
-
-DB_FILENAME = "svweave.db"
 
 # ---------------------------------------------------------------------------- job registry
 _REGISTRY: dict[str, WorkerHandle] = {}

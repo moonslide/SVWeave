@@ -22,7 +22,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from svweave.application.build import DB_FILENAME
 from svweave.application.keys import cursor_key
 from svweave.application.options import WorkspaceOptions
 from svweave.application.semantic_common import build_envelope, freshness_of, require_build
@@ -41,7 +40,7 @@ from svweave.domain.locations import Encoding, LineIndex, byte_to_lsp
 from svweave.domain.states import Freshness
 from svweave.snapshot.capture import snapshots_dir
 from svweave.snapshot.models import SnapFile
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 from svweave.storage.semantic import loads
 
 LOCATION_CONVENTION = {

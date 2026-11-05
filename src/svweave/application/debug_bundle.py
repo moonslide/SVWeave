@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any
 
 from svweave import __version__
-from svweave.application.build import DB_FILENAME
 from svweave.application.options import WorkspaceOptions
 from svweave.application.report import _lock_hash
 from svweave.application.semantic_common import build_envelope, report_of, require_build
@@ -28,7 +27,7 @@ from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import canonical_hash
 from svweave.security import safeio
 from svweave.security.redaction import Redactor
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 
 BUNDLE_VERSION = "1.0"
 

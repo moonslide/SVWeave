@@ -162,3 +162,21 @@ def test_SEC_DIF07_the_working_tree_new_side_never_leaves_the_repository(
     assert dimp._new_version(repo, "dir.sv", None) is None
     monkeypatch.setattr(dimp, "MAX_DIFF_BYTES", 4)
     assert dimp._new_version(repo, "in.sv", None) is None
+
+
+def test_SEC_DIF08_the_report_commit_lookup_uses_the_hardened_runner(tmp_path: Path) -> None:
+    """First council review (architecture finding 3): report._git_commit passed the whole
+    environment to git; it now runs through security/git.py like diff-impact."""
+    import inspect
+
+    from svweave.application import report
+
+    repo = tmp_path / "r"
+    git("init", "-q", "-b", "main", str(repo))
+    (repo / "a.sv").write_text("module a; endmodule\n")
+    git("-C", str(repo), "add", "a.sv")
+    git("-C", str(repo), "commit", "-qm", "c")
+    head = git("-C", str(repo), "rev-parse", "HEAD").strip()
+    assert report._git_commit(repo) == head
+    assert report._git_commit(tmp_path / "not-a-repo") is None
+    assert "run_git(" in inspect.getsource(report._git_commit)

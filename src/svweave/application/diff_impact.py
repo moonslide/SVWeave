@@ -21,15 +21,10 @@ runtime, UVM factory/config_db or bit-level reasoning. Counts are counts, not a 
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import os
 import re
-import selectors
-import signal
 import sqlite3
-import subprocess
-import time
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +47,7 @@ from svweave.application.semantic_common import build_envelope
 from svweave.domain.cursor import MAX_RESPONSE_BYTES, check_limit
 from svweave.domain.envelope import Envelope, Pagination
 from svweave.domain.errors import ErrorCode, SvwError
+from svweave.security.git import HARDENED_CONFIG, LOG_SAFE, run_git
 from svweave.snapshot.capture import load_record, snapshots_dir
 
 DIFF_NOTE = (
@@ -85,131 +81,15 @@ def check_ref(ref: str, field: str) -> str:
     return ref
 
 
-# Repository metadata is untrusted (the same stance as update_git): git must not read the user's
-# global/system config, must never reach a transport (a partial clone's lazy fetch would run
-# `remote.<x>.uploadpack` / `core.sshCommand` from the repository config), must not descend into
-# submodules (their own config and filters) and must not take output prefixes from config.
-_GIT_CONFIG = (
-    "core.fsmonitor=false",
-    "core.quotePath=false",
-    "protocol.allow=never",
-    "diff.noprefix=false",
-    "diff.mnemonicPrefix=false",
-    "diff.srcPrefix=a/",
-    "diff.dstPrefix=b/",
-    "diff.ignoreSubmodules=all",
-    "submodule.recurse=false",
-    # `log.showSignature` in the repository config makes `git log` verify every signed commit,
-    # i.e. run `gpg.program` (or the ssh / x509 one): a program chosen by the repository
-    "log.showSignature=false",
-    "gpg.program=" + os.devnull,
-    "gpg.ssh.program=" + os.devnull,
-    "gpg.x509.program=" + os.devnull,
-)
-#: every `git log` runs with these (signature checks, external diff and textconv off)
-_LOG_SAFE = ("--no-show-signature", "--no-ext-diff", "--no-textconv")
-
-
-def _git_env() -> dict[str, str]:
-    return {
-        "PATH": os.environ.get("PATH", os.defpath),
-        "HOME": "/nonexistent",
-        "XDG_CONFIG_HOME": "/nonexistent",
-        "LC_ALL": "C",
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_SYSTEM": os.devnull,
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_ATTR_NOSYSTEM": "1",
-        "GIT_OPTIONAL_LOCKS": "0",
-        "GIT_TERMINAL_PROMPT": "0",
-        "GIT_NO_LAZY_FETCH": "1",
-        "GIT_ALLOW_PROTOCOL": "",
-    }
-
-
-def _kill_group(proc: subprocess.Popen[bytes]) -> None:
-    with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(proc.pid, signal.SIGKILL)
+# git runs through the one hardened runner (security/git.py): untrusted repository config,
+# no transport, enforced deadline, capped output
+_GIT_CONFIG = HARDENED_CONFIG
+_LOG_SAFE = LOG_SAFE
 
 
 def _git(repo: Path, args: list[str], ok: tuple[int, ...] = (0,)) -> bytes:
-    argv = ["git", "-C", str(repo)]
-    for kv in _GIT_CONFIG:
-        argv += ["-c", kv]
-    argv += ["--no-pager", *args]
-    try:
-        proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell, refs validated by check_ref
-            argv,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
-            env=_git_env(),
-            start_new_session=True,  # a timeout or overflow kills git AND its children
-        )
-    except FileNotFoundError as e:
-        raise SvwError(
-            ErrorCode.BACKEND_UNAVAILABLE, "git is not installed", {"reason": "git_missing"}
-        ) from e
-    # Both pipes are drained without blocking, so the deadline holds even while git writes
-    # nothing; stdout is capped, so the diff (or a blob) is never buffered whole only to be
-    # refused afterwards.
-    chunks: list[bytes] = []
-    err = bytearray()
-    size = 0
-    over = timed_out = False
-    deadline = time.monotonic() + GIT_TIMEOUT_S
-    assert proc.stdout is not None and proc.stderr is not None
-    try:
-        with selectors.DefaultSelector() as sel:
-            for pipe in (proc.stdout, proc.stderr):
-                os.set_blocking(pipe.fileno(), False)
-                sel.register(pipe, selectors.EVENT_READ)
-            while sel.get_map():
-                left = deadline - time.monotonic()
-                if left <= 0:
-                    timed_out = True
-                    break
-                for key, _ in sel.select(timeout=left):
-                    chunk = os.read(key.fd, 1 << 16)
-                    if not chunk:
-                        sel.unregister(key.fileobj)
-                    elif key.fileobj is proc.stdout:
-                        size += len(chunk)
-                        if size > MAX_DIFF_BYTES:
-                            over = True
-                            break
-                        chunks.append(chunk)
-                    elif len(err) < 1 << 16:
-                        err += chunk
-                if over:
-                    break
-        if not (timed_out or over):
-            try:
-                rc = proc.wait(timeout=max(deadline - time.monotonic(), 0.05))
-            except subprocess.TimeoutExpired:
-                timed_out = True
-    finally:
-        _kill_group(proc)  # also reaps children that outlived git and hold the pipes
-        if proc.poll() is None:
-            proc.wait()
-        for f in (proc.stdout, proc.stderr):
-            f.close()
-    if timed_out:
-        raise SvwError(
-            ErrorCode.BUILD_TIMEOUT, f"git did not finish in {GIT_TIMEOUT_S}s", {"reason": "git_timeout"}
-        )
-    if over:
-        raise SvwError(
-            ErrorCode.OUTPUT_LIMIT, "the diff is larger than 64 MiB", {"reason": "diff_too_large"}
-        )
-    if rc not in ok:
-        first = bytes(err).decode("utf-8", "replace").strip().splitlines()[:1]
-        raise SvwError(
-            ErrorCode.MISSING_INPUT,
-            "git could not answer: " + (first[0][:200] if first else f"exit {rc}"),
-            {"reason": "git_failed", "args": args[:3]},
-        )
-    return b"".join(chunks)
+    # module globals read at call time (tests and callers may lower them)
+    return run_git(repo, args, ok, timeout_s=GIT_TIMEOUT_S, max_bytes=MAX_DIFF_BYTES)
 
 
 def _refuse_lazy_objects(top: Path) -> None:
