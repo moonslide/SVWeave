@@ -587,9 +587,10 @@ Re-run the installer as in the path you used (`--create-venv` repairs an existin
   re-used by `--create-venv`.
 * From 2026-11-05 SVWeave trusts only a `.svweave/` it recorded (breaking): in each existing
   workspace run `svweave init --adopt-state` once for the state directory you created (the
-  first command otherwise refuses it with `state_dir_not_adopted`). Known limitation (third
-  council review, H2): with `project.root` other than `.` this step adopts the wrong directory;
-  until that is fixed, keep `project.root: "."` or move the state directory aside.
+  first command otherwise refuses it with `state_dir_not_adopted`; `svweave-mcp` prints the same
+  hint on stderr). `init` adopts `<project.root>/.svweave`, the directory every command uses. A
+  workspace recorded by the first 2026-11-05 version is re-recorded automatically. A state
+  directory writable by group or others is refused (`chmod go-w .svweave`).
 * A filelist that expands `$VAR` also needs the variable in the trusted policy's
   `environment_allowlist` (2026-11-04, breaking).
 
@@ -1424,9 +1425,11 @@ until the mapping exists.
 repository content (and anything an agent writes there) must not be able to widen its own
 permissions. A repository file can only tighten the policy; a repo-local policy file is ignored and
 a `--policy` path inside the project tree is `POLICY_DENIED`. The same directory records which
-`.svweave/` SVWeave created for the workspace (`state_dir.json`): any other non-empty `.svweave/`
-(shipped with a repository or tarball, copied or moved) is refused with `state_dir_not_adopted`
-until you run `svweave init --adopt-state` for a state directory you made yourself.
+`.svweave/` SVWeave created for the workspace (`state_dir.json`: the sha256 of a random token
+SVWeave keeps in `.svweave/.svweave-id`, keyed by the directory's real path): any other non-empty
+`.svweave/` (shipped with a repository or tarball, extracted in place of a deleted one, moved or
+copied to another path) is refused with `state_dir_not_adopted` until you run
+`svweave init --adopt-state` for a state directory you made yourself.
 
 | Field | Default | Meaning |
 |---|---|---|

@@ -204,3 +204,48 @@ def test_SEC_STA09_the_mcp_launcher_and_doctor_name_the_refused_state_dir_and_th
     names = {c["name"]: c for c in env["data"]["checks"]}
     assert names["state_dir"]["status"] == "FAIL", names.keys()
     assert "policy_tightening" not in names
+
+
+def _first_command_a(trusted: Path, state: Path, a_wrote: Any, b_done: Any) -> None:
+    from svweave.config import trusted as T
+
+    real = T.write_under
+
+    def token_then_wait(*args: Any, **kw: Any) -> None:
+        real(*args, **kw)
+        a_wrote.set()
+        b_done.wait(2)  # B may run in between, unless the registration lock holds it
+
+    T.write_under = token_then_wait  # type: ignore[assignment]  # this child process only
+    T.verify_state_dir(trusted, state)
+
+
+def _first_command_b(trusted: Path, state: Path, a_wrote: Any, b_done: Any) -> None:
+    from svweave.config import trusted as T
+
+    a_wrote.wait(10)
+    T.verify_state_dir(trusted, state)
+    b_done.set()
+
+
+def test_SEC_STA10_two_first_commands_leave_one_token_and_its_record(tmp_path: Path) -> None:
+    """Two SVWeave processes starting on a fresh workspace each wrote their own token: B wrote
+    token and record between A's token and A's record, leaving B's token next to A's record, so
+    every later command refused the directory (state_dir_not_adopted). Registration decisions
+    are now serialized by a lock in the trusted directory."""
+    import multiprocessing as mp
+
+    from svweave.config.trusted import state_dir_registered
+
+    trusted, state = tmp_path / "trusted", tmp_path / "proj" / ".svweave"
+    state.parent.mkdir()
+    ctx = mp.get_context("spawn")  # no fork of the multi-threaded test process
+    a_wrote, b_done = ctx.Event(), ctx.Event()
+    procs = [ctx.Process(target=f, args=(trusted, state, a_wrote, b_done))
+             for f in (_first_command_a, _first_command_b)]
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join(30)
+    assert [p.exitcode for p in procs] == [0, 0]
+    assert state_dir_registered(trusted, state), "the token left behind is not the recorded one"

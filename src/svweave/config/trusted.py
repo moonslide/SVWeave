@@ -9,6 +9,7 @@ approval store in the same directory (`trusted_dir`).
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import hmac
 import json
@@ -16,6 +17,9 @@ import os
 import re
 import secrets
 import stat
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -178,9 +182,42 @@ def _legacy_match(trusted: Path, state: Path) -> bool:
             and rec.get("ino") == st.st_ino)
 
 
+_held = threading.local()
+
+
+@contextmanager
+def state_dir_lock(trusted: Path) -> Iterator[None]:
+    """One registration decision at a time per workspace (re-entrant within a thread). Without it
+    two first commands each wrote their own token, and the token left in the directory need not be
+    the one the record holds: a spurious ``state_dir_not_adopted``."""
+    if getattr(_held, "dirs", None) is None:
+        _held.dirs = set()
+    key = os.path.realpath(trusted)
+    if key in _held.dirs:
+        yield
+        return
+    trusted.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(trusted / ".state_dir.lock",
+                 os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        _held.dirs.add(key)
+        try:
+            yield
+        finally:
+            _held.dirs.discard(key)
+    finally:
+        os.close(fd)
+
+
 def register_state_dir(trusted: Path, state: Path) -> None:
     """Record ``state`` (an existing real directory) as a trusted state dir of this workspace: a
     fresh token inside it, its sha256 in the trusted record, keyed by the real path."""
+    with state_dir_lock(trusted):
+        _register(trusted, state)
+
+
+def _register(trusted: Path, state: Path) -> None:
     check_state_dir(state)
     os.chmod(state, 0o700, follow_symlinks=False)  # private, whatever umask made it
     token = secrets.token_hex(32)
@@ -221,16 +258,15 @@ def verify_state_dir(trusted: Path, state: Path) -> None:
         try:
             os.mkdir(state, 0o700)
         except FileExistsError:
-            pass  # a concurrent SVWeave process created it: checked below like any other
-        else:
-            register_state_dir(trusted, state)
-            return
-        check_state_dir(state)
+            check_state_dir(state)  # a concurrent SVWeave process created it
     if state_dir_registered(trusted, state):
         return
-    if _legacy_match(trusted, state) or not state_dir_has_content(state):
-        register_state_dir(trusted, state)
-        return
+    with state_dir_lock(trusted):  # decide once the other registrations are done
+        if state_dir_registered(trusted, state):
+            return
+        if _legacy_match(trusted, state) or not state_dir_has_content(state):
+            _register(trusted, state)
+            return
     raise SvwError(
         ErrorCode.POLICY_DENIED,
         f"{state} is not recorded as this workspace's SVWeave state; refusing to use it. If you "

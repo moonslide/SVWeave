@@ -21,6 +21,7 @@ from svweave.config.trusted import (
     policy_path_for,
     register_state_dir,
     state_dir_has_content,
+    state_dir_lock,
     state_dir_registered,
     trusted_dir,
 )
@@ -55,6 +56,11 @@ def _state_location(root: Path, manifest_path: Path | None) -> tuple[Path, Path,
 
 def _prepare_state(state: Path, trusted: Path, root: Path, adopt_state: bool) -> list[str]:
     """Create or adopt ``state`` and record it; returns the directories created."""
+    with state_dir_lock(trusted):  # no other registration decides in between
+        return _prepare_state_locked(state, trusted, root, adopt_state)
+
+
+def _prepare_state_locked(state: Path, trusted: Path, root: Path, adopt_state: bool) -> list[str]:
     check_state_dir(state)  # symlink / foreign owner / not a directory => POLICY_DENIED
     existed = state.exists()
     if existed and state_dir_has_content(state) and not state_dir_registered(trusted, state):

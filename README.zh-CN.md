@@ -375,7 +375,7 @@ svweave build --profile rtl_demo   # the shipped demo: exit 0
 
 * 由 build backend 尚未锁定之前（2026-10-20 之前）的安装程序填充的 uv 缓存，可能含有用未锁定 backend 构建的 `proxy-tools` 或 `serena-agent` wheel，而 uv 会复用这类已构建的 wheel。升级后请删除 `.toolchain/state/uv-cache`（或你的 `--uv-cache-dir`）一次。在 `vendor/` 路径上，之后请重新解压 `vendor/uv-cache.tar.gz`：它已用锁定的 backend 和锁定版本的 uv 重新生成（由其他 uv 版本写入的缓存使用不同的缓存 bucket，离线时无法使用）。
 * 文档所述的流程不再以 `uv venv` 开头；先前以该方式创建的 `.venv` 会被保留，并由 `--create-venv` 复用。
-* 自 2026-11-05 起，SVWeave 只信任它记录过的 `.svweave/`（破坏性变更）：请在每个既有工作区对你自己创建的状态目录运行一次 `svweave init --adopt-state`（否则第一个命令会以 `state_dir_not_adopted` 拒绝）。已知限制（第三次 council review，H2）：当 `project.root` 不是 `.` 时，这一步会认领错误的目录；修正之前请保持 `project.root: "."`，或先把状态目录移开。
+* 自 2026-11-05 起，SVWeave 只信任它记录过的 `.svweave/`（破坏性变更）：请在每个既有工作区对你自己创建的状态目录运行一次 `svweave init --adopt-state`（否则第一个命令会以 `state_dir_not_adopted` 拒绝）。`svweave-mcp` 也会在 stderr 打印同样的提示。`init` 认领的是 `<project.root>/.svweave`，也就是每个命令使用的目录。由 2026-11-05 第一版记录过的工作区会自动重新记录。组或其他人可写的状态目录也会被拒绝（`chmod go-w .svweave`）。
 * 会展开 `$VAR` 的 filelist，也需要该变量出现在受信 policy 的 `environment_allowlist` 中（2026-11-04，破坏性变更）。
 
 ### 安装一次，跨项目共享
@@ -927,7 +927,7 @@ root_mappings:
 
 外部根中的文件以 `@uvm/relative/path` 的形式寻址。使用未映射的外部根是一个 `MISSING_INPUT` 阻断项（`reason: root_unmapped`），因此在映射存在之前，`uvm_smoke` profile 一直是 BLOCKED。
 
-**受信策略。** `policy.json` 位于 `$XDG_CONFIG_HOME/svweave/workspaces/<workspace_key>/policy.json`（回退到 `~/.config`），其中 `workspace_key` 是 `sha256(realpath(dir of svweave.yaml))` 的前 16 个十六进制字符。`svweave init` 创建它，且从不覆盖它。它刻意位于仓库之外：仓库内容（以及智能体写入其中的任何东西）不得能够扩大自身的权限。仓库中的文件只能收紧策略；仓库本地的策略文件会被忽略，而位于项目树内的 `--policy` 路径为 `POLICY_DENIED`。同一个目录也记录 SVWeave 为此工作区创建的是哪一个 `.svweave/`（`state_dir.json`）：其他任何非空的 `.svweave/`（随仓库或 tarball 附带、被复制或移动）都会以 `state_dir_not_adopted` 拒绝，直到你对自己创建的状态目录运行 `svweave init --adopt-state`。
+**受信策略。** `policy.json` 位于 `$XDG_CONFIG_HOME/svweave/workspaces/<workspace_key>/policy.json`（回退到 `~/.config`），其中 `workspace_key` 是 `sha256(realpath(dir of svweave.yaml))` 的前 16 个十六进制字符。`svweave init` 创建它，且从不覆盖它。它刻意位于仓库之外：仓库内容（以及智能体写入其中的任何东西）不得能够扩大自身的权限。仓库中的文件只能收紧策略；仓库本地的策略文件会被忽略，而位于项目树内的 `--policy` 路径为 `POLICY_DENIED`。同一个目录也记录 SVWeave 为此工作区创建的是哪一个 `.svweave/`（`state_dir.json`：SVWeave 存放在 `.svweave/.svweave-id` 的随机 token 的 sha256，以目录的实际路径为键）：其他任何非空的 `.svweave/`（随仓库或 tarball 附带、在删除后的原位置解压、被移动或复制到其他路径）都会以 `state_dir_not_adopted` 拒绝，直到你对自己创建的状态目录运行 `svweave init --adopt-state`。
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|

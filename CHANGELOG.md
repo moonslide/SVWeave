@@ -45,7 +45,9 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   (`state_dir_not_adopted`) until `svweave init --adopt-state`. After upgrading, an existing
   workspace needs that one step (the error, also on the MCP launcher's stderr, says so; a record of
   the first, device/inode format is accepted once and rewritten). A state directory writable by
-  group or others, or a `.svweave` that is not a directory, is refused. Mutations M32, M43.
+  group or others, or a `.svweave` that is not a directory, is refused. Registration decisions
+  are serialized by a lock in the trusted directory (two first commands could otherwise leave
+  one's token next to the other's record). Mutations M32, M43.
 * **Fixes from the third council review** (`evidence/council-review-3-2026-11-05/`): the
   untrusted-repo git runner sets `core.hooksPath=/dev/null` and `diff.autoRefreshIndex=false`
   (a repository delivered with its `.git/` ran `.git/hooks/post-index-change` from
