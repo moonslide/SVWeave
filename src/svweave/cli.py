@@ -388,11 +388,8 @@ def schema_emit(st: _State, out_dir: Path, check: bool) -> None:
 @pass_state
 def build_cmd(st: _State, profile: str | None, no_reuse: bool) -> None:
     """Resolve, snapshot and analyse a profile with slang (exit 3: errors/PARTIAL/BLOCKED)."""
-    from svweave.application.build import run_build
-    from svweave.application.evidence import record_static_for
-
-    env = st.run(lambda rid: run_build(st.opts, profile, rid, reuse=not no_reuse), profile=profile)
-    record_static_for(st.opts, env.build_id)
+    env = st.run(lambda rid: services.build_sync(st.opts, profile, rid, reuse=not no_reuse),
+                 profile=profile)
     st.emit(env, EXIT_BUILD if env.outcome in (Outcome.PARTIAL, Outcome.BLOCKED) else None)
 
 
@@ -403,11 +400,8 @@ def build_cmd(st: _State, profile: str | None, no_reuse: bool) -> None:
 @pass_state
 def update_cmd(st: _State, profile: str | None, base: str | None, no_git: bool) -> None:
     """Reuse immutable snapshot data; changed inputs still require whole-profile analysis."""
-    from svweave.application.evidence import record_static_for
-    from svweave.application.update import run_update
-
-    env = st.run(lambda rid: run_update(st.opts, profile, rid, base=base, git=not no_git), profile=profile)
-    record_static_for(st.opts, env.build_id)
+    env = st.run(lambda rid: services.update_sync(st.opts, profile, rid, base=base, git=not no_git),
+                 profile=profile)
     st.emit(env, EXIT_BUILD if env.outcome in (Outcome.PARTIAL, Outcome.BLOCKED) else None)
 
 

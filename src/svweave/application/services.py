@@ -18,6 +18,7 @@ from svweave.application import impact as impact_mod
 from svweave.application import rename as rename_mod
 from svweave.application import status as status_mod
 from svweave.application.exports import check_export_name, write_export
+from svweave.application.options import WorkspaceOptions
 from svweave.application.search import svw_search
 from svweave.application.session import Session
 from svweave.domain.envelope import AnalysisCoverage, Envelope, ErrorInfo, Outcome
@@ -511,3 +512,28 @@ def edit(session: Session, request_id: str, *, action: str, **args: Any) -> Enve
     if action == "abort":
         return edit_mod.abort(opts, request_id, transaction_id=args["transaction_id"])
     raise SvwError(ErrorCode.INVALID_CONFIG, "unknown svw_edit action", {"action": action})
+
+
+def build_sync(
+    opts: WorkspaceOptions, profile: str | None, request_id: str, *, reuse: bool = True
+) -> Envelope:
+    """A synchronous build (the CLI) with the same post-build step as an MCP build job."""
+    from svweave.application.build import run_build
+    from svweave.application.evidence import post_build
+
+    env = run_build(opts, profile, request_id, reuse=reuse)
+    post_build(opts, env.build_id)
+    return env
+
+
+def update_sync(
+    opts: WorkspaceOptions, profile: str | None, request_id: str, *, base: str | None = None,
+    git: bool = True,
+) -> Envelope:
+    """``svweave update`` with the same post-build step as a build."""
+    from svweave.application.evidence import post_build
+    from svweave.application.update import run_update
+
+    env = run_update(opts, profile, request_id, base=base, git=git)
+    post_build(opts, env.build_id)
+    return env

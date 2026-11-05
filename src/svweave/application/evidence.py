@@ -394,6 +394,13 @@ def ensure_static(db: Database, build: sqlite3.Row) -> str:
     return eid
 
 
+def post_build(opts: WorkspaceOptions, build_id: str | None) -> None:
+    """THE step after every build or update, CLI and MCP alike (services.build_sync /
+    update_sync and the job runner): add a new post-build step here, once (first council review,
+    architecture finding 10). Today: the build's static evidence record."""
+    record_static_for(opts, build_id)
+
+
 def record_static_for(opts: WorkspaceOptions, build_id: str | None) -> None:
     """Best-effort hook after a build (never fails the build)."""
     if not build_id or not is_sha256_hex(build_id):

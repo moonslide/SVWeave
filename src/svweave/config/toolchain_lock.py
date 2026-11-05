@@ -6,9 +6,13 @@ silently drop a pin; a new pin is added here first, then to the lock.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+import json
+from pathlib import Path
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
+
+from svweave.domain.errors import ErrorCode, SvwError
 
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 Commit = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
@@ -174,3 +178,25 @@ class ToolchainLock(_Strict):
     #: required: the installer refuses to build Serena or run uv without these pins
     serena_build_wheelhouse: SerenaBuildWheelhouse
     uv: UvPin
+
+
+def read_lock(path: Path) -> dict[str, Any]:
+    """``toolchain.lock.json`` read once and validated against :class:`ToolchainLock` (first council
+    review, architecture finding 8: the runtime read it as untyped dicts in two places, so a lock
+    that does not match the schema surfaced as a KeyError deep inside). Returns the raw mapping
+    the callers index."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise SvwError(ErrorCode.MISSING_INPUT, f"cannot read toolchain lock {path}: {e}",
+                       {"file": str(path)}) from e
+    try:
+        ToolchainLock.model_validate(raw)
+    except ValidationError as e:
+        errs = e.errors()
+        loc = ".".join(str(x) for x in errs[0]["loc"]) if errs else ""
+        raise SvwError(ErrorCode.INVALID_CONFIG,
+                       f"toolchain lock {path} does not match its schema",
+                       {"file": str(path), "field": loc, "reason": "lock_schema"}) from e
+    data: dict[str, Any] = raw
+    return data

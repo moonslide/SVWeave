@@ -45,7 +45,7 @@ def test_full_check_runs_once_then_never_while_nothing_changes(
     w = lang_ws(tmp_path, "sem09_escaped", "sem09_top")
     bid = build(w).build_id
     assert bid
-    sc._VERDICTS.clear()
+    sc.reset_caches()
     c = Counter(monkeypatch)
     assert fresh(w, bid) == "CURRENT" and c.n == 1  # cold: one full check, not one per envelope
     page = Q.hierarchy(opts(w), bid, "r", limit=3)  # a paged query builds 2 envelopes internally

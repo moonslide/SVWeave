@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from svweave.config.toolchain_lock import read_lock
 from svweave.domain.errors import ErrorCode, SvwError
 
 LOCK_NAME = "toolchain.lock.json"
@@ -81,8 +82,8 @@ class Toolchain:
     @classmethod
     def load(cls, root: Path) -> Toolchain:
         root = Path(root).resolve()
+        lock = read_lock(root / LOCK_NAME)  # schema-validated (a bad lock fails here, typed)
         try:
-            lock = json.loads((root / LOCK_NAME).read_text())
             report = json.loads((root / REPORT_NAME).read_text())
         except (OSError, ValueError) as e:
             raise SvwError(
