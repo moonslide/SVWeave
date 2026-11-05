@@ -170,8 +170,9 @@ def _full_oracle(tmp: Path, w: Ws, incremental: Envelope) -> None:
     full = Ws(tmp / "ws")
     shutil.copytree(w.root, full.root, ignore=shutil.ignore_patterns(".svweave"))
     full.policy()
-    # fresh state: only the empty, recorded state dir Ws.policy() creates (like `svweave init`)
-    assert not any((full.root / ".svweave").iterdir())
+    # fresh state: only the recorded state dir Ws.policy() creates (like `svweave init`), which
+    # holds nothing but its identity token
+    assert [p.name for p in (full.root / ".svweave").iterdir()] == [".svweave-id"]
     expected = build(full)
     _complete(expected)
     _whole_profile_request(full, expected)

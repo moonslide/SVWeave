@@ -1,0 +1,92 @@
+[mut] svweave imported (python -I) from: /home/user/SVWeave/.svweave/mutation/repo/src/svweave/__init__.py
+[mut] baseline for M01: rc=0 ['...........                                                              [100%]']
+[mut] M01 KILLED: remove the header hash from the snapshot inventory (headers hash to a constant)
+[mut] baseline for M02: rc=0 ['....                                                                     [100%]']
+[mut] M02 KILLED: ignore include-directory order (slang -I dirs are sorted alphabetically)
+[mut] baseline for M03: rc=0 ['................                                                         [100%]']
+[mut] M03 KILLED: merge methods by bare name (function/task qualified_name = bare name)
+[mut] baseline for M04: rc=0 ['....................                                                     [100%]']
+[mut] M04 KILLED: PARTIAL becomes COMPLETE (ingest completeness verdict always COMPLETE)
+[mut] baseline for M05: rc=0 ['...................................................................      [100%]']
+[mut] M05 KILLED: cancel the expected-hash compare-and-set (exact range and commit precondition)
+[mut] baseline for M06: rc=0 ['..............................................................           [100%]']
+[mut] M06 KILLED: accept a fake approval (HMAC signature check disabled)
+[mut] baseline for M07: rc=0 ['.............                                                            [100%]']
+[mut] M07 KILLED: snapshot/candidate separation lost (candidate files are hardlinks of the snapshot, so a candidate write mutates the snapshot)
+[mut] baseline for M11: rc=0 ['...........................                                              [100%]']
+[mut] M11 KILLED: sandbox write-surface check removed (a backend may get a writable bind of the protected original)
+[mut] baseline for M08: rc=0 ['....................................                                     [100%]']
+[mut] M08 KILLED: blind rollback after a crash (conflicting files are classified as applied, recovery CAS removed)
+[mut] baseline for M09: rc=0 ['................................                                         [100%]']
+[mut] M09 KILLED: ignore unsupported options (unknown flag is logged and dropped, build not blocked)
+[mut] baseline for M10: rc=0 ['.......................................................................  [100%]']
+[mut] M10 KILLED: treat a static build as simulation PASS (absent evidence reported as PASS)
+[mut] baseline for M12: rc=0 ['...............                                                          [100%]']
+[mut] M12 KILLED: roll-forward skips recovery gates (policy / approval / candidate rechecks)
+[mut] baseline for M13: rc=0 ['...........................................                              [100%]']
+[mut] M13 KILLED: commit and roll-forward skip the current edit-policy recheck (A4)
+[mut] baseline for M14: rc=0 ['..                                                                       [100%]']
+[mut] M14 KILLED: slang_symbol resolution ignores the build/snapshot identity and COMPLETE check
+[mut] baseline for M15: rc=0 ['..                                                                       [100%]']
+[mut] M15 KILLED: slang_symbol picks the first of several matching names (ambiguity refusal removed)
+[mut] baseline for M16: rc=0 ['..............                                                           [100%]']
+[mut] M16 KILLED: slang_symbol replacement shape check removed (class / comment / qualifier escapes)
+[mut] baseline for M17: rc=0 ['..                                                                       [100%]']
+[mut] M17 KILLED: slang_symbol scope-escape check after the candidate build removed
+[mut] baseline for M18: rc=0 ['..                                                                       [100%]']
+[mut] M18 KILLED: slang_symbol base-span shape check removed (extern / prototype / odd span)
+[mut] baseline for M19: rc=0 ['.                                                                        [100%]']
+[mut] M19 KILLED: slang_symbol accepts a symbol_id that is not a task or function
+[mut] baseline for M20: rc=0 ['...............                                                          [100%]']
+[mut] M20 KILLED: slang_symbol replacement may contain preprocessor directives / pasting / any macro
+[mut] baseline for M21: rc=0 ['.                                                                        [100%]']
+[mut] M21 KILLED: slang_symbol candidate target span is not required to equal the replacement
+[mut] baseline for M22: rc=0 ['.                                                                        [100%]']
+[mut] M22 KILLED: slang_symbol macro-body walk ignores state-changing directives (include / undef / define)
+[mut] baseline for M23: rc=0 ['.                                                                        [100%]']
+[mut] M23 KILLED: remove the P0 remote editing provider guard
+[mut] baseline for M24: rc=0 ['.                                                                        [100%]']
+[mut] M24 KILLED: ignore exact scheduler ownership on cancellation
+[mut] baseline for M25: rc=0 ['.                                                                        [100%]']
+[mut] M25 KILLED: drop unknown remote cleanup snapshot pins
+[mut] baseline for M26: rc=0 ['......                                                                   [100%]']
+[mut] M26 KILLED: ignore unresolved remote workspace submission barrier
+[mut] baseline for M27: rc=0 ['...                                                                      [100%]']
+[mut] M27 KILLED: allow a bound shared-launcher workspace to rebind through a later symlink
+[mut] baseline for M28: rc=0 ['.....                                                                    [100%]']
+[mut] M28 KILLED: trust an existing incremental snapshot by its name without exact-tree verification
+[mut] baseline for M29: rc=0 ['.                                                                        [100%]']
+[mut] M29 KILLED: publish an incremental snapshot after source or lookup inventory changed during materialization
+[mut] baseline for M30: rc=0 ['.                                                                        [100%]']
+[mut] M30 KILLED: roll-forward decides on a display-truncated change list (first 20 changes only)
+[mut] baseline for M31: rc=0 ['.                                                                        [100%]']
+[mut] M31 KILLED: edit validate reuses a candidate snapshot directory found on disk unverified
+[mut] baseline for M32: rc=0 ['..                                                                       [100%]']
+[mut] M32 KILLED: trust a .svweave/ that SVWeave did not create (repository-shipped state)
+[mut] baseline for M33: rc=0 ['....                                                                     [100%]']
+[mut] M33 KILLED: edit writes into an external root follow linked parent directories
+[mut] baseline for M34: rc=0 ['.                                                                        [100%]']
+[mut] M34 KILLED: commit writes candidate bytes that changed after validation (freeze check removed)
+[mut] baseline for M35: rc=0 ['.                                                                        [100%]']
+[mut] M35 KILLED: a signed approval authorizes another transaction (binding check removed)
+[mut] baseline for M36: rc=0 ['.                                                                        [100%]']
+[mut] M36 KILLED: a test-token approval is accepted without the trusted policy flag
+[mut] baseline for M37: rc=0 ['.                                                                        [100%]']
+[mut] M37 KILLED: an expired approval is still honoured
+[mut] baseline for M38: rc=0 ['..                                                                       [100%]']
+[mut] M38 KILLED: an approval key readable by others is used (key mode check removed)
+[mut] baseline for M39: rc=0 ['.                                                                        [100%]']
+[mut] M39 KILLED: roll-forward applies a journal written for another patch
+[mut] baseline for M40: rc=0 ['...........................                                              [100%]']
+[mut] M40 KILLED: the exact-range patch replaces bytes that differ from the expected hash
+[mut] baseline for M41: rc=0 ['...                                                                      [100%]']
+[mut] M41 KILLED: recovery rollback writes the journal's base bytes without approval/policy/journal checks
+[mut] baseline for M42: rc=0 ['.                                                                        [100%]']
+[mut] M42 KILLED: recovery rollback reads the base bytes through linked snapshot directories
+[mut] baseline for M43: rc=0 ['.                                                                        [100%]']
+[mut] M43 KILLED: a recorded state-dir path is trusted without its token (a replaced .svweave/)
+[mut] baseline for M44: rc=0 ['.                                                                        [100%]']
+[mut] M44 KILLED: the untrusted-repo git runner refreshes the index and lets repository hooks run
+[mut] baseline for M45: rc=0 ['..                                                                       [100%]']
+[mut] M45 KILLED: the source writer alone follows a parent swapped after the compare-and-set check
+[mut] killed 45/45; survived=[] errors=[]; wrote evidence/council-review-3-2026-11-05/run6/mutation.json

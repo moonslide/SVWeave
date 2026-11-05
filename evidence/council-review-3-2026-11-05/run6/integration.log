@@ -1,0 +1,60 @@
+........................................................................ [ 30%]
+...................................F.................................... [ 60%]
+........................................................................ [ 90%]
+........................                                                 [100%]
+=================================== FAILURES ===================================
+_______ test_SNP_01_02_03_update_matches_full_capture_and_real_semantics _______
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-680/test_SNP_01_02_03_update_match0')
+
+    def test_SNP_01_02_03_update_matches_full_capture_and_real_semantics(tmp_path: Path) -> None:
+        w = _workspace(tmp_path / "incremental")
+        initial = build(w)
+        _complete(initial)
+        _whole_profile_request(w, initial)
+        assert initial.build_id and initial.snapshot_id
+        initial_record, initial_bytes = _snapshot(w, initial.snapshot_id)
+        old_hierarchy = Q.hierarchy(opts(w), initial.build_id, "history").data
+        old_rows = _semantic_rows(w, initial.build_id)
+        initial_runs = _run_files(w)
+        initial_jobs = dbq(w, "SELECT * FROM jobs")
+    
+        # The real CLI's no-op must preserve both semantic rows AND all historical run bytes.
+        result = CliRunner().invoke(cli, ["--root", str(w.root), "--compact", "update", "--profile", "p", "--no-git"])
+        assert result.exit_code == 0, result.output
+        noop = Envelope.model_validate_json(result.stdout)
+        _complete(noop, ran_worker=False)
+        assert noop.build_id == initial.build_id and noop.snapshot_id == initial.snapshot_id
+        assert noop.data["reused"] is True and noop.data["job_id"] is None
+        assert noop.data["update"]["semantic_action"] == "exact_build_reuse"
+        materialization = noop.data["update"]["materialization"]
+        assert materialization["noop_snapshot_reused"] is True
+        assert materialization["files_copied"] == materialization["files_cloned"] == 0
+        assert noop.data["update"]["changes"]["total"] == 0
+        assert dbq(w, "SELECT * FROM jobs") == initial_jobs and _run_files(w) == initial_runs
+        assert _semantic_rows(w, initial.build_id) == old_rows
+>       _full_oracle(tmp_path / "full-noop", w, noop)
+
+tests/integration/test_incremental_update.py:246: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+tmp = PosixPath('/tmp/pytest-of-root/pytest-680/test_SNP_01_02_03_update_match0/full-noop')
+w = <tests.conftest.Ws object at 0x7fc20ceed010>
+incremental = Envelope(schema_version='1.1', request_id='req-b30fc7e75487', outcome=<Outcome.OK: 'OK'>, workspace_id='t', snapshot_i...ntic_status': 'reused'}}, pagination=Pagination(limit=100, next_cursor=None, truncated=False), warnings=[], error=None)
+
+    def _full_oracle(tmp: Path, w: Ws, incremental: Envelope) -> None:
+        """Fresh state uses legacy run_build/capture_snapshot, never the update path or cache."""
+        full = Ws(tmp / "ws")
+        shutil.copytree(w.root, full.root, ignore=shutil.ignore_patterns(".svweave"))
+        full.policy()
+        # fresh state: only the empty, recorded state dir Ws.policy() creates (like `svweave init`)
+>       assert not any((full.root / ".svweave").iterdir())
+E       AssertionError: assert not True
+E        +  where True = any(<generator object Path.iterdir at 0x7fc1f25f7370>)
+E        +    where <generator object Path.iterdir at 0x7fc1f25f7370> = iterdir()
+E        +      where iterdir = (PosixPath('/tmp/pytest-of-root/pytest-680/test_SNP_01_02_03_update_match0/full-noop/ws') / '.svweave').iterdir
+E        +        where PosixPath('/tmp/pytest-of-root/pytest-680/test_SNP_01_02_03_update_match0/full-noop/ws') = <tests.conftest.Ws object at 0x7fc20d2f4110>.root
+
+tests/integration/test_incremental_update.py:174: AssertionError
+=========================== short test summary info ============================
+FAILED tests/integration/test_incremental_update.py::test_SNP_01_02_03_update_matches_full_capture_and_real_semantics
