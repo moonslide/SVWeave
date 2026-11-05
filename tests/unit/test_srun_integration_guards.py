@@ -117,7 +117,7 @@ def test_SRUN_P0_no_approval_or_apply_under_remote_context(ws: Ws, operation: st
     if operation == "approve":
         kw.update(patch_hash="b" * 64, confirm=lambda _: pytest.fail("must not ask approval"))
     elif operation == "commit":
-        kw.update(expected_patch_hash="b" * 64, request_key="request")
+        kw.update(expected_patch_hash="b" * 64, request_key="request-key-1")
     with pytest.raises(SvwError) as err:
         getattr(edit, operation)(opts, "request", **kw)
     assert err.value.details["reason"] == "srun_editing_not_supported"

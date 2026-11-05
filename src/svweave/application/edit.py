@@ -14,6 +14,7 @@ enforced here and nowhere else may be bypassed:
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections import Counter
 from collections.abc import Callable, Iterator
@@ -67,7 +68,7 @@ from svweave.editing.diffing import (
     patch_hash,
     patch_record,
 )
-from svweave.editing.models import PrepareRequest
+from svweave.editing.models import KEY_PATTERN, PrepareRequest
 from svweave.editing.plan import (
     declared_files,
     denied,
@@ -955,6 +956,11 @@ def commit(
     """Apply an approved, validated transaction. ``crash_after_files`` is TEST-ONLY: keyword
     argument of this function, not reachable from configuration, environment or MCP."""
     _require_id(transaction_id)
+    if not isinstance(request_key, str) or not re.fullmatch(KEY_PATTERN, request_key):
+        # the MCP schema checks this; the CLI did not, and a key JSON escapes (", \, non-ASCII)
+        # never matched the stored record, so reusing it for another transaction went unnoticed
+        raise SvwError(ErrorCode.INVALID_CONFIG,
+                       "request_key must be 8-128 of [A-Za-z0-9._:-]", {"field": "request_key"})
     with _session(opts) as (ctx, db, store):
         require_editing_enabled(ctx)
         _check_trusted_location(ctx)
@@ -1091,7 +1097,7 @@ def check_inputs_unchanged(
             c for c in changed
             if not (
                 c["change"] == "modified" and c["path"] in own
-                and jr.current_sha(ctx.to_abs(c["path"])) == own[c["path"]]
+                and jr.target_sha(ctx, c["path"]) == own[c["path"]]
             )
         ]
         if foreign or not changed:
@@ -1142,9 +1148,8 @@ def _commit_locked(
     # per-file CAS precondition BEFORE the journal exists (nothing to recover yet)
     try:
         for jf in files:
-            p = ctx.to_abs(jf.logical_path)
-            jr._lstat_regular(p)
-            if jr.current_sha(p) != jf.before_sha256:
+            jr.target_stat(ctx, jf.logical_path)
+            if jr.target_sha(ctx, jf.logical_path) != jf.before_sha256:
                 raise SvwError(
                     ErrorCode.EDIT_CONFLICT,
                     f"{jf.logical_path} changed since the base snapshot; refusing to overwrite",
@@ -1219,7 +1224,7 @@ def _post_apply(
     v = txn.record["validation"]
     expected = {f["logical_path"]: f["after_sha256"] for f in v["files"]}
     failures: list[dict[str, Any]] = []
-    mismatches = [lp for lp, h in expected.items() if jr.current_sha(ctx.to_abs(lp)) != h]
+    mismatches = [lp for lp, h in expected.items() if jr.target_sha(ctx, lp) != h]
     if mismatches:
         failures.append({"reason": "post_apply_bytes_differ", "paths": mismatches})
     pb = txn.record.get("profile_builds", {})
@@ -1261,7 +1266,7 @@ def _post_apply(
         from svweave.application.semantic_common import freshness_of
 
         for prof, bid, old in to_publish:
-            db.publish_build(bid)
+            db.publish_build(bid, prof)  # a shared build_id must move THIS profile's pointer
             verified[prof]["old_build_id"] = old
             verified[prof]["old_build_freshness"] = (
                 freshness_of(ctx, db, require_build(db, old)).value if old else None
@@ -1423,21 +1428,14 @@ def _before_bytes(ctx: WorkspaceContext, j: jr.Journal, logical: str, want: str)
 
 
 def _write_one(ctx: WorkspaceContext, logical: str, data: bytes, expect_current: str) -> None:
-    import os
     import stat as st
 
-    from svweave.security import safeio
 
-    path = ctx.to_abs(logical)
-    if jr.current_sha(path) != expect_current:
+    if jr.target_sha(ctx, logical) != expect_current:
         raise SvwError(ErrorCode.EDIT_CONFLICT, "file changed during recovery",
                        {"reason": "changed_during_recovery", "path": logical})
-    mode = st.S_IMODE(os.lstat(path).st_mode)
-    jr._lstat_regular(path)
-    inside = ctx.project_root in path.parents
-    base = ctx.project_root if inside else path.parent
-    name = path.relative_to(ctx.project_root).as_posix() if inside else path.name
-    safeio.write_under(base, name, data, mode, durable=True)
+    mode = st.S_IMODE(jr.target_stat(ctx, logical).st_mode)
+    jr.write_target(ctx, logical, data, mode)
 
 
 def _roll_forward_gates(ctx: WorkspaceContext, txn: Txn, j: jr.Journal) -> None:

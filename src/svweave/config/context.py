@@ -198,6 +198,15 @@ class WorkspaceContext:
             )
         return r.abs
 
+    def write_base(self, logical: str) -> tuple[Path, str]:
+        """(base directory, path below it) for a no-follow read/write of ``logical``: the project
+        root, or the external root's own directory. Every component below the base is opened
+        without following links (safeio ``*_under``), also in an external root."""
+        if logical.startswith("@"):
+            rid, _, rest = logical[1:].partition("/")
+            return self.root_abs(rid), rest
+        return self.project_root, logical
+
     def to_abs(self, logical: str) -> Path:
         if logical.startswith("@"):
             rid, _, rest = logical[1:].partition("/")

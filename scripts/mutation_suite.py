@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Critical mutation suite (plan 20.5, release gate "Critical invariants").
 
-Thirty-two deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
+Thirty-three deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
 the M12–M22 extra write-safety rules, M23–M26 Slurm boundaries, and M27 shared-launcher workspace
 binding, plus M28–M29 verified incremental-snapshot reuse, M30 the complete change list of
-the roll-forward input gate and M31 the verified candidate snapshot of edit validate and M32 the recorded state directory. They are injected, one at a time, into a THROWAWAY COPY of the
+the roll-forward input gate and M31 the verified candidate snapshot of edit validate M32 the recorded state directory and M33 no-follow writes into external roots. They are injected, one at a time, into a THROWAWAY COPY of the
 repository. For each one the mapped test subset is run against the copy; a mutation is ``KILLED`` when the subset
 fails (pytest exit 1 with at least one FAILED test) and ``SURVIVED`` when it stays green. Anything
 else (patch anchor missing, syntax/collection error, timeout, red baseline) is ``ERROR`` and is
@@ -122,7 +122,7 @@ MUTATIONS: list[Mutation] = [
                "    if sha256_hex(data[e.start_byte : e.end_byte]) != e.expected_sha256:\n",
                "    if False:  # " + MARK + ":M05\n"),
          Patch("src/svweave/application/edit.py",
-               "            if jr.current_sha(p) != jf.before_sha256:\n"
+               "            if jr.target_sha(ctx, jf.logical_path) != jf.before_sha256:\n"
                "                raise SvwError(\n"
                "                    ErrorCode.EDIT_CONFLICT,\n"
                "                    f\"{jf.logical_path} changed since the base snapshot; refusing to overwrite\",\n"
@@ -178,7 +178,7 @@ MUTATIONS: list[Mutation] = [
                "        else:\n            v = \"conflict\"\n",
                "        else:\n            v = \"applied\"  # " + MARK + ":M08\n"),
          Patch("src/svweave/application/edit.py",
-               "    if jr.current_sha(path) != expect_current:\n"
+               "    if jr.target_sha(ctx, logical) != expect_current:\n"
                "        raise SvwError(ErrorCode.EDIT_CONFLICT, \"file changed during recovery\",\n",
                "    if False:  # " + MARK + ":M08\n"
                "        raise SvwError(ErrorCode.EDIT_CONFLICT, \"file changed during recovery\",\n")],
@@ -420,6 +420,22 @@ MUTATIONS: list[Mutation] = [
          "test_SEC_STA01_a_shipped_state_dir_is_refused_by_every_command",
          "tests/unit/test_state_trust.py::"
          "test_SEC_STA04_a_copied_or_replaced_state_dir_no_longer_matches_its_record"],
+    ),
+    m(
+        "M33", "edit writes into an external root follow linked parent directories",
+        "A1/SEC (beyond 20.5); first council review, security finding 4",
+        [Patch("src/svweave/editing/journal.py",
+               "    base, rel = ctx.write_base(logical)\n    try:\n        st = safeio.lstat_under(base, rel)\n",
+               "    base, rel = ctx.write_base(logical)  # " + MARK + ":M33\n    try:\n"
+               "        st = os.lstat(ctx.to_abs(logical))\n"),
+         Patch("src/svweave/editing/journal.py",
+               "    try:\n        return sha256_hex(safeio.read_regular_under(base, rel))\n",
+               "    try:  # " + MARK + ":M33\n        return sha256_hex(safeio.read_regular(ctx.to_abs(logical)))\n"),
+         Patch("src/svweave/editing/journal.py",
+               "    safeio.write_under(base, rel, data, mode, durable=True)\n",
+               "    p = ctx.to_abs(logical)  # " + MARK + ":M33\n"
+               "    safeio.write_under(p.parent, p.name, data, mode, durable=True)\n")],
+        ["tests/unit/test_external_root_writes.py"],
     ),
 ]
 

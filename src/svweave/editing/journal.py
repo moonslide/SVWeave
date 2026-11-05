@@ -166,6 +166,49 @@ def _lstat_regular(path: Path) -> os.stat_result:
     return st
 
 
+def target_stat(ctx: WorkspaceContext, logical: str) -> os.stat_result:
+    """:func:`_lstat_regular` of ``logical`` without following a link in ANY component below its
+    root (project root or external root): a swapped parent directory is refused, not followed."""
+    base, rel = ctx.write_base(logical)
+    try:
+        st = safeio.lstat_under(base, rel)
+    except FileNotFoundError as e:
+        raise SvwError(
+            ErrorCode.EDIT_CONFLICT, "target file disappeared", {"reason": "target_missing"}
+        ) from e
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        raise SvwError(
+            ErrorCode.POLICY_DENIED,
+            "target is a symlink or not a regular file",
+            {"reason": "target_not_regular"},
+        )
+    if st.st_nlink > 1:
+        raise SvwError(
+            ErrorCode.POLICY_DENIED,
+            "target file is hardlinked; it can be changed through another name",
+            {"reason": "target_hardlinked"},
+        )
+    return st
+
+
+def target_sha(ctx: WorkspaceContext, logical: str) -> str | None:
+    """sha256 of ``logical`` read through no link below its root; ``None`` if absent; a link,
+    special file or linked parent is the conflict marker ``"non-regular"``."""
+    base, rel = ctx.write_base(logical)
+    try:
+        return sha256_hex(safeio.read_regular_under(base, rel))
+    except FileNotFoundError:
+        return None
+    except SvwError:
+        return "non-regular"
+
+
+def write_target(ctx: WorkspaceContext, logical: str, data: bytes, mode: int) -> None:
+    """Atomic durable replace of ``logical``, no link followed below its root."""
+    base, rel = ctx.write_base(logical)
+    safeio.write_under(base, rel, data, mode, durable=True)
+
+
 def current_sha(path: Path) -> str | None:
     """sha256 of a regular file, ``None`` if absent; a link/special file is a conflict marker."""
     try:
@@ -197,9 +240,8 @@ def apply_files(
             continue
         if crash_after_files is not None and applied >= crash_after_files:
             raise SimulatedCrash(f"simulated crash before file #{applied + 1}")
-        path = ctx.to_abs(jf.logical_path)
-        st = _lstat_regular(path)
-        cur = current_sha(path)
+        st = target_stat(ctx, jf.logical_path)
+        cur = target_sha(ctx, jf.logical_path)
         if cur != jf.before_sha256:
             raise SvwError(
                 ErrorCode.EDIT_CONFLICT,
@@ -213,10 +255,7 @@ def apply_files(
                 "candidate bytes differ from the validated after-hash",
                 {"reason": "after_hash_mismatch", "path": jf.logical_path},
             )
-        rel = path.relative_to(ctx.project_root).as_posix() if _inside(ctx, path) else None
-        base = ctx.project_root if rel is not None else path.parent
-        name = rel if rel is not None else path.name
-        safeio.write_under(base, name, data, stat.S_IMODE(st.st_mode), durable=True)
+        write_target(ctx, jf.logical_path, data, stat.S_IMODE(st.st_mode))
         jf.status = "applied"
         write_journal(ctx, journal)
         if on_progress is not None:
@@ -246,7 +285,7 @@ class FileVerdict:
 def classify(ctx: WorkspaceContext, j: Journal) -> list[FileVerdict]:
     out: list[FileVerdict] = []
     for jf in j.files:
-        cur = current_sha(ctx.to_abs(jf.logical_path))
+        cur = target_sha(ctx, jf.logical_path)
         if cur == jf.after_sha256:
             v = "applied"
         elif cur == jf.before_sha256:

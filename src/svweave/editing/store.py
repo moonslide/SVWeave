@@ -97,7 +97,8 @@ class TxnStore:
     def commit_key_owner(self, key: str) -> list[Txn]:
         """Transactions whose commit used this request key (scoped per workspace, F7)."""
         rows = self.db.conn.execute(
-            "SELECT * FROM edit_transactions WHERE record LIKE ?", (f'%"request_key": "{key}"%',)
+            "SELECT * FROM edit_transactions WHERE record LIKE ? ESCAPE '\\'",
+            ("%" + _like(f'"request_key": {json.dumps(key)}') + "%",),
         ).fetchall()
         out = [Txn.from_row(r) for r in rows]
         return [t for t in out if (t.record.get("commit") or {}).get("request_key") == key]
@@ -195,3 +196,8 @@ class TxnStore:
                 (*args, txn_id, cur.value),
             )
         return self.get(txn_id)
+
+
+def _like(text: str) -> str:
+    """``text`` as a literal inside a LIKE pattern (``\\`` escapes ``%``, ``_`` and itself)."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

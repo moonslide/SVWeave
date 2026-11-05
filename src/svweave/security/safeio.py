@@ -140,6 +140,25 @@ def read_regular(path: Path, max_bytes: int | None = None, *, tail: bool = False
         os.close(fd)
 
 
+def lstat_under(base: Path, rel: str) -> os.stat_result:
+    """``lstat`` of ``base/rel`` following NO link in any component below ``base`` (the final one
+    is not followed either). ``FileNotFoundError`` when missing; a link or non-directory on the
+    way is ``POLICY_DENIED``."""
+    if safe_rel_path(rel) is None:
+        raise unsafe(rel, "not a safe relative path")
+    parts = rel.split("/")
+    try:
+        dfd = _walk(base, parts[:-1], create=False)
+    except OSError as e:
+        if isinstance(e, FileNotFoundError):
+            raise
+        raise unsafe(rel, f"cannot traverse without following links ({e.strerror})") from e
+    try:
+        return os.stat(parts[-1], dir_fd=dfd, follow_symlinks=False)
+    finally:
+        os.close(dfd)
+
+
 def require_real_dir(base: Path, rel: str) -> None:
     """``base`` and every component of ``base/rel`` are real directories, no link anywhere
     (``POLICY_DENIED`` otherwise; ``FileNotFoundError`` when missing). For a tree that is about to

@@ -118,3 +118,30 @@ def test_SEC_SNP05_validate_never_reuses_a_planted_candidate_snapshot(tmp_path: 
     again = derive_candidate_snapshot(ctx, base, {"rtl/a.sv": new})
     assert again is not None and again.snapshot_id == first.snapshot_id
     assert f.read_bytes() == new
+
+
+def test_SEC_SNP06_gc_cannot_run_while_a_candidate_snapshot_is_written(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """First council review: the candidate snapshot was built without the shared workspace lock,
+    so a concurrent `svweave gc` (exclusive, removes every .tmp-*) could delete it mid-copy and
+    turn validate into a terminal VALIDATION_FAILED."""
+    import svweave.editing.candsnap as cs
+    from svweave.storage.lock import WorkspaceBusy, workspace_lock
+
+    w, sid = _ws(tmp_path)
+    ctx = w.ctx()
+    base = load_record(snapshots_dir(ctx) / sid)
+    seen: list[str] = []
+    real = cs._derive
+
+    def probe(*a: object, **kw: object) -> object:
+        try:  # what gc does: exclusive, non-blocking
+            with workspace_lock(ctx.state_dir, exclusive=True, blocking=False):
+                seen.append("gc could run")
+        except WorkspaceBusy:
+            seen.append("gc excluded")
+        return real(*a, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cs, "_derive", probe)
+    assert cs.derive_candidate_snapshot(ctx, base, {"rtl/a.sv": b"module a; wire w; endmodule\n"})
+    assert seen == ["gc excluded"]

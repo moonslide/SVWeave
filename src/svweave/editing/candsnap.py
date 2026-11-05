@@ -21,9 +21,11 @@ from svweave.snapshot.capture import (
     load_record,
     remove_snapshot_dir,
     snapshot_id_for,
+    snapshot_publish_lock,
     snapshots_dir,
 )
 from svweave.snapshot.models import SnapFile, SnapshotRecord
+from svweave.storage.lock import workspace_lock
 
 
 def _freeze(root: Path) -> None:
@@ -54,6 +56,16 @@ def derive_candidate_snapshot(
             files.append(f.model_copy(update={"sha256": sha256_hex(data), "size": len(data)}))
         else:
             files.append(f)
+    # held like capture: a concurrent `svweave gc` (exclusive) must not delete the .tmp-* copy
+    # or the candidate snapshot between creation and the build that reads it; the publish lock
+    # serialises the check-then-replace of an existing directory with other publishers
+    with workspace_lock(ctx.state_dir), snapshot_publish_lock(ctx):
+        return _derive(ctx, base, files, changed)
+
+
+def _derive(
+    ctx: WorkspaceContext, base: SnapshotRecord, files: list[SnapFile], changed: dict[str, bytes]
+) -> SnapshotRecord:
     sid = snapshot_id_for(base.spec, files, base.lookup)
     root = snapshots_dir(ctx)
     final = root / sid
