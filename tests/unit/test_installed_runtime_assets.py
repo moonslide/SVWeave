@@ -20,9 +20,9 @@ import pytest
 import yaml
 from scripts import ci_wheel_smoke
 
+from svweave.adapters import toolchain as T
 from svweave.application.toolchain import find_lock
 from svweave.domain.errors import ErrorCode, SvwError
-from svweave.adapters import toolchain as T
 
 REPO = Path(__file__).resolve().parents[2]
 ASSETS = (
