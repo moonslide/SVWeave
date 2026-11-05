@@ -61,6 +61,20 @@
 
 ## 状态
 
+### 两次审查的后续处理与第三次 Council review（2026-11-05）
+
+前两次审查留下的所有项目都已处理，并按项目负责人 2026-11-05 的决定进行：批准 `--lazy` 的 CSP 放宽（ADR-014）；SVWeave 只信任它自己创建或由人认领的 `.svweave/`（**破坏性变更：** 每个既有工作区请运行一次 `svweave init --adopt-state`）；第一次审查的遗留项目也一并处理。内容包括修正（共享构建的发布、候选快照在锁内创建、request key 校验、写入外部根目录时不跟随链接、用法错误也输出 envelope、doctor 退出码、qualify 关卡）、新测试与 mutation M32–M40，以及不改变行为的重构（公开的查询核心、单一 git runner、写入安全代码移到 `editing/`、图谱导出拆分、查看器改为 JavaScript 文件、`docs/architecture.md`）。在 `de0e6fe` 验证（run5，一个 4 CPU 云端 session，不是 CI，`SVWEAVE_REQUIRE_BACKENDS=1`）：unit + contract 1793 通过，4 个 BLOCKED 与之前相同；fault injection 21、integration 240、acceptance 12、browser 1 通过；mutation **40/40 KILLED**。第一次运行（run4）发现了一个测试 helper 的回归，记录保留。细节：[evidence/council-review-followup-2026-11-05](evidence/council-review-followup-2026-11-05/README.md)。
+
+随后针对该状态（`41e99df`）进行的第三次六位专家审查发现了新问题，**目前尚未修正**，其中包括：
+- 强化过的 git runner 没有停用仓库 hook，因此对连同 `.git/` 一起交付的仓库，`svw_diff_impact` 可能运行其 `.git/hooks/post-index-change`（已复现）；
+- 当 `project.root` 不是 `.` 时，`svweave init` 与工作区加载记录的是不同的 `.svweave/`，`--adopt-state` 会认领错误的目录；
+- `doctor` 的备援路径会在被拒绝的 `.svweave/` 内进行 probe；
+- 状态记录不涵盖目录内容（recovery rollback 写入 journal 字节时没有 commit 的关卡）；
+- `schema emit` 在错误 envelope 时退出码为 0；
+- git 失败时 qualify 的 dirty-tree 关卡会放行。
+
+所有发现、严重度与已确认的部分：[evidence/council-review-3-2026-11-05](evidence/council-review-3-2026-11-05/README.md)。这不是 `scripts/qualify.py` 的资格认定运行。
+
 ### 第二次 Council review：修正与已验证的运行（2026-11-04）
 
 第二次六位专家审查（针对之后的代码：大型 SoC 页面、`--per-commit`、默认完整拓扑）发现两个 **High** 问题，均已先复现再修正：`graph export --per-commit` 运行的 `git log` 在仓库配置 `log.showSignature` 时，会为已签名的 commit 运行仓库指定的 `gpg.program`；以及仓库附带的 `.svweave/` 可以放一个 `files` 为符号链接（例如指向 `$HOME`）的快照，文本搜索会遍历它，且 `snapshot.json` 会被原样信任。另外也修正了：图谱页面只运行自己的查看器脚本（以 hash 指定）；`--split`/`--lazy` 拒绝每页上限，且不再在单一页面上声称完整；沙箱绑定 `$HOME` 的上层目录；以及正确性与接口缺陷。每个修正都有在旧代码上会失败的测试（新增 mutation M31）。
@@ -361,6 +375,8 @@ svweave build --profile rtl_demo   # the shipped demo: exit 0
 
 * 由 build backend 尚未锁定之前（2026-10-20 之前）的安装程序填充的 uv 缓存，可能含有用未锁定 backend 构建的 `proxy-tools` 或 `serena-agent` wheel，而 uv 会复用这类已构建的 wheel。升级后请删除 `.toolchain/state/uv-cache`（或你的 `--uv-cache-dir`）一次。在 `vendor/` 路径上，之后请重新解压 `vendor/uv-cache.tar.gz`：它已用锁定的 backend 和锁定版本的 uv 重新生成（由其他 uv 版本写入的缓存使用不同的缓存 bucket，离线时无法使用）。
 * 文档所述的流程不再以 `uv venv` 开头；先前以该方式创建的 `.venv` 会被保留，并由 `--create-venv` 复用。
+* 自 2026-11-05 起，SVWeave 只信任它记录过的 `.svweave/`（破坏性变更）：请在每个既有工作区对你自己创建的状态目录运行一次 `svweave init --adopt-state`（否则第一个命令会以 `state_dir_not_adopted` 拒绝）。已知限制（第三次 council review，H2）：当 `project.root` 不是 `.` 时，这一步会认领错误的目录；修正之前请保持 `project.root: "."`，或先把状态目录移开。
+* 会展开 `$VAR` 的 filelist，也需要该变量出现在受信 policy 的 `environment_allowlist` 中（2026-11-04，破坏性变更）。
 
 ### 安装一次，跨项目共享
 

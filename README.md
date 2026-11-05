@@ -74,6 +74,38 @@ compare-and-set write (TB4). Dashed lines are trust boundaries TB1 to TB4.*
 
 ## Status
 
+### Follow-up of both reviews and third council review (2026-11-05)
+
+Every item left open by the first two reviews was handled, with the project owner's decisions of
+2026-11-05: the `--lazy` CSP relaxation is approved (ADR-014); SVWeave trusts only a `.svweave/`
+it created or a person adopted (**breaking:** run `svweave init --adopt-state` once per existing
+workspace); and the first review's leftovers were handled too. That covers fixes (shared-build
+publish, candidate snapshot under the lock, request-key validation, no-follow writes into
+external roots, usage-error envelopes, doctor exit codes, qualify gates), new tests and
+mutations M32–M40, and behaviour-preserving restructuring (a public query core, one git runner,
+write-safety code in `editing/`, the graph export split, the viewer as a JavaScript file,
+`docs/architecture.md`). Verified at `de0e6fe` (run5, one 4-CPU cloud session, not CI,
+`SVWEAVE_REQUIRE_BACKENDS=1`): unit + contract 1793 passed with the same 4 BLOCKED as before,
+fault injection 21, integration 240, acceptance 12, browser 1 passed; mutations **40/40 KILLED**.
+A first run (run4) caught a regression in a test helper and is kept. Details:
+[evidence/council-review-followup-2026-11-05](evidence/council-review-followup-2026-11-05/README.md).
+
+A third six-specialist review of that state (`41e99df`) then found new issues, **open and not
+fixed yet**, among them:
+- the hardened git runner does not disable repository hooks, so `svw_diff_impact` can run
+  `.git/hooks/post-index-change` of a repository delivered with its `.git/` (reproduced);
+- `svweave init` and the workspace loader record different `.svweave/` directories when
+  `project.root` is not `.`, so `--adopt-state` adopts the wrong one;
+- `doctor`'s fallback probes inside a refused `.svweave/`;
+- the state record does not cover the directory's contents (recovery rollback writes journal
+  bytes without the commit gates);
+- `schema emit` exits 0 on error envelopes;
+- the qualify dirty-tree gate passes when git fails.
+
+All findings, with severity and what was confirmed:
+[evidence/council-review-3-2026-11-05](evidence/council-review-3-2026-11-05/README.md). Not a
+`scripts/qualify.py` qualification run.
+
 ### Second council review: fixes and verified run (2026-11-04)
 
 A second six-specialist review, of the code that followed (large-SoC pages, `--per-commit`, the
@@ -553,6 +585,13 @@ Re-run the installer as in the path you used (`--create-venv` repairs an existin
   uses other cache buckets and does not work offline).
 * The documented flows no longer start with `uv venv`; an earlier `.venv` made that way is kept and
   re-used by `--create-venv`.
+* From 2026-11-05 SVWeave trusts only a `.svweave/` it recorded (breaking): in each existing
+  workspace run `svweave init --adopt-state` once for the state directory you created (the
+  first command otherwise refuses it with `state_dir_not_adopted`). Known limitation (third
+  council review, H2): with `project.root` other than `.` this step adopts the wrong directory;
+  until that is fixed, keep `project.root: "."` or move the state directory aside.
+* A filelist that expands `$VAR` also needs the variable in the trusted policy's
+  `environment_allowlist` (2026-11-04, breaking).
 
 ### Install once; reuse it across projects
 

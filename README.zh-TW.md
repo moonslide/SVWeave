@@ -61,6 +61,20 @@
 
 ## 狀態
 
+### 兩次審查的後續處理與第三次 Council review（2026-11-05）
+
+前兩次審查留下的所有項目都已處理，並依專案負責人 2026-11-05 的決定進行：核准 `--lazy` 的 CSP 放寬（ADR-014）；SVWeave 只信任它自己建立或由人認領的 `.svweave/`（**破壞性變更：** 每個既有工作區請執行一次 `svweave init --adopt-state`）；第一次審查的遺留項目也一併處理。內容包括修正（共用建置的發布、候選快照在鎖內建立、request key 驗證、寫入外部根目錄時不跟隨連結、用法錯誤也輸出 envelope、doctor 結束碼、qualify 關卡）、新測試與 mutation M32–M40，以及不改變行為的重構（公開的查詢核心、單一 git runner、寫入安全程式碼移到 `editing/`、圖譜匯出拆分、檢視器改為 JavaScript 檔、`docs/architecture.md`）。在 `de0e6fe` 驗證（run5，一個 4 CPU 雲端 session，不是 CI，`SVWEAVE_REQUIRE_BACKENDS=1`）：unit + contract 1793 通過，4 個 BLOCKED 與之前相同；fault injection 21、integration 240、acceptance 12、browser 1 通過；mutation **40/40 KILLED**。第一次執行（run4）抓到一個測試 helper 的回歸，紀錄保留。細節：[evidence/council-review-followup-2026-11-05](evidence/council-review-followup-2026-11-05/README.md)。
+
+接著針對該狀態（`41e99df`）做的第三次六位專家審查發現了新問題，**目前尚未修正**，其中包括：
+- 強化過的 git runner 沒有停用儲存庫 hook，因此對連同 `.git/` 一起交付的儲存庫，`svw_diff_impact` 可能執行其 `.git/hooks/post-index-change`（已重現）；
+- 當 `project.root` 不是 `.` 時，`svweave init` 與工作區載入記錄的是不同的 `.svweave/`，`--adopt-state` 會認領錯的目錄；
+- `doctor` 的備援路徑會在被拒絕的 `.svweave/` 內進行 probe；
+- 狀態紀錄不涵蓋目錄內容（recovery rollback 寫入 journal 位元組時沒有 commit 的關卡）；
+- `schema emit` 在錯誤 envelope 時結束碼為 0；
+- git 失敗時 qualify 的 dirty-tree 關卡會放行。
+
+所有發現、嚴重度與已確認的部分：[evidence/council-review-3-2026-11-05](evidence/council-review-3-2026-11-05/README.md)。這不是 `scripts/qualify.py` 的資格認定執行。
+
 ### 第二次 Council review：修正與已驗證的執行（2026-11-04）
 
 第二次六位專家審查（針對之後的程式碼：大型 SoC 頁面、`--per-commit`、預設完整拓撲）發現兩個 **High** 問題，皆已先重現再修正：`graph export --per-commit` 執行的 `git log` 在儲存庫設定 `log.showSignature` 時，會為已簽章的 commit 執行儲存庫指定的 `gpg.program`；以及儲存庫附帶的 `.svweave/` 可以放一個 `files` 為符號連結（例如指向 `$HOME`）的快照，文字搜尋會走訪它，且 `snapshot.json` 會被原樣信任。另外也修正了：圖譜頁面只執行自己的檢視器腳本（以 hash 指定）；`--split`/`--lazy` 拒絕每頁上限，且不再在單一頁面上宣稱完整；沙箱綁定 `$HOME` 的上層目錄；以及正確性與介面缺陷。每個修正都有在舊程式碼上會失敗的測試（新增 mutation M31）。
@@ -361,6 +375,8 @@ svweave build --profile rtl_demo   # the shipped demo: exit 0
 
 * 由 build backend 尚未鎖定之前（2026-10-20 之前）的安裝程式所填入的 uv 快取，可能含有以未鎖定 backend 建置的 `proxy-tools` 或 `serena-agent` wheel，而 uv 會重用這類已建置的 wheel。升級後請刪除 `.toolchain/state/uv-cache`（或你的 `--uv-cache-dir`）一次。在 `vendor/` 路徑上，之後請重新解壓縮 `vendor/uv-cache.tar.gz`：它已用鎖定的 backend 與鎖定版本的 uv 重新產生（由其他 uv 版本寫入的快取使用不同的快取 bucket，離線時無法使用）。
 * 文件所述的流程不再以 `uv venv` 開頭；先前以該方式建立的 `.venv` 會被保留，並由 `--create-venv` 重用。
+* 自 2026-11-05 起，SVWeave 只信任它記錄過的 `.svweave/`（破壞性變更）：請在每個既有工作區對你自己建立的狀態目錄執行一次 `svweave init --adopt-state`（否則第一個指令會以 `state_dir_not_adopted` 拒絕）。已知限制（第三次 council review，H2）：當 `project.root` 不是 `.` 時，這一步會認領錯的目錄；修正之前請保持 `project.root: "."`，或先把狀態目錄移開。
+* 會展開 `$VAR` 的 filelist，也需要該變數出現在受信任 policy 的 `environment_allowlist` 中（2026-11-04，破壞性變更）。
 
 ### 安裝一次，跨專案共用
 

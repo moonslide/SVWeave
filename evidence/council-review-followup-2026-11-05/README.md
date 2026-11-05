@@ -1,4 +1,4 @@
-# Follow-up of both council reviews: every open item closed (2026-11-05)
+# Follow-up of both council reviews (2026-11-05)
 
 After council review 2 (`../council-review-2-2026-11-04/`) the project owner asked for every item
 still open in both reviews to be handled, and decided the three questions only the owner could
@@ -10,9 +10,12 @@ decide (2026-11-05):
 * the first review's leftovers are handled too, write-safety moves as behaviour-preserving
   refactors checked by the full suite and the mutation suite.
 
-Every fix below has a test that fails on the previous code (shown by reverting the fix or by
-injecting the defect), or, for behaviour-preserving moves, is checked by the unchanged suites
-plus a test that pins the new structure.
+Each listed test guards the change: the safety rules have negative tests that fail on the
+previous code and, where they protect writes, mutation entries (M32–M40, killed in run5);
+GRF-I22..I27 and SEC-DIF07 add coverage for behaviour that already existed (they pass on the
+previous code too); some pins (QUAL-02/05, SEC-DIF08, ARC-05) check source text, not behaviour;
+behaviour-preserving moves are checked by the unchanged suites. The third council review
+(`../council-review-3-2026-11-05/`) found new issues, some in this follow-up's own changes.
 
 ## Owner decisions
 
@@ -85,8 +88,9 @@ plus a test that pins the new structure.
 
 ## Verification
 
-One 4-CPU cloud session (not CI), `SVWEAVE_REQUIRE_BACKENDS=1 SVWEAVE_REQUIRE_NODE=1` for every
-pytest step, real pyslang 12 under mandatory bwrap, real codebase-memory-mcp, Serena and UVM
+One 4-CPU cloud session (not CI), `SVWEAVE_REQUIRE_BACKENDS=1 SVWEAVE_REQUIRE_NODE=1` exported by
+the run script for every pytest step (`commands.txt` lists each command without that exported
+environment; no `git status`, node or Playwright version was recorded), real pyslang 12 under mandatory bwrap, real codebase-memory-mcp, Serena and UVM
 verified from the lock (sha256 `ea20baf9…`). Each run directory has `commands.txt` (every
 command), `steps.txt` (exit code and wall time), `junit-*.xml` (every test), `mutation.json`.
 
@@ -97,7 +101,7 @@ command), `steps.txt` (exit code and wall time), `junit-*.xml` (every test), `mu
 | Step | run5 |
 |---|---|
 | ruff, mypy (strict), `svweave schema emit --check`, `bootstrap_locked.py --verify-only` | rc 0 |
-| unit + contract | 1797 tests: **1793 passed**, 0 failed; 4 **BLOCKED** (the same four as runs 2 and 3) |
+| unit + contract | 1797 tests: **1793 passed**; 4 **BLOCKED** (the same four as runs 2 and 3; JUnit records them as 3 failures and 1 error because `SVWEAVE_REQUIRE_BACKENDS=1` turns a required skip into a failure) |
 | fault injection | 21 passed |
 | integration (real backends) | **240 passed**, 0 skipped |
 | acceptance | 12 passed |
