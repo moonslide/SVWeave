@@ -876,3 +876,29 @@ def test_GRF_I26_changed_instances_under_two_tops_have_no_common_ancestor(tmp_pa
     marks = _marks(data)
     assert marks == {"ta": "context", "ta.u": "changed", "tb": "context", "tb.u": "changed"}
     assert sorted(n["path"] for n in data["nodes"] if n["parent"] is None) == ["ta", "tb"]
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I27_per_commit_attributes_the_branch_commit_not_the_merge(tmp_path: Path) -> None:
+    """Second council review (test evidence 11): merge commits in the range were untested. The
+    change is attributed to the commit that made it; the merge itself changes nothing drawn."""
+    from tests.integration.test_diff_impact import git
+
+    root = _git_grf(tmp_path)
+    git(root, "checkout", "-q", "-b", "feature")
+    _edit(root, "grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];")
+    git(root, "commit", "-q", "-am", "F1 reduce on a branch")
+    git(root, "checkout", "-q", "main")
+    (root / "notes.txt").write_text("main moved on\n")
+    git(root, "add", "notes.txt")
+    git(root, "commit", "-q", "-m", "M1 notes on main")
+    git(root, "merge", "-q", "--no-ff", "-m", "Merge feature", "feature")
+    bid = _build(root)
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~1",
+                    "--diff-head", "HEAD", "--per-commit")
+    assert code == 0, env.get("error")
+    d = env["data"]["diff"]
+    subjects = [c["subject"] for c in d["commits"]]
+    assert "F1 reduce on a branch" in subjects and "Merge feature" in subjects
+    by = {x["qualified_name"]: x["commits"] for x in d["changed_definitions"]}
+    assert [subjects[i] for i in by["grf_reduce"]] == ["F1 reduce on a branch"]
