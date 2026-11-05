@@ -12,6 +12,7 @@ from svweave.application.evidence import EvidenceManifest
 from svweave.config.models import LocalConfig, Manifest, Policy
 from svweave.config.toolchain_lock import ToolchainLock
 from svweave.editing.models import PrepareRequest
+from svweave.security.safeio import write_under
 
 SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "manifest.schema.json": Manifest,
@@ -32,9 +33,10 @@ def emit_schemas(out_dir: Path) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     written = []
     for name, model in SCHEMA_MODELS.items():
-        p = out_dir / name
-        p.write_text(schema_text(model), encoding="utf-8")
-        written.append(p)
+        # atomic, no link followed (a planted schemas/x.json -> elsewhere is replaced, not
+        # written through; first council review, policy finding 11)
+        write_under(out_dir, name, schema_text(model).encode("utf-8"), 0o644)
+        written.append(out_dir / name)
     return written
 
 

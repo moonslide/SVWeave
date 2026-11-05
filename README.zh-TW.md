@@ -353,7 +353,7 @@ svweave doctor --probe             # starts each backend once with a real fixtur
 svweave build --profile rtl_demo   # the shipped demo: exit 0
 ```
 
-預期結果：`svweave doctor` 以結束碼 0 結束，`outcome` 為 `OK`；`client_boundary` 永遠是 `WARN`（`not qualified`，見 `docs/security.md` 第 4 節），而隨附的 `svweave.yaml` 在你對應該外部根目錄之前會給出 `root_mapping:uvm` `WARN`。任何 `FAIL` 都會使結束碼為 4、`outcome` 為 `ERROR`；只有在略過 Serena（`--skip-serena`）時，`backend:serena_exe FAIL` 才是預期的。`svweave build --profile rtl_demo` 以結束碼 0 結束，帶有 `"completeness": "COMPLETE"`、`"diagnostic_outcome": "NO_ERRORS"` 與 `"published": true`，並印出可用於[快速入門](#快速入門)查詢的 `build_id` 與 `snapshot_id`；完整輸出見[實例演練：隨附的示範](#實例演練隨附的示範)。
+預期結果：`svweave doctor` 以結束碼 0 結束，`outcome` 為 `OK`；`client_boundary` 永遠是 `WARN`（`not qualified`，見 `docs/security.md` 第 4 節），而隨附的 `svweave.yaml` 在你對應該外部根目錄之前會給出 `root_mapping:uvm` `WARN`。任何 `FAIL` 都會使 `outcome` 為 `ERROR`，結束碼取自最根本的失敗檢查（與檢查順序無關）：設定 2、政策 6、缺少輸入或根目錄對應 3、後端 4（`error.details.failed_checks` 列出所有失敗的檢查）；只有在略過 Serena（`--skip-serena`）時，`backend:serena_exe FAIL`（結束碼 4）才是預期的。`svweave build --profile rtl_demo` 以結束碼 0 結束，帶有 `"completeness": "COMPLETE"`、`"diagnostic_outcome": "NO_ERRORS"` 與 `"published": true`，並印出可用於[快速入門](#快速入門)查詢的 `build_id` 與 `snapshot_id`；完整輸出見[實例演練：隨附的示範](#實例演練隨附的示範)。
 
 ### 從較早的安裝升級
 
@@ -598,7 +598,7 @@ svweave graph export --build BUILD_ID --lazy    # 單一頁面，打開時才載
 
 放不下的子樹會成為「入口節點」：它在上一層頁面上是一個節點（帶著自己的連接埠連線），可開啟它那一部分（`--split`：連到它的頁面；`--lazy`：雙擊即在同一張圖中載入）。索引頁可搜尋整個設計的所有實例，並開啟正確的部分。在 115,562 個實例上：單一頁面開啟需 10.1 秒，`--split` 或 `--lazy` 的索引頁約 0.55 秒，開啟一筆搜尋結果約 1 秒（[量測證據](evidence/bench/graph-large/README.md)）。`--lazy` 的頁面 CSP 允許載入同一目錄的腳本（讀取本機檔案所必需；僅在 Chromium 驗證）；`--split` 維持嚴格的 CSP，任何瀏覽器都能用。每個頁面只會執行它自己的檢視器腳本（CSP 寫明其 sha256，沒有 `'unsafe-inline'` 的腳本）。`--split` 與 `--lazy` 寫出一個目錄（由 `--name` 命名），並拒絕 `--max-instances` / `--max-fanout`：它們的頁面合起來就是完整拓撲，要讓頁面變小請用 `--page-budget`（至少 100）。每頁都會註明唯一的例外：透過沒有任何實例宣告的訊號（例如 package 變數）、連接位於不同頁面之實例的連線不會畫出。
 
-各模式的 envelope `data`：單一頁面（預設、`--instance`、`--diff-base`）有 `path`、`bytes`、`sha256`、`stats`、`truncated`、`root`（`--diff-base` 時另有 `diff`）；「沒有東西可畫」時為 `path: null`、`written: false` 與 `diff`。`--split` / `--lazy` 寫出一個目錄：`path`（其 `index.html`）、`directory`、`root`，以及位於 `atlas`（`--split`）或 `lazy`（`--lazy`）下的摘要：`pages`、`budget`、`largest_page`、`oversized_pages`、`bytes_total`、`largest_file_bytes`、`files`（至多 200 個名稱）、`files_total`、`files_truncated`。
+各模式的 envelope `data`（`data.mode`：單一頁面為 `page`、`--split` 為 `split`、`--lazy` 為 `lazy`）：單一頁面（預設、`--instance`、`--diff-base`）有 `path`、`bytes`、`sha256`、`stats`、`truncated`、`root`（`--diff-base` 時另有 `diff`）；「沒有東西可畫」時為 `path: null`、`written: false` 與 `diff`。`--split` / `--lazy` 寫出一個目錄：`path`（其 `index.html`）、`directory`、`root`，以及 `parts` 摘要：`pages`、`budget`、`largest_page`、`oversized_pages`、`bytes_total`、`largest_file_bytes`、`files`（至多 200 個名稱）、`files_total`、`files_truncated`。
 
 `graph export` 的結束碼：寫出頁面（或沒有東西可畫）時為 0；與 `query` 指令相同，PARTIAL 的建置為 3、STALE/HISTORICAL 為 5（頁面仍會寫出，並在頁面上註明），除非加上 `--allow-partial` / `--allow-stale`；使用 `--diff-base` 時，STALE 不會改變結束碼。`--max-instances` 截斷繪圖時 `pagination.truncated` 為 true。
 
@@ -976,7 +976,7 @@ root_mappings:
 | `svweave query search --snapshot S --query Q` | 圖譜候選項，或有標示的純文字備援（`--scope`、`--no-graph`） |
 | `svweave report --build B` | 以真實資料填寫的狀態報告；未評估的關卡會如實標明 |
 | `svweave evidence import --manifest FILE` | 匯入外部證據（以 `EXTERNAL_DECLARED` 儲存） |
-| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R [--per-commit]]] [--split \| --lazy [--page-budget N]] [--allow-stale] [--allow-partial]` | 寫出 `.svweave/exports/<name>.html`：實例階層加上連接埠關聯連線，單一自含式頁面，不提供任何服務（ADR-014）；`--instance` 只畫實例 I 的子樹；`--diff-base` 只畫 git diff 改到的實例 |
+| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R [--per-commit]]] [--split \| --lazy [--page-budget N]] [--allow-stale] [--allow-partial]` | 寫出 `.svweave/exports/<name>.html`，單一自含式頁面（使用 `--split`/`--lazy` 時則寫出目錄 `.svweave/exports/<name>/`，以 `index.html` 開始；這兩者拒絕 `--max-instances`/`--max-fanout`）：實例階層加上連接埠關聯連線，不提供任何服務（ADR-014）；`--instance` 只畫實例 I 的子樹；`--diff-base` 只畫 git diff 改到的實例 |
 | `svweave cache gc [--no-dry-run]` | 對快照做垃圾回收；保留最近 3 個與被參照的快照；預設為試執行（dry run） |
 | `svweave debug bundle --build B [--out DIR]` | 重現用套件：雜湊、manifest、診斷摘要、已遮蔽的路徑 |
 | `svweave schema emit [--check] [--out DIR]` | 寫出或驗證 `schemas/*.schema.json` |
@@ -1045,7 +1045,7 @@ root_mappings:
 | `UNSUPPORTED_OPTION` | slang 轉接器無法遵守的選項 | 3 |
 | `PARTIAL_ANALYSIS` | 部分結果 | 3 |
 | `AMBIGUOUS_SYMBOL` | 有多個限定範圍內的候選項 | 3 |
-| `PATH_NOT_ALLOWED` | 路徑位於允許的根目錄之外，或違反 include/exclude 規則或符號連結目標規則 | 6 |
+| `PATH_NOT_ALLOWED` | 路徑位於允許的根目錄之外，或違反 include/exclude 規則或符號連結目標規則 | 6；`build`/`update` 時若建置本身讀取了快照之外的檔案則為 3（`details.reason: dependency_leak`，outcome `BLOCKED`） |
 | `POLICY_DENIED` | 政策拒絕該操作 | 6 |
 | `APPROVAL_REQUIRED`, `APPROVAL_EXPIRED` | 核准缺少、偽造或過期 | 6 |
 | `WORKSPACE_UNSTABLE`, `STALE_SNAPSHOT` | 擷取期間工作區變動，或 `expected_snapshot_id` 不一致 | 5 |

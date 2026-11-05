@@ -683,7 +683,8 @@ def _export_atlas(
         stem += "-" + hashlib.sha256(str(root_row["path"]).encode()).hexdigest()[:10]
     dirname = name or stem
     if not _SAFE_NAME.fullmatch(dirname) or dirname.startswith("."):
-        raise SvwError(ErrorCode.INVALID_CONFIG, "name must match [A-Za-z0-9._-]+ (no path)")
+        raise SvwError(ErrorCode.INVALID_CONFIG, "--name must match [A-Za-z0-9._-]+ (no path)",
+                       {"field": "--name"})
     start = [root_row] if root_row is not None else s.rows(
         "SELECT * FROM instances WHERE build_id=? AND parent_id IS NULL ORDER BY ord", s.bid)
     limits = _gap_limits(s) + [GRAPH_NOTE, LAZY_NOTE if lazy else ATLAS_NOTE]
@@ -715,7 +716,9 @@ def _export_atlas(
             "written": True,
             "served": False,
             "root": str(root_row["path"]) if root_row is not None else None,
-            ("lazy" if lazy else "atlas"): {
+            # one key for both directory outputs; `mode` says which (interface review 2)
+            "mode": "lazy" if lazy else "split",
+            "parts": {
                 **summary, "files": sorted(files)[:MAX_LISTED_FILES],
                 "files_total": len(files), "files_truncated": len(files) > MAX_LISTED_FILES},
             "note": GRAPH_NOTE,
@@ -743,46 +746,52 @@ def export_graph(
     lazy: bool = False,
 ) -> Envelope:
     if split and lazy:
-        raise SvwError(ErrorCode.INVALID_CONFIG, "give split (--split) OR lazy (--lazy): "
-                       "linked pages or one page that loads its parts")
+        raise SvwError(ErrorCode.INVALID_CONFIG, "give --split OR --lazy: linked pages or one page "
+                       "that loads its parts", {"field": "--lazy"})
     if page_budget is not None and not (split or lazy):
-        raise SvwError(ErrorCode.INVALID_CONFIG, "page_budget (--page-budget) needs split "
-                       "(--split) or lazy (--lazy)")
+        raise SvwError(ErrorCode.INVALID_CONFIG, "--page-budget needs --split or --lazy",
+                       {"field": "--page-budget"})
     if (split or lazy) and (max_instances is not None or max_fanout is not None):
         # the pages together are the complete topology; a per-page cap would silently drop
         # instances and connections of every page and is not reported per page
         raise SvwError(ErrorCode.INVALID_CONFIG,
-                       "max_instances/max_fanout (--max-instances/--max-fanout) cannot be "
-                       "combined with split/lazy (--split/--lazy): those pages are the complete "
-                       "topology; use page_budget (--page-budget) to make the pages smaller")
+                       "--max-instances/--max-fanout cannot be combined with --split/--lazy: "
+                       "those pages are the complete topology; use --page-budget to make the "
+                       "pages smaller", {"field": "--max-instances"})
     if (split or lazy) and diff_base is not None:
         raise SvwError(ErrorCode.INVALID_CONFIG,
-                       "split applies to the complete topology or an --instance subtree, not to "
-                       "a diff view (a diff page is small already)")
+                       "--split/--lazy apply to the complete topology or an --instance subtree, "
+                       "not to a --diff-base view (a diff page is small already)",
+                       {"field": "--diff-base"})
     if page_budget is not None and (not isinstance(page_budget, int)
                                     or isinstance(page_budget, bool) or page_budget < MIN_PAGE_BUDGET):
-        raise SvwError(ErrorCode.INVALID_CONFIG, f"page_budget (--page-budget) must be at least "
-                       f"{MIN_PAGE_BUDGET} instances")
+        raise SvwError(ErrorCode.INVALID_CONFIG, f"--page-budget must be at least "
+                       f"{MIN_PAGE_BUDGET} instances", {"field": "--page-budget"})
     if per_commit and (diff_base is None or diff_head is None):
         raise SvwError(
             ErrorCode.INVALID_CONFIG,
-            "per_commit needs diff_base and diff_head (a commit range; build the head revision)",
+            "--per-commit needs --diff-base and --diff-head (a commit range; build the "
+            "--diff-head revision)", {"field": "--per-commit"},
         )
     if diff_base is not None:
-        check_ref(diff_base, "diff_base")
+        check_ref(diff_base, "--diff-base")
     if diff_head is not None:
         if diff_base is None:
-            raise SvwError(ErrorCode.INVALID_CONFIG, "diff_head needs diff_base")
-        check_ref(diff_head, "diff_head")
+            raise SvwError(ErrorCode.INVALID_CONFIG, "--diff-head needs --diff-base",
+                           {"field": "--diff-head"})
+        check_ref(diff_head, "--diff-head")
     if instance is not None and (not isinstance(instance, str) or not instance.strip()):
-        raise SvwError(ErrorCode.INVALID_CONFIG, "instance must be a non-empty instance path or id")
+        raise SvwError(ErrorCode.INVALID_CONFIG, "--instance must be a non-empty instance path "
+                       "or id", {"field": "--instance"})
     if max_instances is not None and (
             not isinstance(max_instances, int) or isinstance(max_instances, bool)
             or max_instances < 1):
-        raise SvwError(ErrorCode.INVALID_CONFIG, "max_instances must be at least 1 (omit: no cap)")
+        raise SvwError(ErrorCode.INVALID_CONFIG, "--max-instances must be at least 1 (omit it: "
+                       "no cap)", {"field": "--max-instances"})
     if max_fanout is not None and (
             not isinstance(max_fanout, int) or isinstance(max_fanout, bool) or max_fanout < 2):
-        raise SvwError(ErrorCode.INVALID_CONFIG, "max_fanout must be at least 2 (omit: no hubs)")
+        raise SvwError(ErrorCode.INVALID_CONFIG, "--max-fanout must be at least 2 (omit it: no "
+                       "hubs)", {"field": "--max-fanout"})
     with _session(opts, build_id) as s:
         root_row = resolve_root(s, instance) if instance is not None else None
         if split or lazy:
@@ -801,7 +810,7 @@ def export_graph(
                                 f"{diff['nothing_to_draw']}; no page was written")
                 return build_envelope(
                     s.ctx, s.db, s.build, request_id,
-                    {"path": None, "written": False, "served": False, "diff": diff,
+                    {"path": None, "mode": "page", "written": False, "served": False, "diff": diff,
                      "note": GRAPH_NOTE},
                     warnings=warns,
                     extra_limits=_gap_limits(s) + [DIFF_VIEW_NOTE, DIFF_NOTE],
@@ -842,7 +851,8 @@ def export_graph(
             stem += "-sub-" + hashlib.sha256(str(root_row["path"]).encode()).hexdigest()[:10]
         fname = f"{name or stem}.html"
         if not _SAFE_NAME.fullmatch(fname) or fname.startswith("."):
-            raise SvwError(ErrorCode.INVALID_CONFIG, "name must match [A-Za-z0-9._-]+ (no path)")
+            raise SvwError(ErrorCode.INVALID_CONFIG, "--name must match [A-Za-z0-9._-]+ (no path)",
+                       {"field": "--name"})
         limits = _gap_limits(s) + [GRAPH_NOTE]
         if diff is not None:
             limits += [DIFF_VIEW_NOTE, DIFF_NOTE]
@@ -887,6 +897,7 @@ def export_graph(
             request_id,
             {
                 "path": f".svweave/{EXPORT_DIR}/{fname}",
+                "mode": "page",
                 "bytes": len(data),
                 "sha256": hashlib.sha256(data).hexdigest(),
                 "stats": model["stats"],

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import functools
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +27,14 @@ from svweave.application.use_cases import (
 )
 from svweave.config.schemas import check_schemas, emit_schemas
 from svweave.domain.cursor import MAX_RESPONSE_BYTES
-from svweave.domain.envelope import AnalysisCoverage, Envelope, Outcome
+from svweave.domain.envelope import (
+    AnalysisCoverage,
+    Envelope,
+    ErrorInfo,
+    Outcome,
+    error_envelope,
+    new_request_id,
+)
 from svweave.domain.errors import EXIT_BUILD, EXIT_CONFIG, EXIT_OK, EXIT_STALE, SvwError
 from svweave.domain.errors import ErrorCode as EC
 from svweave.domain.states import Completeness, Freshness
@@ -121,7 +128,41 @@ def _query_flags(f: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+class _EnvelopeGroup(click.Group):
+    """Click's own usage errors (missing or unknown option, bad choice, out-of-range value) print
+    the same ``INVALID_CONFIG`` envelope on stdout as every other error, exit 2 ("every command
+    prints one JSON envelope"; first council review, interface finding 4). Click's text stays on
+    stderr; ``--help`` is unchanged."""
+
+    def main(
+        self,
+        args: Sequence[str] | None = None,
+        prog_name: str | None = None,
+        complete_var: str | None = None,
+        standalone_mode: bool = True,
+        **kw: Any,
+    ) -> Any:
+        if not standalone_mode:
+            return super().main(args, prog_name, complete_var, False, **kw)
+        try:
+            rv = super().main(args, prog_name, complete_var, False, **kw)
+        except click.UsageError as e:
+            e.show()
+            param = getattr(getattr(e, "param", None), "name", None)
+            err = SvwError(EC.INVALID_CONFIG, e.format_message(),
+                           {"reason": "usage_error", **({"param": param} if param else {})})
+            click.echo(error_envelope(err, request_id=new_request_id()).to_json(indent=None))
+            sys.exit(e.exit_code)
+        except click.ClickException as e:
+            e.show()
+            sys.exit(e.exit_code)
+        except click.Abort:
+            click.echo("Aborted!", err=True)
+            sys.exit(1)
+        sys.exit(rv if isinstance(rv, int) else 0)
+
+
+@click.group(cls=_EnvelopeGroup, context_settings={"help_option_names": ["-h", "--help"]})
 @click.option(
     "--root",
     type=click.Path(file_okay=False, path_type=Path),
@@ -324,6 +365,12 @@ def schema_emit(st: _State, out_dir: Path, check: bool) -> None:
                 outcome=Outcome.OK if not bad else Outcome.ERROR,
                 analysis_coverage=AnalysisCoverage(completeness=Completeness.COMPLETE),
                 data={"out_of_sync": bad},
+                # an ERROR envelope always names its code (first council review, interface 6)
+                error=ErrorInfo(code=EC.INVALID_CONFIG.value,
+                                message=f"{len(bad)} schema file(s) out of sync with the models; "
+                                "run `svweave schema emit`",
+                                details={"reason": "schemas_out_of_sync", "out_of_sync": bad})
+                if bad else None,
             )
         return Envelope(
             request_id=rid,
@@ -446,7 +493,9 @@ def graph_export_cmd(
     lazy: bool,
     page_budget: int | None,
 ) -> None:
-    """Write .svweave/exports/<name>.html: instance hierarchy plus port-association connections."""
+    """Write .svweave/exports/<name>.html (or, with --split/--lazy, the directory
+    .svweave/exports/<name>/ with index.html): instance hierarchy plus port-association
+    connections, nothing served."""
     if diff_base is not None and st.query_policy is not None:
         # like diff-impact: the workspace is expected to differ from the build
         st.query_policy = (True, st.query_policy[1])

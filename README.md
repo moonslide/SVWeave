@@ -527,8 +527,11 @@ svweave build --profile rtl_demo   # the shipped demo: exit 0
 
 Expected: `svweave doctor` exits 0 with `outcome` `OK`; `client_boundary` is always `WARN`
 (`not qualified`, `docs/security.md` section 4) and the shipped `svweave.yaml` gives a
-`root_mapping:uvm` `WARN` until you map that external root. A `FAIL` gives exit 4 and `outcome`
-`ERROR`; `backend:serena_exe FAIL` is expected only if Serena was skipped (`--skip-serena`).
+`root_mapping:uvm` `WARN` until you map that external root. A `FAIL` gives `outcome` `ERROR` and
+the exit code of the most fundamental failing check, whatever the check order: 2 configuration,
+6 policy, 3 missing input or root mapping, 4 backend (`error.details.failed_checks` lists every
+failing check); `backend:serena_exe FAIL` (exit 4) is expected only if Serena was skipped
+(`--skip-serena`).
 `svweave build --profile rtl_demo` exits 0 with `"completeness": "COMPLETE"`,
 `"diagnostic_outcome": "NO_ERRORS"` and `"published": true` and prints the `build_id` and
 `snapshot_id` to use in the [Quickstart](#quickstart) queries; the full output is in
@@ -919,11 +922,11 @@ complete topology, `--page-budget` (at least 100) makes the pages smaller. One e
 on every page: a connection through a signal no instance declares (a package variable) between
 instances on different pages is not drawn.
 
-Envelope `data` per mode: a single page (default, `--instance`, `--diff-base`) has `path`,
-`bytes`, `sha256`, `stats`, `truncated`, `root` (and `diff` with `--diff-base`); "nothing to draw"
-has `path: null`, `written: false` and `diff`. `--split` / `--lazy` write a directory: `path`
-(its `index.html`), `directory`, `root` and a summary under `atlas` (`--split`) or `lazy`
-(`--lazy`): `pages`, `budget`, `largest_page`, `oversized_pages`, `bytes_total`,
+Envelope `data` per mode (`data.mode`): a single page (`page`: default, `--instance`,
+`--diff-base`) has `path`, `bytes`, `sha256`, `stats`, `truncated`, `root` (and `diff` with
+`--diff-base`); "nothing to draw" has `path: null`, `written: false` and `diff`. `--split`
+(`split`) and `--lazy` (`lazy`) write a directory: `path` (its `index.html`), `directory`, `root`
+and `parts`: `pages`, `budget`, `largest_page`, `oversized_pages`, `bytes_total`,
 `largest_file_bytes`, `files` (at most 200 names), `files_total`, `files_truncated`.
 
 Exit codes of `graph export`: 0 when the page was written (or there was nothing to draw); like the
@@ -1450,7 +1453,7 @@ prints one JSON envelope.
 | `svweave query search --snapshot S --query Q` | graph candidates or marked text fallback (`--scope`, `--no-graph`) |
 | `svweave report --build B` | status report filled from real data; unevaluated gates say so |
 | `svweave evidence import --manifest FILE` | import external evidence (stored `EXTERNAL_DECLARED`) |
-| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R [--per-commit]]] [--split \| --lazy [--page-budget N]] [--allow-stale] [--allow-partial]` | write `.svweave/exports/<name>.html`: instance hierarchy plus port-association connections, one self-contained page, nothing served (ADR-014); `--instance` draws only the subtree of instance I; `--diff-base` only the instances a git diff changes |
+| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R [--per-commit]]] [--split \| --lazy [--page-budget N]] [--allow-stale] [--allow-partial]` | write `.svweave/exports/<name>.html`, one self-contained page (or with `--split`/`--lazy` the directory `.svweave/exports/<name>/`, `index.html` first; these refuse `--max-instances`/`--max-fanout`): instance hierarchy plus port-association connections, nothing served (ADR-014); `--instance` draws only the subtree of instance I; `--diff-base` only the instances a git diff changes |
 | `svweave cache gc [--no-dry-run]` | garbage-collect snapshots; keeps the last 3 and referenced ones; dry run by default |
 | `svweave debug bundle --build B [--out DIR]` | reproduction bundle: hashes, manifest, diagnostics summary, redacted paths |
 | `svweave schema emit [--check] [--out DIR]` | write or verify `schemas/*.schema.json` |
@@ -1532,7 +1535,7 @@ page is not proven absent.
 | `UNSUPPORTED_OPTION` | option the slang adapter cannot honour | 3 |
 | `PARTIAL_ANALYSIS` | partial result | 3 |
 | `AMBIGUOUS_SYMBOL` | several scoped candidates | 3 |
-| `PATH_NOT_ALLOWED` | path outside the allowed roots, include/exclude rules or symlink target rules | 6 |
+| `PATH_NOT_ALLOWED` | path outside the allowed roots, include/exclude rules or symlink target rules | 6; 3 from `build`/`update` when the build itself read a file outside its snapshot (`details.reason: dependency_leak`, outcome `BLOCKED`) |
 | `POLICY_DENIED` | policy refuses the operation | 6 |
 | `APPROVAL_REQUIRED`, `APPROVAL_EXPIRED` | missing, forged or expired approval | 6 |
 | `WORKSPACE_UNSTABLE`, `STALE_SNAPSHOT` | workspace changed during capture, or `expected_snapshot_id` mismatch | 5 |

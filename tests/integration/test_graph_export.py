@@ -501,7 +501,8 @@ def test_GRF_I15_the_atlas_pages_together_are_exactly_the_complete_topology(
     code, env = run(root, "graph", "export", "--build", bid, "--split", "--page-budget", "200",
                     "--name", "atlas")
     assert code == 0, env.get("error")
-    a = env["data"]["atlas"]
+    a = env["data"]["parts"]
+    assert env["data"]["mode"] == "split"
     assert env["data"]["path"] == ".svweave/exports/atlas/index.html"
     # the index takes cluster 0 whole (1 + 4 portal-or-cluster nodes + reducer + 151 = 157);
     # clusters 1..3 (152 each) no longer fit and become pages of their own
@@ -561,11 +562,14 @@ def test_GRF_I16_atlas_refusals_and_a_subtree_atlas(tmp_path: Path) -> None:
                 ["--split", "--max-instances", "100"], ["--lazy", "--max-fanout", "8"]):
         code, e = run(root, "graph", "export", "--build", bid, *bad)
         assert code == 2 and e["error"]["code"] == "INVALID_CONFIG", bad
+        # a CLI-only command names its CLI flags (interface review 2)
+        assert e["error"]["details"]["field"].startswith("--"), e["error"]
+        assert e["error"]["details"]["field"] in e["error"]["message"], e["error"]
     code, env = run(root, "graph", "export", "--build", bid, "--split", "--instance",
                     "grf_soc.g_cl[1].u_cl", "--page-budget", "100", "--name", "sub")
     assert code == 0, env.get("error")
     # 152 instances: the 30 cores (5 each) are below MIN_PORTAL, so one oversized page, said so
-    assert env["data"]["atlas"]["pages"] == 1 and env["data"]["atlas"]["oversized_pages"] == 1
+    assert env["data"]["parts"]["pages"] == 1 and env["data"]["parts"]["oversized_pages"] == 1
     assert any("never split off" in w for w in env["warnings"])
     index = _page_data(root / env["data"]["path"])
     assert [n["path"] for n in index["nodes"]][0] == "grf_soc.g_cl[1].u_cl"
@@ -588,7 +592,8 @@ def test_GRF_I17_lazy_one_page_plus_parts_is_the_complete_topology(tmp_path: Pat
     code, env = run(root, "graph", "export", "--build", bid, "--lazy", "--page-budget", "200",
                     "--name", "lazy")
     assert code == 0, env.get("error")
-    lz = env["data"]["lazy"]
+    lz = env["data"]["parts"]
+    assert env["data"]["mode"] == "lazy"
     assert lz["pages"] == 4 and lz["oversized_pages"] == 0
     d = root / env["data"]["directory"]
     assert sorted(lz["files"])[-1] == "index.html" and all(
@@ -677,7 +682,7 @@ def test_GRF_I19_atlas_files_are_private_and_only_stale_pages_are_removed(tmp_pa
     assert code == 0, env.get("error")
     d = root / env["data"]["directory"]
     assert stat.S_IMODE(d.stat().st_mode) == 0o700
-    first = sorted(env["data"]["atlas"]["files"])
+    first = sorted(env["data"]["parts"]["files"])
     assert len(first) == 4
     for f in first:
         assert stat.S_IMODE((d / f).stat().st_mode) == 0o600, f
@@ -690,7 +695,7 @@ def test_GRF_I19_atlas_files_are_private_and_only_stale_pages_are_removed(tmp_pa
     code, env = run(root, "graph", "export", "--build", bid, "--split", "--page-budget", "5000",
                     "--name", "atlas")
     assert code == 0, env.get("error")
-    assert env["data"]["atlas"]["files"] == ["index.html"]  # one page now: the old ones go
+    assert env["data"]["parts"]["files"] == ["index.html"]  # one page now: the old ones go
     assert sorted(p.name for p in d.iterdir()) == ["index.html", "notes.txt", "p-link000000.html"]
     assert outside.read_text() == "not ours" and (d / "p-link000000.html").is_symlink()
 

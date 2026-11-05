@@ -870,7 +870,8 @@ def _blocked(
             code=ErrorCode.PATH_NOT_ALLOWED.value,
             message="the build read files outside the snapshot inventory; "
             "analysis is BLOCKED and was not published",
-            details={"violations": dep["violations"]},
+            # exit 3 like every BLOCKED build, not 6: the reason says why (interface finding 5)
+            details={"reason": "dependency_leak", "violations": dep["violations"]},
         ),
     )
     _surface_isolation(env, outcome)
