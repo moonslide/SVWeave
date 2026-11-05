@@ -57,8 +57,8 @@ def ensure_outside_tree(path: Path, *trees: Path) -> None:
         if is_within(real, Path(os.path.realpath(t))):
             raise SvwError(
                 ErrorCode.POLICY_DENIED,
-                f"trusted policy path {path} is inside the project tree; policy must live outside "
-                "the repository",
+                f"trusted path {path} is inside the project tree; the trusted policy, keys and "
+                "records must live outside the repository",
                 {"path": str(path), "tree": str(t)},
             )
 
@@ -68,6 +68,82 @@ STATE_DIR_REASONS = frozenset({
     "state_dir_symlink", "state_dir_foreign_owner", "state_dir_not_directory",
     "state_dir_writable_by_others", "state_dir_not_adopted",
 })
+
+
+# ------------------------------------------------------------------ trusted-directory files
+# The ONE owner of the files in the trusted directory (third council review M9: the approval key,
+# the cursor key, the probe record and the state record each had their own creation and checks,
+# and the cursor key was made with weaker hardening than the approval key).
+
+
+def ensure_trusted_dir(trusted: Path) -> None:
+    """Create ``trusted`` (0700); an existing one must be a real directory owned by the current
+    user (``POLICY_DENIED``, reason ``trusted_dir_untrusted``) and is made private (0700)."""
+    trusted.mkdir(parents=True, exist_ok=True, mode=0o700)
+    st = os.lstat(trusted)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
+        raise SvwError(
+            ErrorCode.POLICY_DENIED,
+            f"trusted directory {trusted} is not a real directory owned by the current user",
+            {"path": str(trusted), "reason": "trusted_dir_untrusted"},
+        )
+    if st.st_mode & 0o077:
+        os.chmod(trusted, 0o700)
+
+
+def read_secret(trusted: Path, name: str, *, min_bytes: int, reason: str,
+                weak_reason: str | None = None) -> bytes | None:
+    """The key file ``name`` of ``trusted``, or None when absent. Opened without following a link
+    and checked on the open descriptor: a regular file owned by the current user with no group or
+    other permission bits, at least ``min_bytes`` long. Anything else is ``POLICY_DENIED``
+    (``reason``; a short key ``weak_reason``): a key others could read or replace is not used."""
+    try:
+        fd = os.open(trusted / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None
+    except OSError as e:  # a link (ELOOP) or something that cannot be opened
+        raise SvwError(ErrorCode.POLICY_DENIED,
+                       f"{name} is not a regular file owned by the current user with mode 0600",
+                       {"reason": reason}) from e
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o077:
+            raise SvwError(ErrorCode.POLICY_DENIED,
+                           f"{name} is not a regular file owned by the current user with mode "
+                           "0600; delete it to generate a new one",
+                           {"reason": reason})
+        data = os.read(fd, 1 << 16)
+    finally:
+        os.close(fd)
+    if len(data) < min_bytes:
+        raise SvwError(ErrorCode.POLICY_DENIED,
+                       f"{name} is shorter than {min_bytes} bytes; delete it to generate a new one",
+                       {"reason": weak_reason or reason})
+    return data
+
+
+def create_secret(trusted: Path, name: str, nbytes: int, *, reason: str,
+                  weak_reason: str | None = None) -> bytes:
+    """A new random key ``name`` in ``trusted`` (0600, written exclusively without following a
+    link, fsynced, published atomically). A concurrent creator wins: its key is read back."""
+    ensure_trusted_dir(trusted)
+    key = secrets.token_bytes(nbytes)
+    tmp = trusted / f".{name}.{secrets.token_hex(8)}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(key)
+        f.flush()
+        os.fsync(f.fileno())
+    try:
+        os.link(tmp, trusted / name)  # atomic publish; loses gracefully to a concurrent creator
+    except FileExistsError:
+        theirs = read_secret(trusted, name, min_bytes=nbytes, reason=reason,
+                             weak_reason=weak_reason)
+        assert theirs is not None
+        return theirs
+    finally:
+        os.unlink(tmp)
+    return key
 
 
 def check_state_dir(path: Path) -> None:
@@ -151,7 +227,8 @@ def _read_record(trusted: Path) -> dict[str, Any]:
     except OSError:
         return {}
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid():  # nobody else's record
             return {}
         with os.fdopen(os.dup(fd), "rb") as f:
             rec = json.loads(f.read(1 << 20) or b"null")
@@ -184,7 +261,7 @@ def state_dir_lock(trusted: Path) -> Iterator[None]:
     if key in _held.dirs:
         yield
         return
-    trusted.mkdir(parents=True, exist_ok=True, mode=0o700)
+    ensure_trusted_dir(trusted)
     fd = os.open(trusted / ".state_dir.lock",
                  os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     try:
@@ -210,7 +287,7 @@ def _register(trusted: Path, state: Path) -> None:
     os.chmod(state, 0o700, follow_symlinks=False)  # private, whatever umask made it
     token = secrets.token_hex(32)
     write_under(state, STATE_TOKEN, (token + "\n").encode("ascii"), 0o600)
-    trusted.mkdir(parents=True, exist_ok=True, mode=0o700)
+    ensure_trusted_dir(trusted)
     dirs = _recorded(trusted)
     key = os.path.realpath(state)
     dirs.pop(key, None)

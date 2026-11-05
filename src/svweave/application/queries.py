@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from svweave.application.options import WorkspaceOptions
@@ -58,7 +57,7 @@ from svweave.domain.cursor import (
 from svweave.domain.envelope import Envelope, ErrorInfo, Outcome, Pagination
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.locations import Encoding, LineIndex, byte_to_lsp
-from svweave.snapshot.capture import snapshots_dir
+from svweave.snapshot.capture import read_snapshot_file, snapshots_dir
 from svweave.snapshot.models import SnapFile
 from svweave.storage.semantic import loads
 
@@ -267,11 +266,7 @@ def symbol(
         # lists every declaration at a location; an empty name/location lookup is an answer
         rows = lookup_declarations(s, symbol_id=symbol_id, file=file, byte=byte, name=name)
         if symbol_id is not None and not rows:
-            raise SvwError(
-                ErrorCode.MISSING_INPUT,
-                f"unknown symbol {symbol_id}",
-                {"reason": "symbol_missing"},
-            )
+            raise s.missing(f"unknown symbol {symbol_id}", {"reason": "symbol_missing"})
         lim = SYMBOL_PAGE_DEFAULT if limit is None else check_limit(limit)
         qh = query_hash(
             "svw_symbol", {"symbol_id": symbol_id, "file": file, "byte": byte, "name": name}
@@ -396,9 +391,7 @@ def references(
     with _session(opts, build_id) as s:
         d = s.one("SELECT * FROM declarations WHERE build_id=? AND symbol_id=?", s.bid, symbol_id)
         if d is None:
-            raise SvwError(
-                ErrorCode.MISSING_INPUT, f"unknown symbol {symbol_id}", {"reason": "symbol_missing"}
-            )
+            raise s.missing(f"unknown symbol {symbol_id}", {"reason": "symbol_missing"})
         did = d["declaration_id"]
         # exact (case-sensitive, wildcard-free) prefix matching: SV paths and names are
         # case-sensitive, LIKE is not (M3)
@@ -856,7 +849,7 @@ def lsp_positions(
         from svweave.snapshot.capture import load_record
 
         sf: SnapFile = next(f for f in load_record(snap_dir).files if f.logical_path == file)
-        data = Path(snap_dir / sf.snapshot_path).read_bytes()
+        data = read_snapshot_file(snap_dir, sf)
         idx = LineIndex(data)
         return {
             "file": file,

@@ -40,6 +40,10 @@ def safe_rel_path(p: object) -> str | None:
 def _open_dir(name: str | Path, dir_fd: int | None = None) -> int:
     try:
         return os.open(name, _DIR_FLAGS, dir_fd=dir_fd)
+    except FileNotFoundError:
+        # missing is not unsafe: callers report it as missing (third council review: every
+        # missing parent became POLICY_DENIED and the callers' FileNotFoundError branches were dead)
+        raise
     except OSError as e:
         raise unsafe(name, f"cannot open directory without following links ({e.strerror})") from e
 
@@ -181,8 +185,8 @@ def read_regular_under(base: Path, rel: str, max_bytes: int | None = None) -> by
 
     For trees a backend can write (candidate copies): :func:`read_regular` only refuses a link at
     the final component, so a directory symlink inside the tree could redirect the read outside it.
-    Raises ``FileNotFoundError`` for a missing final file; any link, non-regular file or missing
-    parent directory is the same ``POLICY_DENIED`` refusal :func:`write_under` gives."""
+    Raises ``FileNotFoundError`` for a missing file or parent directory; any link or non-regular
+    file is the same ``POLICY_DENIED`` refusal :func:`write_under` gives."""
     if safe_rel_path(rel) is None:
         raise unsafe(rel, "not a safe relative path")
     parts = rel.split("/")

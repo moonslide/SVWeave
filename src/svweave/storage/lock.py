@@ -7,11 +7,14 @@ description, so two acquisitions conflict even inside one process (used by tests
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+
+from svweave.domain.errors import ErrorCode, SvwError
 
 LOCK_NAME = "lock"
 
@@ -20,12 +23,26 @@ class WorkspaceBusy(Exception):
     """Raised by a non-blocking acquisition when another holder conflicts."""
 
 
+def open_state_file(path: Path) -> int:
+    """Open (create 0600) a lock file of the state directory WITHOUT following a link: a link a
+    repository planted at its place is refused (``POLICY_DENIED``, reason
+    ``state_file_not_regular``; third council review: the locks were opened following links)."""
+    try:
+        return os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    except OSError as e:
+        if e.errno != errno.ELOOP:  # only a link is a refusal; anything else stays itself
+            raise
+        raise SvwError(ErrorCode.POLICY_DENIED,
+                       f"{path.name} in the state directory is a link; refusing to open it",
+                       {"reason": "state_file_not_regular", "file": path.name}) from e
+
+
 @contextmanager
 def workspace_lock(
     state_dir: Path, *, exclusive: bool = False, blocking: bool = True
 ) -> Iterator[None]:
     state_dir.mkdir(parents=True, exist_ok=True)
-    fd = os.open(state_dir / LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o600)
+    fd = open_state_file(state_dir / LOCK_NAME)
     try:
         flags = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
         if not blocking:
@@ -50,7 +67,7 @@ def build_lock(state_dir: Path) -> Iterator[None]:
     """Exclusive, NON-blocking lock held for the whole of a build (CLI and MCP alike): at most one
     build runs per workspace. Raises :class:`WorkspaceBusy` when another build holds it."""
     state_dir.mkdir(parents=True, exist_ok=True)
-    fd = os.open(state_dir / BUILD_LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o600)
+    fd = open_state_file(state_dir / BUILD_LOCK_NAME)
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -68,7 +85,7 @@ def build_lock(state_dir: Path) -> Iterator[None]:
 def init_lock(db_path: Path) -> Iterator[None]:
     """Blocking exclusive lock serialising database setup (journal mode + migrations)."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(db_path.with_name(db_path.name + ".init.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    fd = open_state_file(db_path.with_name(db_path.name + ".init.lock"))
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         try:

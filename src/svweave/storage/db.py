@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import stat
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -34,10 +36,32 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+#: the database and the side files SQLite creates next to it (it follows links in all of them)
+_DB_FILES = ("", "-wal", "-shm", "-journal")
+
+
+def _check_db_files(path: Path) -> None:
+    """No link (or other non-regular file) at the database's place or its side files: SQLite
+    would read and write through it (third council review: the database was opened following
+    links). The state directory is private (0700), so nothing swaps them after this check."""
+    for suffix in _DB_FILES:
+        p = path.with_name(path.name + suffix)
+        try:
+            st = os.lstat(p)
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISREG(st.st_mode):
+            raise SvwError(ErrorCode.POLICY_DENIED,
+                           f"{p.name} in the state directory is not a regular file (a link?); "
+                           "refusing to open the database",
+                           {"reason": "state_file_not_regular", "file": p.name})
+
+
 class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
+        _check_db_files(path)
         self.conn = sqlite3.connect(str(path), isolation_level=None)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")

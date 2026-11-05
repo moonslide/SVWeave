@@ -21,6 +21,7 @@ from svweave.application.semantic_read import (
 from svweave.application.semantic_read import (
     names_of as _names,
 )
+from svweave.snapshot.capture import read_snapshot_file
 
 
 def diff_selection(s: QuerySession, definition_ids: set[str], root_row: Any = None) -> dict[str, Any]:
@@ -137,7 +138,7 @@ def _per_commit(
             continue
         lf = str(r["file"])
         if lf not in starts_of:
-            data = (ch.snap_dir / ch.by_logical[lf].snapshot_path).read_bytes()
+            data = read_snapshot_file(ch.snap_dir, ch.by_logical[lf])
             starts_of[lf] = [0] + [i + 1 for i, b in enumerate(data) if b == 0x0A]
         st = starts_of[lf]
         lo, hi = int(r["lo"]), int(r["hi"])

@@ -39,6 +39,7 @@ from svweave.domain.errors import EXIT_BUILD, EXIT_STALE, SvwError, startup_mess
 from svweave.domain.errors import ErrorCode as EC
 from svweave.domain.states import Completeness, Freshness
 from svweave.gateway.schemas import check_mcp_schemas, emit_mcp_schemas
+from svweave.security.redaction import Redactor, redact_envelope
 
 
 class _State:
@@ -54,8 +55,6 @@ class _State:
         return Session(self.opts, use_graph=use_graph)
 
     def emit(self, env: Envelope, code: int | None = None) -> None:
-        from svweave.security.redaction import Redactor, redact_envelope
-
         env = redact_envelope(env, Redactor([self.opts.root]))
         text = env.to_json(indent=None if self.compact else 2)
         if len(text.encode("utf-8")) > MAX_RESPONSE_BYTES:
@@ -127,6 +126,17 @@ def _query_flags(f: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
+def _cli_param_name(param: Any) -> str | None:
+    """The parameter as the user typed it (``--out``, ``INSTANCE``), never its Python name."""
+    if param is None:
+        return None
+    opts = [o for o in getattr(param, "opts", []) if o.startswith("--")] or list(
+        getattr(param, "opts", []))
+    if isinstance(param, click.Option) and opts:
+        return str(max(opts, key=len))
+    return str(param.human_readable_name)
+
+
 class _EnvelopeGroup(click.Group):
     """Click's own usage errors (missing or unknown option, bad choice, out-of-range value) print
     the same ``INVALID_CONFIG`` envelope on stdout as every other error, exit 2 ("every command
@@ -146,11 +156,20 @@ class _EnvelopeGroup(click.Group):
         try:
             rv = super().main(args, prog_name, complete_var, False, **kw)
         except click.UsageError as e:
-            e.show()
-            param = getattr(getattr(e, "param", None), "name", None)
-            err = SvwError(EC.INVALID_CONFIG, e.format_message(),
-                           {"reason": "usage_error", **({"param": param} if param else {})})
-            click.echo(error_envelope(err, request_id=new_request_id()).to_json(indent=None))
+            e.show()  # Click's own text (or the help) on stderr
+            if isinstance(e, click.exceptions.NoArgsIsHelpError):
+                # its "message" is the whole help text: name what is missing instead
+                cmd = e.ctx.command_path if e.ctx is not None else "svweave"
+                err = SvwError(EC.INVALID_CONFIG, f"missing command; run `{cmd} --help`",
+                               {"reason": "usage_error", "missing": "command"})
+            else:
+                param = _cli_param_name(getattr(e, "param", None))
+                err = SvwError(EC.INVALID_CONFIG, e.format_message(),
+                               {"reason": "usage_error", **({"param": param} if param else {})})
+            # the message can echo a typed value (a path, a token): redacted like every envelope
+            env = redact_envelope(error_envelope(err, request_id=new_request_id()),
+                                  Redactor([Path.cwd()]))
+            click.echo(env.to_json(indent=None))
             sys.exit(e.exit_code)
         except click.ClickException as e:
             e.show()

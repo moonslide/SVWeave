@@ -690,6 +690,26 @@ def load_record(snapshot_dir: Path) -> SnapshotRecord:
     return rec
 
 
+def read_snapshot_file(snapshot_dir: Path, sf: SnapFile) -> bytes:
+    """The captured bytes of ``sf`` in the published snapshot ``snapshot_dir``, read without
+    following a link in any component below it and checked against the record's sha256. Every
+    reader of snapshot bytes uses this (third council review: rename, diff impact, the graph's
+    per-commit labels and LSP positions followed links and skipped the hash check; a `.svweave/`
+    is project-writable). ``MISSING_INPUT``, reason ``snapshot_file_invalid``."""
+    try:
+        data = read_regular_under(snapshot_dir, sf.snapshot_path)
+    except (OSError, SvwError) as e:
+        raise SvwError(ErrorCode.MISSING_INPUT,
+                       f"snapshot {snapshot_dir.name}: {sf.logical_path} cannot be read safely",
+                       {"reason": "snapshot_file_invalid", "file": sf.logical_path}) from e
+    if hashlib.sha256(data).hexdigest() != sf.sha256:
+        raise SvwError(ErrorCode.MISSING_INPUT,
+                       f"snapshot {snapshot_dir.name}: {sf.logical_path} does not match its "
+                       "recorded hash",
+                       {"reason": "snapshot_file_invalid", "file": sf.logical_path})
+    return data
+
+
 # --------------------------------------------------------------------------- freshness
 def check_freshness(ctx: WorkspaceContext, record: SnapshotRecord) -> FreshnessResult:
     """Recompute the current workspace inventory for the snapshot's spec and diff it.

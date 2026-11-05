@@ -11,6 +11,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import pytest
 from click.testing import CliRunner
 
 from svweave.cli import cli
@@ -254,3 +255,72 @@ def test_SEC_STA10_two_first_commands_leave_one_token_and_its_record(tmp_path: P
         p.join(30)
     assert [p.exitcode for p in procs] == [0, 0]
     assert state_dir_registered(trusted, state), "the token left behind is not the recorded one"
+
+
+def test_SEC_TRU01_the_trusted_directory_must_be_a_private_real_directory_outside_the_tree(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Third council review M9 and its security note: the trusted directory's owner was checked
+    for the approval key only, its location for the policy and for commits only."""
+    from svweave.config import trusted as T
+    from svweave.config.context import WorkspaceContext
+    from svweave.domain.errors import ErrorCode, SvwError
+
+    w = _fresh(tmp_path)
+    trusted = w.policy_path.parent
+    os.chmod(trusted, 0o755)
+    assert _cli(w.root, "snapshot", "create", "--profile", "p")[0] == 0
+    assert oct(trusted.stat().st_mode & 0o777) == "0o700"  # made private
+    # a linked trusted directory is refused
+    moved = tmp_path / "moved-trusted"
+    os.rename(trusted, moved)
+    trusted.symlink_to(moved, target_is_directory=True)
+    with pytest.raises(SvwError) as ei:
+        T.ensure_trusted_dir(trusted)
+    assert ei.value.details["reason"] == "trusted_dir_untrusted"
+    os.unlink(trusted)
+    os.rename(moved, trusted)
+    # someone else's trusted directory is refused
+    me = os.geteuid()
+    with monkeypatch.context() as m:  # scoped: the test's XDG_CONFIG_HOME isolation stays
+        m.setattr(T.os, "geteuid", lambda: me + 1)
+        with pytest.raises(SvwError) as ei:
+            T.ensure_trusted_dir(trusted)
+    assert ei.value.details["reason"] == "trusted_dir_untrusted"
+    # a trusted directory inside the project tree (XDG_CONFIG_HOME pointing into it) is refused
+    # even when --policy names a policy file outside the tree
+    policy = tmp_path / "policy.json"
+    policy.write_bytes(w.policy_path.read_bytes())
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(w.root / ".config"))
+    with pytest.raises(SvwError) as ei:
+        WorkspaceContext.load(w.root, policy_path=policy)
+    assert ei.value.code is ErrorCode.POLICY_DENIED and "inside the project tree" in ei.value.message
+    assert not (w.root / ".config").exists()
+
+
+@pytest.mark.parametrize("name", ["svweave.db", "svweave.db-wal", "svweave.db-shm", "lock",
+                                  "build.lock", "svweave.db.init.lock"])
+def test_SEC_STF01_a_link_at_a_state_file_is_refused_not_followed(
+        tmp_path: Path, name: str) -> None:
+    """Third council review: `.svweave/svweave.db` and the lock files were opened following
+    links (SQLite also writes its -wal/-shm files through a link)."""
+    from svweave.domain.errors import ErrorCode, SvwError
+    from svweave.storage.db import Database
+    from svweave.storage.lock import build_lock, workspace_lock
+
+    state = tmp_path / ".svweave"
+    state.mkdir(mode=0o700)
+    target = tmp_path / "elsewhere"
+    target.write_bytes(b"keep")
+    (state / name).symlink_to(target)
+    with pytest.raises(SvwError) as ei:
+        if name.startswith("svweave.db"):
+            Database(state / "svweave.db").close()
+        elif name == "lock":
+            with workspace_lock(state):
+                pass
+        else:
+            with build_lock(state):
+                pass
+    assert ei.value.code is ErrorCode.POLICY_DENIED
+    assert ei.value.details == {"reason": "state_file_not_regular", "file": name}
+    assert target.read_bytes() == b"keep"

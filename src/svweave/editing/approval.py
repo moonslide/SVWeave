@@ -19,13 +19,12 @@ import hashlib
 import hmac
 import json
 import os
-import secrets
-import stat
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from svweave.config.trusted import create_secret, ensure_trusted_dir, read_secret
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import canonical_json
 from svweave.security import safeio
@@ -67,34 +66,12 @@ def _utcnow() -> datetime:
 
 
 def approval_key(trusted: Path, *, create: bool) -> bytes | None:
-    p = trusted / KEY_FILENAME
-    if p.exists() or p.is_symlink():
-        st = os.lstat(p)
-        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o077:
-            raise SvwError(
-                ErrorCode.POLICY_DENIED,
-                "approval key is not a regular file owned by the current user with mode 0600",
-                {"reason": "approval_key_unsafe"},
-            )
-        return safeio.read_regular(p)
-    if not create:
-        return None
-    trusted.mkdir(parents=True, exist_ok=True)
-    os.chmod(trusted, 0o700)
-    key = secrets.token_bytes(32)
-    tmp = trusted / f".{KEY_FILENAME}.{os.getpid()}.{secrets.token_hex(4)}"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, "wb") as f:
-        f.write(key)
-        f.flush()
-        os.fsync(f.fileno())
-    try:
-        os.link(tmp, p)  # atomic publish; loses gracefully to a concurrent creator
-    except FileExistsError:
-        return safeio.read_regular(p)
-    finally:
-        os.unlink(tmp)
-    return key
+    """The HMAC key of the approval store (``config/trusted.py`` helpers: private, owned, read
+    without following a link); created on the first approval when ``create``."""
+    key = read_secret(trusted, KEY_FILENAME, min_bytes=32, reason="approval_key_unsafe")
+    if key is not None or not create:
+        return key
+    return create_secret(trusted, KEY_FILENAME, 32, reason="approval_key_unsafe")
 
 
 def _sig(key: bytes, body: dict[str, Any]) -> str:
@@ -126,6 +103,7 @@ def write_approval(
         "expires_at": (t + timedelta(seconds=ttl_s)).isoformat(timespec="seconds"),
     }
     rec = {**body, "hmac": _sig(key, body)}
+    ensure_trusted_dir(trusted)
     d = trusted / APPROVALS_DIR
     d.mkdir(parents=True, exist_ok=True)
     os.chmod(d, 0o700)

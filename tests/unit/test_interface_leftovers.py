@@ -109,3 +109,32 @@ def test_IF_05_doctor_warns_about_a_profile_variable_the_policy_does_not_allow(w
     assert env is not None
     msgs = [w for w in env["warnings"] if w.startswith("environment_allowlist:p")]
     assert msgs and "OTHER_VAR" in msgs[0] and "PROJ_HOME" not in msgs[0]
+
+
+def test_IF_01c_usage_errors_are_redacted_and_name_the_option_as_typed(tmp_path: Path) -> None:
+    """Third council review: Click usage-error envelopes skipped redaction, and
+    ``details.param`` held the Python parameter name."""
+    token = "ghp_" + "A1b2C3d4" * 5
+    code, env, output = _run(tmp_path, "query", "assertions", "--build", "a" * 64,
+                             "--kind", token)
+    assert code == 2 and env is not None, output
+    from svweave.security.redaction import REDACTED
+
+    assert token not in json.dumps(env) and REDACTED in env["error"]["message"]
+    assert env["error"]["details"]["param"] == "--kind"
+    out = tmp_path / "a-file"
+    out.write_text("x")
+    code, env, _ = _run(tmp_path, "schema", "emit", "--out", str(out))
+    assert env is not None and env["error"]["details"]["param"] == "--out"  # not out_dir
+
+
+@pytest.mark.parametrize("args", [[], ["--compact", "query"]])
+def test_IF_01d_no_command_names_what_is_missing_not_the_whole_help(args: list[str]) -> None:
+    """Third council review: `svweave` / `svweave query` alone printed an envelope whose message
+    was the whole help text."""
+    out = CliRunner().invoke(cli, args)
+    env = json.loads(out.stdout)
+    assert out.exit_code == 2 and env["error"]["code"] == "INVALID_CONFIG"
+    assert env["error"]["details"] == {"reason": "usage_error", "missing": "command"}
+    assert len(env["error"]["message"]) < 120 and "--help" in env["error"]["message"]
+    assert "Usage:" in out.stderr  # the help itself stays text, on stderr

@@ -17,6 +17,7 @@ from svweave.application.events import EventLog
 from svweave.application.jobs import JobManager
 from svweave.application.keys import cursor_key
 from svweave.application.options import WorkspaceOptions
+from svweave.config.trusted import ensure_trusted_dir
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.orchestration.registry import BackendRegistry
 from svweave.security import safeio
@@ -131,7 +132,7 @@ _STATUSES = {"READY", "DEGRADED", "UNAVAILABLE"}
 
 
 def save_probe(trusted_dir: Path, health: dict[str, Any]) -> None:
-    trusted_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    ensure_trusted_dir(trusted_dir)
     safeio.write_atomic(
         probe_path(trusted_dir),
         json.dumps(health, indent=2, sort_keys=True).encode("utf-8"),

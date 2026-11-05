@@ -567,8 +567,12 @@ def test_cursor_key_is_strong_private_and_weak_keys_are_refused(ws: Ws) -> None:
     p = ctx.trusted_dir / "cursor.key"
     assert len(key) >= 32 and (p.stat().st_mode & 0o777) == 0o600
     assert (ctx.trusted_dir.stat().st_mode & 0o777) == 0o700
-    os.chmod(p, 0o644)
-    assert cursor_key(ctx) == key and (p.stat().st_mode & 0o777) == 0o600  # tightened
+    os.chmod(p, 0o644)  # readable by others: refused, never used or silently tightened (M9)
+    with pytest.raises(SvwError) as ei0:
+        cursor_key(ctx)
+    assert ei0.value.details["reason"] == "cursor_key_untrusted"
+    os.chmod(p, 0o600)
+    assert cursor_key(ctx) == key
     p.write_bytes(b"short")
     with pytest.raises(SvwError) as ei:
         cursor_key(ctx)

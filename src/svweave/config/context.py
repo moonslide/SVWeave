@@ -25,6 +25,7 @@ from svweave.config.policy import (
 )
 from svweave.config.trusted import (
     check_state_dir,
+    ensure_outside_tree,
     load_trusted_policy,
     trusted_dir,
     verify_state_dir,
@@ -137,6 +138,9 @@ class WorkspaceContext:
         self._by_id = {r.id: r for r in roots}
         # only now that the policy accepted the project root: the state dir must be the one
         # SVWeave created (or a person adopted), never one shipped with the repository
+        # the trusted directory holds the state record, keys and approvals: never inside the tree
+        # (third council review: its location was checked for the policy and for commits only)
+        ensure_outside_tree(trusted_dir(self.manifest_dir), self.manifest_dir, self.project_root)
         verify_state_dir(trusted_dir(self.manifest_dir), self.project_root / STATE_DIRNAME)
 
     # ------------------------------------------------------------------ loading

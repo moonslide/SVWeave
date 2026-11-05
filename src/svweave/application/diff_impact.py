@@ -76,7 +76,7 @@ from svweave.domain.cursor import MAX_RESPONSE_BYTES, check_limit
 from svweave.domain.envelope import Envelope, Pagination
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.security.git import HARDENED_CONFIG, LOG_SAFE, run_git
-from svweave.snapshot.capture import load_record, snapshots_dir
+from svweave.snapshot.capture import load_record, read_snapshot_file, snapshots_dir
 from svweave.snapshot.models import SnapFile
 
 DIFF_NOTE = (
@@ -363,7 +363,7 @@ def collect_changes(
             entry.update(aligned=None, note="binary file")
             files_out.append(entry)
             continue
-        src_bytes = (snap_dir / sf.snapshot_path).read_bytes()
+        src_bytes = read_snapshot_file(snap_dir, sf)
         aligned: bool | None = None
         if fd.old is not None:
             try:

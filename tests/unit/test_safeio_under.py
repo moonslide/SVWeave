@@ -27,8 +27,14 @@ def test_REV_S01_regular_file_is_read_and_a_missing_one_raises_filenotfound(tree
     assert safeio.read_regular_under(tree, "rtl/a.sv", 6) == b"module"
     with pytest.raises(FileNotFoundError):
         safeio.read_regular_under(tree, "rtl/nope.sv")
-    with pytest.raises(SvwError):  # a missing parent directory is refused like write_under does
+    # a missing parent directory is missing too, not "unsafe" (third council review: POLICY_DENIED
+    # here left every caller's FileNotFoundError branch dead, e.g. search's snapshot_missing)
+    with pytest.raises(FileNotFoundError):
         safeio.read_regular_under(tree, "nodir/a.sv")
+    with pytest.raises(FileNotFoundError):
+        safeio.lstat_under(tree, "nodir/a.sv")
+    with pytest.raises(FileNotFoundError):
+        safeio.require_real_dir(tree, "nodir/sub")
 
 
 def test_REV_S02_a_directory_symlink_in_the_middle_is_refused(tree: Path) -> None:

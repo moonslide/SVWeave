@@ -68,7 +68,7 @@ from svweave.domain.envelope import Envelope, Pagination
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.states import Completeness, Freshness
 from svweave.editing.plan import mask_comments_strings
-from svweave.snapshot.capture import load_record, snapshots_dir
+from svweave.snapshot.capture import load_record, read_snapshot_file, snapshots_dir
 from svweave.storage.semantic import loads
 
 DEFAULT_LIST = 50
@@ -249,7 +249,7 @@ def rename_preview(
                 sf = by_logical.get(logical)
                 if sf is None:
                     return None
-                cache[logical] = (snap_dir / sf.snapshot_path).read_bytes()
+                cache[logical] = read_snapshot_file(snap_dir, sf)
             return cache[logical]
 
         masked_cache: dict[str, bytes | None] = {}

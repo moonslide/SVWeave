@@ -480,14 +480,15 @@ MUTATIONS: list[Mutation] = [
         ["tests/unit/test_edit_commit.py::test_sec06_expired_approval"],
     ),
     m(
-        "M38", "an approval key readable by others is used (key mode check removed)",
+        "M38", "an approval or cursor key readable by others is used (key mode check removed)",
         "20.5 #6 neighbour; F9; first council review, test-evidence finding 4",
-        [Patch("src/svweave/editing/approval.py",
+        [Patch("src/svweave/config/trusted.py",
                "        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o077:\n",
                "        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid():  # " + MARK
                + ":M38\n")],
         ["tests/unit/test_edit_review_fixes.py::test_f9_approval_key_must_be_private_and_owned",
-         "tests/unit/test_edit_review_fixes.py::test_f9_unsafe_key_blocks_commit"],
+         "tests/unit/test_edit_review_fixes.py::test_f9_unsafe_key_blocks_commit",
+         "tests/unit/test_m3b_fixes.py::test_cursor_key_is_strong_private_and_weak_keys_are_refused"],
     ),
     m(
         "M39", "roll-forward applies a journal written for another patch",

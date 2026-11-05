@@ -17,7 +17,6 @@ from svweave.application.semantic_read import (
 from svweave.application.semantic_read import (
     resolve_instance as _resolve_instance,
 )
-from svweave.domain.errors import ErrorCode, SvwError
 from svweave.storage.semantic import loads
 
 MAX_PORTS_PER_INSTANCE = 200
@@ -98,17 +97,7 @@ def resolve_root(s: QuerySession, root: str) -> Any:
     rows = s.rows("SELECT * FROM instances WHERE build_id=? AND path=?", s.bid, root)
     if len(rows) == 1:
         return rows[0]
-    try:
-        return _resolve_instance(s, root)
-    except SvwError as e:
-        if e.code == ErrorCode.MISSING_INPUT and str(s.build["completeness"]) != "COMPLETE":
-            raise SvwError(
-                ErrorCode.MISSING_INPUT,
-                f"unknown instance {root!r} in a {s.build['completeness']} build: absence from a "
-                "build that is not COMPLETE is not proof that the instance does not exist",
-                {"reason": "instance_missing", "instance": root},
-            ) from e
-        raise
+    return _resolve_instance(s, root)  # its MISSING_INPUT says absence is no proof (PARTIAL)
 
 
 def _load_subtree(

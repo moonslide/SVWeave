@@ -52,6 +52,18 @@ class QuerySession:
     def count(self, sql: str, *args: Any) -> int:
         return int(self.db.conn.execute(sql, args).fetchone()[0])
 
+    def missing(self, message: str, details: dict[str, Any]) -> SvwError:
+        """``MISSING_INPUT`` for a target this build does not hold. In a build that is not
+        COMPLETE the absence is no proof that the target does not exist (rule 5; third council
+        review M8: only the graph's root resolver said so), stated in the message and in
+        ``details`` (``completeness``, ``absence_is_proof: false``)."""
+        completeness = str(self.build["completeness"])
+        if completeness != "COMPLETE":
+            message += (f" in a {completeness} build: absence from a build that is not COMPLETE "
+                        "is not proof that it does not exist")
+            details = {**details, "completeness": completeness, "absence_is_proof": False}
+        return SvwError(ErrorCode.MISSING_INPUT, message, details)
+
 
 def workspace_cursor_key(ctx: WorkspaceContext) -> bytes:
     """Workspace secret in the trusted dir (outside the repo), shared with svw_search."""
@@ -192,11 +204,7 @@ def resolve_instance(s: QuerySession, ref: str) -> sqlite3.Row:
         cleaned,
     )
     if not rows:
-        raise SvwError(
-            ErrorCode.MISSING_INPUT,
-            f"unknown instance {ref!r}",
-            {"reason": "instance_missing", "instance": ref},
-        )
+        raise s.missing(f"unknown instance {ref!r}", {"reason": "instance_missing", "instance": ref})
     if len(rows) > 1:
         raise SvwError(
             ErrorCode.AMBIGUOUS_SYMBOL,
@@ -528,8 +536,7 @@ def resolve_declaration_target(
     on purpose, it lists every declaration at a location."""
     rows = lookup_declarations(s, symbol_id=symbol_id, file=file, byte=byte, name=name)
     if not rows:
-        raise SvwError(ErrorCode.MISSING_INPUT, "no declaration matches the target",
-                       {"reason": "symbol_missing"})
+        raise s.missing("no declaration matches the target", {"reason": "symbol_missing"})
     if not collapse_twins:
         return rows, None
     rows = with_twins(s, rows)
