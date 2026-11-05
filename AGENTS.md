@@ -56,11 +56,15 @@ src/svweave/
   domain/                    ids, states, error catalog, envelope, cursor, locations
   config/ manifest/ snapshot/  manifest models, resolver + ledger, immutable snapshots
   adapters/slang/           pyslang worker, extraction, ingest   (never loaded in the gateway)
-  adapters/codebase_memory/  adapters/serena/  adapters/mcp_client.py   upstream MCP clients
-  orchestration/            backend registry, health, capability comparison
-  editing/                  candidate, plan, approval, journal, diffing, state machine
-  security/                 bwrap sandbox, redaction, safe IO
-  storage/                  SQLite and migrations
+  adapters/codebase_memory/  adapters/serena/  adapters/verilator/  adapters/mcp_client.py
+  adapters/toolchain.py, capability.py   toolchain lock view, capability comparison
+  orchestration/            backend registry, health (composes adapters; never the reverse)
+  editing/                  candidate, plan, tree hashing, exact-range patch, approval, journal,
+                            diffing, state machine (write safety lives here, not in an adapter)
+  execution/                local and Slurm execution: ledger, recovery, supervisor, transport
+  security/                 bwrap sandbox, redaction, safe IO, the untrusted-repo git runner
+  storage/                  SQLite, migrations, locks, GC
+docs/architecture.md        layering and allowed dependency directions (tests pin them, ARC-01)
 schemas/                    generated JSON Schemas (manifest, policy, edit, evidence, mcp/*)
 fixtures/                   demo, language, uvm, filelists, negative, expected (hand-written goldens)
 tests/                      unit, contract, fault_injection, integration, acceptance
@@ -85,9 +89,10 @@ journal, backend state); trusted policy, approval key/records and cursor key in
 .venv/bin/python -m pytest tests/fault_injection              # crash/recovery with real slang
 SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest -m integration   # real backends
 SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest -m acceptance    # end-to-end demo flow
+SVWEAVE_REQUIRE_BROWSER=1 .venv/bin/python -m pytest tests/browser     # graph viewer in Chromium (opt-in)
 .venv/bin/python scripts/bootstrap_locked.py --verify-only    # lock vs installed toolchain
 .venv/bin/python scripts/probe_backends.py                    # real backend contract probe
-.venv/bin/python scripts/mutation_suite.py                    # 31 critical mutations (plan 20.5 + write/Slurm/workspace/snapshot-reuse guards)
+.venv/bin/python scripts/mutation_suite.py                    # 40 critical mutations (plan 20.5 + write/Slurm/workspace/snapshot/approval guards)
 .venv/bin/python scripts/benchmark.py --scale 0.1             # PERF-01 (use --scale 1.0 on a big host)
 .venv/bin/python scripts/qualify.py                           # all release gates, writes the report
 ```

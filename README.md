@@ -1706,10 +1706,15 @@ falls back to a marked literal-text search with outcome `PARTIAL`.
 .venv/bin/python -m pytest tests/fault_injection                        # commit crash and recovery
 SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest -m integration    # real backends, skips fail
 SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest tests/acceptance  # end-to-end demo flow, docs check
+SVWEAVE_REQUIRE_BROWSER=1 .venv/bin/python -m pytest tests/browser     # viewer in Chromium (opt-in: node + Playwright)
 .venv/bin/python scripts/qualify.py                                     # release gates G0-G5
 ```
 
-The only custom marker is `integration` (real pinned backends). `SVWEAVE_REQUIRE_BACKENDS=1` turns
+The custom markers are `integration` (real pinned backends) and `browser` (the graph viewer driven
+in Chromium; Playwright and its Chromium are not in `toolchain.lock.json`, so `tests/browser` is
+an opt-in suite outside the required CI run, recorded when it runs). The viewer's JavaScript checks
+in `tests/unit` need `node`; `SVWEAVE_REQUIRE_NODE=1` (set in CI) makes a missing node a failure.
+`SVWEAVE_REQUIRE_BACKENDS=1` turns
 a missing backend from a skip into a failure; `qualify.py` always sets it and treats a skipped test
 as a failed gate. Mocks are for unit and fault-injection tests only. The DEP-01 clean-room test
 (`tests/integration/test_dep01_cleanroom.py`) also needs the cached artifacts under `.toolchain/`
@@ -1726,7 +1731,7 @@ and a benchmark within the plan 22.3 budgets. A gate computed from a step that d
 `NOT_EVALUATED`, never PASS. The release decision is `ACCEPTED_STATIC_PREVIEW` only when every gate
 passes and no blocker is open; otherwise `BLOCKED` with reasons.
 
-**Mutation suite.** `scripts/mutation_suite.py` injects 31 critical mutations (M01–M31, covering plan 20.5
+**Mutation suite.** `scripts/mutation_suite.py` injects 40 critical mutations (M01–M40, covering plan 20.5
 and additional write/workspace-binding/snapshot-reuse safety guards) one at a time into a throwaway copy of the
 repository and runs the mapped tests; a mutation is killed when they fail. `--only M01,M05` selects some; anything
 other than a clean fail (missing patch anchor, timeout, red baseline) is `ERROR`, never killed.
