@@ -43,8 +43,8 @@ def test_GLB_01_two_projects_nested_discovery_and_no_selection(tmp_path: Path) -
     with pytest.raises(SvwError, match="no workspace selected"):
         discover_workspace(cwd=tmp_path, environ={})
     # Discovery/selection alone never creates derived state.
-    assert not (a.root / ".svweave").exists()
-    assert not (b.root / ".svweave").exists()
+    assert _no_state(a.root)  # nothing written (Ws.policy made the empty state dir)
+    assert _no_state(b.root)  # nothing written (Ws.policy made the empty state dir)
 
 
 def test_GLB_01_precedence_and_conflicting_hints(tmp_path: Path) -> None:
@@ -156,7 +156,7 @@ def test_GLB_03_policy_cannot_be_supplied_by_project_or_widened(
     result = CliRunner().invoke(launcher, ["--repo", str(ws.root)])
     assert result.exit_code == 6 and result.stdout == ""
     assert json.loads(ws.policy_path.read_bytes())["allowed_roots"] == policy["allowed_roots"]
-    assert not (ws.root / ".svweave").exists()
+    assert _no_state(ws.root)  # nothing written (Ws.policy made the empty state dir)
 
 
 def test_GLB_04_concurrent_sessions_same_project_id_stay_bound(tmp_path: Path) -> None:
@@ -360,7 +360,7 @@ def test_GLB_04_bound_canonical_directory_cannot_be_retargeted(tmp_path: Path) -
     with pytest.raises(SvwError, match="bound workspace path changed"):
         opts.load()
     assert opts.workspace_id() is None
-    assert not (b.root / ".svweave").exists()
+    assert _no_state(b.root)  # nothing written (Ws.policy made the empty state dir)
     assert not (b.ctx().trusted_dir / "cursor.key").exists()
 
 
@@ -377,7 +377,7 @@ def test_GLB_04_bound_manifest_cannot_become_a_symlink(tmp_path: Path) -> None:
 def test_GLB_08_workspace_binding_mutation_has_precise_anchor_and_pure_tests() -> None:
     from scripts.mutation_suite import MUTATIONS
 
-    assert {m.mid for m in MUTATIONS} == {f"M{i:02d}" for i in range(1, 32)}
+    assert {m.mid for m in MUTATIONS} == {f"M{i:02d}" for i in range(1, 33)}
     mutation = next(m for m in MUTATIONS if m.mid == "M27")
     assert len(mutation.patches) == 1
     patch = mutation.patches[0]
@@ -421,3 +421,10 @@ def test_GLB_04_rejected_binding_does_not_write_retargeted_event_log(tmp_path: P
         assert not (b.root / ".svweave" / "svweave.db").exists()
     finally:
         gateway.session.close()
+
+
+def _no_state(root: Path) -> bool:
+    """No runtime state was written: `.svweave/` is absent or still the empty directory the
+    `Ws.policy()` setup (like `svweave init`) created and recorded."""
+    state = root / ".svweave"
+    return not state.exists() or not any(state.iterdir())

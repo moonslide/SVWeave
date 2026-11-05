@@ -12,7 +12,7 @@ import pytest
 import yaml
 
 from svweave.config.context import WorkspaceContext
-from svweave.config.trusted import policy_path_for
+from svweave.config.trusted import policy_path_for, register_state_dir
 
 pytest_plugins = ["tests.required_backends"]
 
@@ -86,10 +86,16 @@ class Ws:
         return policy_path_for(self.root / "svweave.yaml")
 
     def policy(self, **over: Any) -> None:
-        """Write the TRUSTED policy (outside the repo tree, under XDG_CONFIG_HOME)."""
+        """Write the TRUSTED policy (outside the repo tree, under XDG_CONFIG_HOME) and, like
+        `svweave init`, create and record `.svweave/` as this workspace's own state dir (tests
+        write into it directly before any command runs)."""
         d = {**POLICY, "allowed_roots": [str(self.root.resolve())], **over}
         self.policy_path.parent.mkdir(parents=True, exist_ok=True)
         self.policy_path.write_text(json.dumps(d))
+        state = self.root / ".svweave"
+        if not state.is_symlink():
+            state.mkdir(mode=0o700, exist_ok=True)
+            register_state_dir(self.policy_path.parent, state)
 
     def local(self, mappings: list[dict[str, str]]) -> None:
         self.write(

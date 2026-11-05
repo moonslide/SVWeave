@@ -911,7 +911,7 @@ root_mappings:
 
 外部根目錄中的檔案以 `@uvm/relative/path` 定址。使用未對應的外部根目錄是 `MISSING_INPUT` 阻擋條件（`reason: root_unmapped`），因此在對應存在之前，`uvm_smoke` profile 會維持 BLOCKED。
 
-**受信任政策。** `policy.json` 位於 `$XDG_CONFIG_HOME/svweave/workspaces/<workspace_key>/policy.json`（備援為 `~/.config`），其中 `workspace_key` 是 `sha256(realpath(dir of svweave.yaml))` 的前 16 個十六進位字元。`svweave init` 會建立它，而且絕不覆寫。它刻意放在儲存庫之外：儲存庫內容（以及代理人寫入其中的任何東西）不得有能力擴張自己的權限。儲存庫中的檔案只能收緊政策；儲存庫內的政策檔會被忽略，而位於專案樹內的 `--policy` 路徑會得到 `POLICY_DENIED`。
+**受信任政策。** `policy.json` 位於 `$XDG_CONFIG_HOME/svweave/workspaces/<workspace_key>/policy.json`（備援為 `~/.config`），其中 `workspace_key` 是 `sha256(realpath(dir of svweave.yaml))` 的前 16 個十六進位字元。`svweave init` 會建立它，而且絕不覆寫。它刻意放在儲存庫之外：儲存庫內容（以及代理人寫入其中的任何東西）不得有能力擴張自己的權限。儲存庫中的檔案只能收緊政策；儲存庫內的政策檔會被忽略，而位於專案樹內的 `--policy` 路徑會得到 `POLICY_DENIED`。同一個目錄也記錄 SVWeave 為此工作區建立的是哪一個 `.svweave/`（`state_dir.json`）：其他任何非空的 `.svweave/`（隨儲存庫或 tarball 附帶、被複製或搬移）都會以 `state_dir_not_adopted` 拒絕，直到你對自己建立的狀態目錄執行 `svweave init --adopt-state`。
 
 | 欄位 | 預設值 | 意義 |
 |---|---|---|

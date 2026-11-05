@@ -1379,7 +1379,10 @@ until the mapping exists.
 `svweave init` creates it and never overwrites it. It is outside the repository on purpose: the
 repository content (and anything an agent writes there) must not be able to widen its own
 permissions. A repository file can only tighten the policy; a repo-local policy file is ignored and
-a `--policy` path inside the project tree is `POLICY_DENIED`.
+a `--policy` path inside the project tree is `POLICY_DENIED`. The same directory records which
+`.svweave/` SVWeave created for the workspace (`state_dir.json`): any other non-empty `.svweave/`
+(shipped with a repository or tarball, copied or moved) is refused with `state_dir_not_adopted`
+until you run `svweave init --adopt-state` for a state directory you made yourself.
 
 | Field | Default | Meaning |
 |---|---|---|

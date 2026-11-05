@@ -184,10 +184,17 @@ def cli(
 
 
 @cli.command("init")
+@click.option(
+    "--adopt-state",
+    is_flag=True,
+    help="Trust an existing .svweave/ that SVWeave did not record (only one you created, e.g. "
+    "after moving the project; never one shipped with a repository).",
+)
 @pass_state
-def init_cmd(st: _State) -> None:
+def init_cmd(st: _State, adopt_state: bool) -> None:
     """Create svweave.yaml template, .svweave/ and policy.json (never overwrites)."""
-    st.emit(st.run(lambda rid: init_workspace(st.opts.root, rid, st.opts.policy_path)))
+    st.emit(st.run(lambda rid: init_workspace(st.opts.root, rid, st.opts.policy_path,
+                                              adopt_state=adopt_state)))
 
 
 @cli.command("doctor")

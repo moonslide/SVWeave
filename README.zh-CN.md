@@ -911,7 +911,7 @@ root_mappings:
 
 外部根中的文件以 `@uvm/relative/path` 的形式寻址。使用未映射的外部根是一个 `MISSING_INPUT` 阻断项（`reason: root_unmapped`），因此在映射存在之前，`uvm_smoke` profile 一直是 BLOCKED。
 
-**受信策略。** `policy.json` 位于 `$XDG_CONFIG_HOME/svweave/workspaces/<workspace_key>/policy.json`（回退到 `~/.config`），其中 `workspace_key` 是 `sha256(realpath(dir of svweave.yaml))` 的前 16 个十六进制字符。`svweave init` 创建它，且从不覆盖它。它刻意位于仓库之外：仓库内容（以及智能体写入其中的任何东西）不得能够扩大自身的权限。仓库中的文件只能收紧策略；仓库本地的策略文件会被忽略，而位于项目树内的 `--policy` 路径为 `POLICY_DENIED`。
+**受信策略。** `policy.json` 位于 `$XDG_CONFIG_HOME/svweave/workspaces/<workspace_key>/policy.json`（回退到 `~/.config`），其中 `workspace_key` 是 `sha256(realpath(dir of svweave.yaml))` 的前 16 个十六进制字符。`svweave init` 创建它，且从不覆盖它。它刻意位于仓库之外：仓库内容（以及智能体写入其中的任何东西）不得能够扩大自身的权限。仓库中的文件只能收紧策略；仓库本地的策略文件会被忽略，而位于项目树内的 `--policy` 路径为 `POLICY_DENIED`。同一个目录也记录 SVWeave 为此工作区创建的是哪一个 `.svweave/`（`state_dir.json`）：其他任何非空的 `.svweave/`（随仓库或 tarball 附带、被复制或移动）都会以 `state_dir_not_adopted` 拒绝，直到你对自己创建的状态目录运行 `svweave init --adopt-state`。
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|

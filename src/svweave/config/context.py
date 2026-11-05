@@ -23,7 +23,12 @@ from svweave.config.policy import (
     check_policy_tightening,
     policy_roots,
 )
-from svweave.config.trusted import check_state_dir, load_trusted_policy, trusted_dir
+from svweave.config.trusted import (
+    check_state_dir,
+    load_trusted_policy,
+    trusted_dir,
+    verify_state_dir,
+)
 from svweave.domain.errors import ErrorCode, SvwError
 
 STATE_DIRNAME = ".svweave"
@@ -80,7 +85,7 @@ class WorkspaceContext:
     ) -> None:
         self.project_root = Path(os.path.realpath(project_root))
         self.manifest_dir = Path(os.path.realpath(manifest_dir or project_root))
-        check_state_dir(self.project_root / STATE_DIRNAME)
+        check_state_dir(self.project_root / STATE_DIRNAME)  # link / foreign owner: refuse early
         self.manifest = manifest
         self.local = local
         self.policy = policy
@@ -130,6 +135,9 @@ class WorkspaceContext:
             )
         self.roots = roots
         self._by_id = {r.id: r for r in roots}
+        # only now that the policy accepted the project root: the state dir must be the one
+        # SVWeave created (or a person adopted), never one shipped with the repository
+        verify_state_dir(trusted_dir(self.manifest_dir), self.project_root / STATE_DIRNAME)
 
     # ------------------------------------------------------------------ loading
     @classmethod

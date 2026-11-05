@@ -36,6 +36,14 @@ environment, and the user's host.
 * `.svweave/` (runtime state) must be a real directory owned by the current user. It holds
   snapshots, the semantic database, candidates, journals, run logs and backend state; it is never
   committed.
+* `.svweave/` is trusted only when SVWeave created it for this workspace: its identity (real path,
+  device, inode) is recorded in `state_dir.json` in the trusted directory when it is created. A
+  non-empty `.svweave/` without a matching record (shipped with a repository, a tarball or a
+  shared directory, or copied/moved) is refused with `POLICY_DENIED`, reason
+  `state_dir_not_adopted`; an empty one is recorded. `svweave init --adopt-state` is the explicit
+  human step for a state directory you created yourself (for example after moving the project).
+  Within a trusted state directory, snapshot trees and records are still read without following
+  links and checked against their identity.
 
 The trusted `policy.json` is refused (`policy_writable_by_others`) when it or its directory is
 writable by other users; `svweave init` creates it 0600 in a 0700 directory. Group-write is allowed,

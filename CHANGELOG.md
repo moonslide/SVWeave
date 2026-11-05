@@ -38,6 +38,11 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   prefixes are pinned. **Breaking:** `$VAR` expansion in filelists now also needs the variable in
   the trusted `policy.json` `environment_allowlist` (a repository `svweave.yaml` could read any
   variable, e.g. a token, and echo it in an error message to the MCP client).
+* **`.svweave/` must be SVWeave's own** (**breaking**, owner decision of 2026-11-05): its identity
+  is recorded in the trusted directory when SVWeave creates it; any other non-empty `.svweave/`
+  (repository-shipped, copied, moved) is refused (`state_dir_not_adopted`) until
+  `svweave init --adopt-state`. After upgrading, an existing workspace needs that one step (the
+  error says so). Mutation M32.
 * **Fixes from the second council review** (each with a test that fails without it):
   `--per-commit`'s `git log` ran the repository's `gpg.program` for a signed commit when the
   repository config set `log.showSignature` (reproduced; signature checks, ext-diff and textconv

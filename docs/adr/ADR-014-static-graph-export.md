@@ -86,8 +86,9 @@ Decision record: in the working session of 2026-11-04 on branch
 `claude/partial-compile-html-1eyxxd` the project owner asked for the complete topology by
 default and for a way to handle very large SoC pages, and chose the three steps (compact format,
 `--split`, `--lazy`). The `--lazy` CSP relaxation (`'self'`) was found necessary while building
-`--lazy` and is this branch's proposal: it needs the owner's explicit sign-off of this amendment
-before merge (council review 2, policy finding 1). `--split` needs no relaxation.
+`--lazy`; after council review 2 (policy finding 1) asked for an explicit sign-off, the project
+owner approved it in the session of 2026-11-05, as described in this amendment and the next.
+`--split` needs no relaxation.
 
 ## Amendment (2026-11-04, council review 2): hashed script CSP, atlas honesty
 * No page admits `'unsafe-inline'` scripts any more: the CSP names the sha256 of the one viewer

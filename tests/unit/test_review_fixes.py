@@ -87,8 +87,17 @@ def test_C1_repo_committed_policy_is_never_adopted(ws: Ws) -> None:
     out = CliRunner().invoke(cli, ["--root", str(ws.root), "--compact", "doctor"])
     data = json.loads(out.stdout)
     assert data["error"]["code"] == "INVALID_CONFIG"
-    # with a valid trusted policy, doctor warns that the repo-local file is ignored
+    # with a valid trusted policy, the repository-shipped .svweave/ itself is refused (council
+    # review 2: it was never created by SVWeave here) ...
     ws.policy()
+    from svweave.config.trusted import STATE_RECORD
+
+    (ws.policy_path.parent / STATE_RECORD).unlink()  # as for a clone that shipped .svweave/
+    e = expect(ErrorCode.POLICY_DENIED, ws.ctx)
+    assert e.details["reason"] == "state_dir_not_adopted"
+    # ... and once a person adopts it, doctor warns that the repo-local policy file is ignored
+    out = CliRunner().invoke(cli, ["--root", str(ws.root), "--compact", "init", "--adopt-state"])
+    assert out.exit_code == 0, out.output
     data = json.loads(
         CliRunner().invoke(cli, ["--root", str(ws.root), "--compact", "doctor"]).stdout
     )

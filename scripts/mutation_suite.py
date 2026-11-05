@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Critical mutation suite (plan 20.5, release gate "Critical invariants").
 
-Thirty-one deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
+Thirty-two deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
 the M12–M22 extra write-safety rules, M23–M26 Slurm boundaries, and M27 shared-launcher workspace
 binding, plus M28–M29 verified incremental-snapshot reuse, M30 the complete change list of
-the roll-forward input gate and M31 the verified candidate snapshot of edit validate. They are injected, one at a time, into a THROWAWAY COPY of the
+the roll-forward input gate and M31 the verified candidate snapshot of edit validate and M32 the recorded state directory. They are injected, one at a time, into a THROWAWAY COPY of the
 repository. For each one the mapped test subset is run against the copy; a mutation is ``KILLED`` when the subset
 fails (pytest exit 1 with at least one FAILED test) and ``SURVIVED`` when it stays green. Anything
 else (patch anchor missing, syntax/collection error, timeout, red baseline) is ``ERROR`` and is
@@ -409,6 +409,17 @@ MUTATIONS: list[Mutation] = [
                "        if (not final.is_symlink()  # " + MARK + ":M31\n")],
         ["tests/unit/test_snapshot_trust.py::"
          "test_SEC_SNP05_validate_never_reuses_a_planted_candidate_snapshot"],
+    ),
+    m(
+        "M32", "trust a .svweave/ that SVWeave did not create (repository-shipped state)",
+        "SEC (beyond 20.5); council review 2, owner decision 2026-11-05",
+        [Patch("src/svweave/config/trusted.py",
+               "    if state_dir_registered(trusted, state):\n        return\n",
+               "    return  # " + MARK + ":M32\n")],
+        ["tests/unit/test_state_trust.py::"
+         "test_SEC_STA01_a_shipped_state_dir_is_refused_by_every_command",
+         "tests/unit/test_state_trust.py::"
+         "test_SEC_STA04_a_copied_or_replaced_state_dir_no_longer_matches_its_record"],
     ),
 ]
 
