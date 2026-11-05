@@ -61,6 +61,8 @@
 
 ## 狀態
 
+**待辦與交接（2026-11-05）：** [2026_1105_hand_off.md](2026_1105_hand_off.md) 依建議順序列出所有尚未處理的項目：需要專案負責人決定的事（`--lazy` CSP 核准的可驗證紀錄、PR 與合併、`AGENTS.md` 的修改、舊格式狀態紀錄、`init` 的新行為），接著是安全與正確性、架構與文件、測試證據，並說明怎麼驗證與注意事項。專案仍是 developer preview、UNQUALIFIED：這個分支上沒有跑過 `scripts/qualify.py`。
+
 ### 兩次審查的後續處理與第三次 Council review（2026-11-05）
 
 前兩次審查留下的所有項目都已處理，並依專案負責人 2026-11-05 的決定進行：核准 `--lazy` 的 CSP 放寬（ADR-014）；SVWeave 只信任它自己建立或由人認領的 `.svweave/`（**破壞性變更：** 每個既有工作區請執行一次 `svweave init --adopt-state`）；第一次審查的遺留項目也一併處理。內容包括修正（共用建置的發布、候選快照在鎖內建立、request key 驗證、寫入外部根目錄時不跟隨連結、用法錯誤也輸出 envelope、doctor 結束碼、qualify 關卡）、新測試與 mutation M32–M40，以及不改變行為的重構（公開的查詢核心、單一 git runner、寫入安全程式碼移到 `editing/`、圖譜匯出拆分、檢視器改為 JavaScript 檔、`docs/architecture.md`）。在 `de0e6fe` 驗證（run5，一個 4 CPU 雲端 session，不是 CI，`SVWEAVE_REQUIRE_BACKENDS=1`）：unit + contract 1793 通過，4 個 BLOCKED 與之前相同；fault injection 21、integration 240、acceptance 12、browser 1 通過；mutation **40/40 KILLED**。第一次執行（run4）抓到一個測試 helper 的回歸，紀錄保留。細節：[evidence/council-review-followup-2026-11-05](evidence/council-review-followup-2026-11-05/README.md)。
@@ -1255,6 +1257,7 @@ SVWEAVE_REQUIRE_BROWSER=1 .venv/bin/python -m pytest tests/browser     # viewer 
 | 決策 | `docs/adr/` |
 | 工具鏈 spike 事實 | `docs/m0_spike_report.md` |
 | 給程式碼代理人的規則 | `AGENTS.md` |
+| 待辦與交接（2026-11-05） | `2026_1105_hand_off.md` |
 
 ## 貢獻
 

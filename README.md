@@ -74,6 +74,13 @@ compare-and-set write (TB4). Dashed lines are trust boundaries TB1 to TB4.*
 
 ## Status
 
+**Open work and hand-off (2026-11-05):** [2026_1105_hand_off.md](2026_1105_hand_off.md) (in
+Traditional Chinese) lists everything still open, in the suggested order: decisions for the project
+owner (a verifiable record of the `--lazy` CSP approval, PR and merge, the `AGENTS.md` edits, the
+first-format state record, `init`'s new behaviour), then security and correctness, architecture
+and documentation, and test-evidence items; plus how to verify and known pitfalls. The project
+stays a developer preview, UNQUALIFIED: `scripts/qualify.py` has not been run on this branch.
+
 ### Follow-up of both reviews and third council review (2026-11-05)
 
 Every item left open by the first two reviews was handled, with the project owner's decisions of
@@ -1917,6 +1924,7 @@ Exit codes are listed in [CLI reference](#cli-reference); the daily and onboardi
 | Decisions | `docs/adr/` |
 | Toolchain spike facts | `docs/m0_spike_report.md` |
 | Rules for coding agents | `AGENTS.md` |
+| Open work and hand-off (2026-11-05) | `2026_1105_hand_off.md` |
 
 ## Contributing
 
