@@ -1,0 +1,44 @@
+.....................................................F.................. [  4%]
+........................................................................ [  8%]
+........................................................................ [ 12%]
+........................................................................ [ 16%]
+........................................................................ [ 20%]
+........................................................................ [ 24%]
+........................................................................ [ 28%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 40%]
+........................................................................ [ 44%]
+........................................................................ [ 48%]
+........................................................................ [ 52%]
+......................................FF................................ [ 56%]
+........................................................................ [ 60%]
+........................................................................ [ 64%]
+........................................................................ [ 68%]
+......................................E................................. [ 72%]
+........................................................................ [ 76%]
+........................................................................ [ 80%]
+........................................................................ [ 84%]
+........................................................................ [ 88%]
+........................................................................ [ 92%]
+........................................................................ [ 96%]
+.....................................................................    [100%]
+==================================== ERRORS ====================================
+_ ERROR at setup of test_N6_unreadable_lookup_dir_raises_instead_of_dropping_subtree _
+tests/unit/test_review_fixes.py::test_N6_unreadable_lookup_dir_raises_instead_of_dropping_subtree: required qualification test did not execute (SVWEAVE_REQUIRE_BACKENDS=1); skip is not PASS:
+('/home/user/SVWeave/tests/unit/test_review_fixes.py', 642, 'Skipped: root ignores directory permissions')
+=================================== FAILURES ===================================
+_________ test_f10_python_bind_is_narrowed_to_exe_stdlib_and_libpython _________
+tests/unit/test_adapters_hardening.py::test_f10_python_bind_is_narrowed_to_exe_stdlib_and_libpython: required qualification test did not execute (SVWEAVE_REQUIRE_BACKENDS=1); skip is not PASS:
+('/home/user/SVWeave/tests/unit/test_adapters_hardening.py', 463, 'Skipped: interpreter lives under /usr: nothing extra to bind')
+_______ test_DEP_01_actual_wheel_contains_byte_identical_runtime_assets ________
+tests/unit/test_installed_runtime_assets.py::test_DEP_01_actual_wheel_contains_byte_identical_runtime_assets: required qualification test did not execute (SVWEAVE_REQUIRE_BACKENDS=1); skip is not PASS:
+('/home/user/SVWeave/tests/unit/test_installed_runtime_assets.py', 152, 'Skipped: offline artifact build requires already-installed hatchling==1.29.0')
+_____________ test_DEP_01_actual_sdist_retains_wheel_asset_sources _____________
+tests/unit/test_installed_runtime_assets.py::test_DEP_01_actual_sdist_retains_wheel_asset_sources: required qualification test did not execute (SVWEAVE_REQUIRE_BACKENDS=1); skip is not PASS:
+('/home/user/SVWeave/tests/unit/test_installed_runtime_assets.py', 152, 'Skipped: offline artifact build requires already-installed hatchling==1.29.0')
+=========================== short test summary info ============================
+FAILED tests/unit/test_adapters_hardening.py::test_f10_python_bind_is_narrowed_to_exe_stdlib_and_libpython
+FAILED tests/unit/test_installed_runtime_assets.py::test_DEP_01_actual_wheel_contains_byte_identical_runtime_assets
+FAILED tests/unit/test_installed_runtime_assets.py::test_DEP_01_actual_sdist_retains_wheel_asset_sources
+ERROR tests/unit/test_review_fixes.py::test_N6_unreadable_lookup_dir_raises_instead_of_dropping_subtree
