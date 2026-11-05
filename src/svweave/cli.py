@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import functools
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +18,7 @@ from svweave.application.doctor import run_doctor
 from svweave.application.init import init_workspace
 from svweave.application.options import WorkspaceOptions
 from svweave.application.runner import execute, exit_code
+from svweave.application.schemas import check_schemas, emit_schemas
 from svweave.application.session import Session
 from svweave.application.use_cases import (
     cache_gc,
@@ -25,10 +26,16 @@ from svweave.application.use_cases import (
     create_snapshot,
     resolve_manifest,
 )
-from svweave.config.schemas import check_schemas, emit_schemas
 from svweave.domain.cursor import MAX_RESPONSE_BYTES
-from svweave.domain.envelope import AnalysisCoverage, Envelope, Outcome
-from svweave.domain.errors import EXIT_BUILD, EXIT_CONFIG, EXIT_OK, EXIT_STALE, SvwError
+from svweave.domain.envelope import (
+    AnalysisCoverage,
+    Envelope,
+    ErrorInfo,
+    Outcome,
+    error_envelope,
+    new_request_id,
+)
+from svweave.domain.errors import EXIT_BUILD, EXIT_STALE, SvwError, startup_message
 from svweave.domain.errors import ErrorCode as EC
 from svweave.domain.states import Completeness, Freshness
 from svweave.gateway.schemas import check_mcp_schemas, emit_mcp_schemas
@@ -47,8 +54,7 @@ class _State:
         return Session(self.opts, use_graph=use_graph)
 
     def emit(self, env: Envelope, code: int | None = None) -> None:
-        from svweave.gateway.tools import redact_envelope
-        from svweave.security.redaction import Redactor
+        from svweave.security.redaction import Redactor, redact_envelope
 
         env = redact_envelope(env, Redactor([self.opts.root]))
         text = env.to_json(indent=None if self.compact else 2)
@@ -95,8 +101,11 @@ def _diff_flags(f: Callable[..., Any]) -> Callable[..., Any]:
     envelope still reports ``freshness``). ``--allow-partial`` keeps its meaning."""
 
     @click.option("--allow-partial", is_flag=True, help="Exit 0 for a PARTIAL build (default 3).")
+    @click.option(
+        "--allow-stale", is_flag=True, help="Accepted for uniformity: STALE never changes the exit code."
+    )
     @functools.wraps(f)
-    def wrapper(st: _State, *a: Any, allow_partial: bool, **kw: Any) -> Any:
+    def wrapper(st: _State, *a: Any, allow_partial: bool, allow_stale: bool, **kw: Any) -> Any:
         st.query_policy = (True, allow_partial)
         return f(st, *a, **kw)
 
@@ -118,7 +127,41 @@ def _query_flags(f: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+class _EnvelopeGroup(click.Group):
+    """Click's own usage errors (missing or unknown option, bad choice, out-of-range value) print
+    the same ``INVALID_CONFIG`` envelope on stdout as every other error, exit 2 ("every command
+    prints one JSON envelope"; first council review, interface finding 4). Click's text stays on
+    stderr; ``--help`` is unchanged."""
+
+    def main(
+        self,
+        args: Sequence[str] | None = None,
+        prog_name: str | None = None,
+        complete_var: str | None = None,
+        standalone_mode: bool = True,
+        **kw: Any,
+    ) -> Any:
+        if not standalone_mode:
+            return super().main(args, prog_name, complete_var, False, **kw)
+        try:
+            rv = super().main(args, prog_name, complete_var, False, **kw)
+        except click.UsageError as e:
+            e.show()
+            param = getattr(getattr(e, "param", None), "name", None)
+            err = SvwError(EC.INVALID_CONFIG, e.format_message(),
+                           {"reason": "usage_error", **({"param": param} if param else {})})
+            click.echo(error_envelope(err, request_id=new_request_id()).to_json(indent=None))
+            sys.exit(e.exit_code)
+        except click.ClickException as e:
+            e.show()
+            sys.exit(e.exit_code)
+        except click.Abort:
+            click.echo("Aborted!", err=True)
+            sys.exit(1)
+        sys.exit(rv if isinstance(rv, int) else 0)
+
+
+@click.group(cls=_EnvelopeGroup, context_settings={"help_option_names": ["-h", "--help"]})
 @click.option(
     "--root",
     type=click.Path(file_okay=False, path_type=Path),
@@ -181,10 +224,18 @@ def cli(
 
 
 @cli.command("init")
+@click.option(
+    "--adopt-state",
+    is_flag=True,
+    help="Trust an existing .svweave/ that SVWeave did not record (only one you created, e.g. "
+    "after moving the project; never one shipped with a repository).",
+)
 @pass_state
-def init_cmd(st: _State) -> None:
+def init_cmd(st: _State, adopt_state: bool) -> None:
     """Create svweave.yaml template, .svweave/ and policy.json (never overwrites)."""
-    st.emit(st.run(lambda rid: init_workspace(st.opts.root, rid, st.opts.policy_path)))
+    st.emit(st.run(lambda rid: init_workspace(st.opts.root, rid, st.opts.policy_path,
+                                              adopt_state=adopt_state,
+                                              manifest_path=st.opts.manifest_path)))
 
 
 @cli.command("doctor")
@@ -314,6 +365,12 @@ def schema_emit(st: _State, out_dir: Path, check: bool) -> None:
                 outcome=Outcome.OK if not bad else Outcome.ERROR,
                 analysis_coverage=AnalysisCoverage(completeness=Completeness.COMPLETE),
                 data={"out_of_sync": bad},
+                # an ERROR envelope always names its code (first council review, interface 6)
+                error=ErrorInfo(code=EC.INVALID_CONFIG.value,
+                                message=f"{len(bad)} schema file(s) out of sync with the models; "
+                                "run `svweave schema emit`",
+                                details={"reason": "schemas_out_of_sync", "out_of_sync": bad})
+                if bad else None,
             )
         return Envelope(
             request_id=rid,
@@ -322,8 +379,9 @@ def schema_emit(st: _State, out_dir: Path, check: bool) -> None:
             data={"written": [str(p) for p in emit_schemas(out) + emit_mcp_schemas(out / "mcp")]},
         )
 
-    env = st.run(run)
-    st.emit(env, EXIT_CONFIG if env.data.get("out_of_sync") else EXIT_OK)
+    # the exit code follows the error, whatever it is (third council review M4: an INTERNAL or
+    # POLICY_DENIED error without ``out_of_sync`` exited 0)
+    st.emit(st.run(run))
 
 
 @cli.command("build")
@@ -332,11 +390,8 @@ def schema_emit(st: _State, out_dir: Path, check: bool) -> None:
 @pass_state
 def build_cmd(st: _State, profile: str | None, no_reuse: bool) -> None:
     """Resolve, snapshot and analyse a profile with slang (exit 3: errors/PARTIAL/BLOCKED)."""
-    from svweave.application.build import run_build
-    from svweave.application.evidence import record_static_for
-
-    env = st.run(lambda rid: run_build(st.opts, profile, rid, reuse=not no_reuse), profile=profile)
-    record_static_for(st.opts, env.build_id)
+    env = st.run(lambda rid: services.build_sync(st.opts, profile, rid, reuse=not no_reuse),
+                 profile=profile)
     st.emit(env, EXIT_BUILD if env.outcome in (Outcome.PARTIAL, Outcome.BLOCKED) else None)
 
 
@@ -347,11 +402,8 @@ def build_cmd(st: _State, profile: str | None, no_reuse: bool) -> None:
 @pass_state
 def update_cmd(st: _State, profile: str | None, base: str | None, no_git: bool) -> None:
     """Reuse immutable snapshot data; changed inputs still require whole-profile analysis."""
-    from svweave.application.evidence import record_static_for
-    from svweave.application.update import run_update
-
-    env = st.run(lambda rid: run_update(st.opts, profile, rid, base=base, git=not no_git), profile=profile)
-    record_static_for(st.opts, env.build_id)
+    env = st.run(lambda rid: services.update_sync(st.opts, profile, rid, base=base, git=not no_git),
+                 profile=profile)
     st.emit(env, EXIT_BUILD if env.outcome in (Outcome.PARTIAL, Outcome.BLOCKED) else None)
 
 
@@ -363,24 +415,26 @@ def graph_grp() -> None:
 @graph_grp.command("export")
 @click.option("--build", "build_id", required=True, help="64-hex build id.")
 @click.option(
-    "--name", default=None, help="File name stem under .svweave/exports/ (default graph-<build>)."
+    "--name",
+    default=None,
+    help="File name stem under .svweave/exports/ (default graph-<build>); with --split/--lazy "
+    "the name of the directory that holds the pages.",
 )
 @click.option(
     "--max-instances",
     type=int,
-    default=5000,
-    show_default=True,
-    help="Draw at most N instances, shallowest first.",
+    default=None,
+    help="Reduce: draw at most N instances, shallowest first (default: all, complete topology).",
 )
 @click.option(
     "--max-fanout",
     type=int,
-    default=16,
-    show_default=True,
-    help="Signals used by more instances are listed as hubs, not drawn.",
+    default=None,
+    help="Reduce: list signals used by more than N instances as hubs instead of edges "
+    "(default: every signal is drawn).",
 )
 @click.option(
-    "--root",
+    "--instance",
     default=None,
     help="Subtree view: read and draw only this instance (path or id) and its descendants.",
 )
@@ -393,19 +447,50 @@ def graph_grp() -> None:
 @click.option(
     "--diff-head", default=None, help="Diff view: git revision of the change (default: working tree)."
 )
+@click.option(
+    "--per-commit",
+    is_flag=True,
+    help="Diff view: label each changed instance with the commits of --diff-base..--diff-head "
+    "that changed its module (build the --diff-head revision).",
+)
+@click.option(
+    "--split",
+    is_flag=True,
+    help="Write the complete topology as linked pages (a directory with index.html), each of at "
+    "most --page-budget instances; for SoCs too large for one page.",
+)
+@click.option(
+    "--lazy",
+    is_flag=True,
+    help="Write ONE page that loads the other parts of the topology (data files beside it) when "
+    "a portal is opened; same cut as --split (Chromium-verified).",
+)
+@click.option(
+    "--page-budget",
+    type=int,
+    default=None,
+    help="Instances per page or part with --split/--lazy (default 5000, at least 100). "
+    "--max-instances/--max-fanout are refused with --split/--lazy.",
+)
 @pass_state
 @_query_flags
 def graph_export_cmd(
     st: _State,
     build_id: str,
     name: str | None,
-    max_instances: int,
-    max_fanout: int,
-    root: str | None,
+    max_instances: int | None,
+    max_fanout: int | None,
+    instance: str | None,
     diff_base: str | None,
     diff_head: str | None,
+    per_commit: bool,
+    split: bool,
+    lazy: bool,
+    page_budget: int | None,
 ) -> None:
-    """Write .svweave/exports/<name>.html: instance hierarchy plus port-association connections."""
+    """Write .svweave/exports/<name>.html (or, with --split/--lazy, the directory
+    .svweave/exports/<name>/ with index.html): instance hierarchy plus port-association
+    connections, nothing served."""
     if diff_base is not None and st.query_policy is not None:
         # like diff-impact: the workspace is expected to differ from the build
         st.query_policy = (True, st.query_policy[1])
@@ -419,9 +504,13 @@ def graph_export_cmd(
                 name=name,
                 max_instances=max_instances,
                 max_fanout=max_fanout,
-                root=root,
+                instance=instance,
                 diff_base=diff_base,
                 diff_head=diff_head,
+                per_commit=per_commit,
+                split=split,
+                page_budget=page_budget,
+                lazy=lazy,
             )
         )
     )
@@ -435,7 +524,8 @@ def query_grp() -> None:
 def _paging(f: Callable[..., Any]) -> Callable[..., Any]:
     f = click.option("--cursor", default=None, help="Opaque cursor from a previous page.")(f)
     return click.option(
-        "--limit", type=int, default=None, help="Items per page (default 100, max 500)."
+        "--limit", type=int, default=None,
+        help="Items per page (max 500; default 100, query symbol 50).",
     )(f)
 
 
@@ -878,7 +968,7 @@ def serve_cmd(
             opts = st.opts if workspace is None else replace(st.opts, root=workspace.resolve())
         serve_stdio(opts, use_graph=graph)
     except SvwError as e:
-        click.echo(f"svweave serve: {e.code.value}: {e.message}", err=True)
+        click.echo(startup_message("svweave serve", e), err=True)
         sys.exit(e.exit_code)
 
 

@@ -47,7 +47,7 @@
 | 对模块、端口、信号或实例的一次变更会波及什么 | `svweave query impact` | `svw_impact` | 该构建的实例树和已解析的引用 |
 | 一个 git diff 会波及什么 | `svweave query diff-impact` | `svw_diff_impact` | 映射到该构建快照上的 `git diff` |
 | 一次重命名会做的每一处编辑，以及阻断项 | `svweave query rename-preview` | `svw_rename_preview` | 已解析的引用加上经过校验的词法扫描（只读） |
-| 可浏览的层次结构及其连接图 | `svweave graph export` | （仅 CLI） | 该构建，写成一个静态 HTML 文件 |
+| 可浏览的层次结构及其连接图；也可只画一个子树（`--instance`）或只画 git diff 改到的部分（`--diff-base`） | `svweave graph export` | （仅 CLI） | 该构建，写成一个静态 HTML 文件 |
 | 安全地修改代码 | `svweave edit ...` | `svw_edit`（不能审批） | 候选副本、slang 验证、人工审批、compare-and-set |
 | 状态、证据、报告 | `svweave doctor`、`svweave query evidence`、`svweave report` | `svw_status`、`svw_evidence` | 已记录的运行；EDA、仿真和形式验证保持 `NOT_RUN` |
 
@@ -60,6 +60,53 @@
 *客户端只与一个网关通信。网关掌管策略、作业、溯源和错误映射，并通过适配器驱动三个后端。每个后端都运行在 `bwrap` 沙箱中，网络关闭，且原始源码不以可写方式挂载（或根本不挂载）；pyslang worker 同样处于沙箱中。后端读取不可变快照，或写入 `.svweave/` 下的候选副本。受信目录（策略、审批 HMAC 密钥、游标密钥）位于仓库之外。用户的源码工作区只有一条访问路径：编辑协调器经过审批、compare-and-set 的写入（TB4）。虚线是信任边界 TB1 至 TB4。*
 
 ## 状态
+
+**待办与交接（2026-11-05）：** [2026_1105_hand_off.md](2026_1105_hand_off.md)（繁体中文）按建议顺序列出所有尚未处理的项目：需要项目负责人决定的事（`--lazy` CSP 批准的可验证记录、PR 与合并、`AGENTS.md` 的修改、旧格式状态记录、`init` 的新行为），接着是安全与正确性、架构与文档、测试证据，并说明如何验证与注意事项。项目仍是 developer preview、UNQUALIFIED：这个分支上没有运行过 `scripts/qualify.py`。
+
+### 两次审查的后续处理与第三次 Council review（2026-11-05）
+
+前两次审查留下的所有项目都已处理，并按项目负责人 2026-11-05 的决定进行：批准 `--lazy` 的 CSP 放宽（ADR-014）；SVWeave 只信任它自己创建或由人认领的 `.svweave/`（**破坏性变更：** 每个既有工作区请运行一次 `svweave init --adopt-state`）；第一次审查的遗留项目也一并处理。内容包括修正（共享构建的发布、候选快照在锁内创建、request key 校验、写入外部根目录时不跟随链接、用法错误也输出 envelope、doctor 退出码、qualify 关卡）、新测试与 mutation M32–M40，以及不改变行为的重构（公开的查询核心、单一 git runner、写入安全代码移到 `editing/`、图谱导出拆分、查看器改为 JavaScript 文件、`docs/architecture.md`）。在 `de0e6fe` 验证（run5，一个 4 CPU 云端 session，不是 CI，`SVWEAVE_REQUIRE_BACKENDS=1`）：unit + contract 1793 通过，4 个 BLOCKED 与之前相同；fault injection 21、integration 240、acceptance 12、browser 1 通过；mutation **40/40 KILLED**。第一次运行（run4）发现了一个测试 helper 的回归，记录保留。细节：[evidence/council-review-followup-2026-11-05](evidence/council-review-followup-2026-11-05/README.md)。
+
+随后针对该状态（`41e99df`）进行的第三次六位专家审查发现了新问题；其中高严重度与已确认的中严重度项目现在都**已修正**，各有测试：
+- 强化过的 git runner 停用仓库 hook，且不再刷新 index（对连同 `.git/` 一起交付的仓库，`svw_diff_impact` 原本可能运行其 `.git/hooks/post-index-change`；修正前先复现）；
+- `svweave init --adopt-state` 认领的是每个命令使用的 `.svweave/`（`<project.root>/.svweave`）；状态记录改为 `.svweave/` 内的随机 token（不再比对 device/inode），登记过程加锁串行化，组或其他人可写的状态目录会被拒绝；
+- 没有通过验证的工作区时，`doctor` 的 probe 状态不会写进项目；
+- `edit recover --rollback` 与 roll-forward 有相同的关卡，并从验证过的 base snapshot 读取原始字节，不跟随链接；
+- `schema emit` 出错时退出码不为 0，`git status` 失败时 qualify 关卡会拦下，MCP launcher 会打印 `--adopt-state` 提示。
+
+新增 mutation M41–M45。在 `aaecbee` 验证（run7，一个 4 CPU 云端 session，不是 CI，`SVWEAVE_REQUIRE_BACKENDS=1`）：unit + contract 1804 通过，4 个 BLOCKED 与之前相同；fault injection 26、integration 240、acceptance 12、browser 1 通过；mutation **45/45 KILLED**。前一次运行（run6）发现了一个过时的测试假设，记录保留。仍未处理：项目负责人对 `--lazy` CSP 批准的可验证记录（H4）、仓库写进已登记 `.svweave/` 的文件（M1 的内容部分），以及架构／文档项目。细节：[evidence/council-review-3-2026-11-05](evidence/council-review-3-2026-11-05/README.md)。这不是 `scripts/qualify.py` 的资格认定运行。
+
+### 第二次 Council review：修正与已验证的运行（2026-11-04）
+
+第二次六位专家审查（针对之后的代码：大型 SoC 页面、`--per-commit`、默认完整拓扑）发现两个 **High** 问题，均已先复现再修正：`graph export --per-commit` 运行的 `git log` 在仓库配置 `log.showSignature` 时，会为已签名的 commit 运行仓库指定的 `gpg.program`；以及仓库附带的 `.svweave/` 可以放一个 `files` 为符号链接（例如指向 `$HOME`）的快照，文本搜索会遍历它，且 `snapshot.json` 会被原样信任。另外也修正了：图谱页面只运行自己的查看器脚本（以 hash 指定）；`--split`/`--lazy` 拒绝每页上限，且不再在单一页面上声称完整；沙箱绑定 `$HOME` 的上层目录；以及正确性与接口缺陷。每个修正都有在旧代码上会失败的测试（新增 mutation M31）。
+
+在 `4491a54`、于一个 4 CPU 的云端 session 中验证（不是 CI），`SVWEAVE_REQUIRE_BACKENDS=1`：unit + contract 1752 通过、0 失败、4 个 BLOCKED（与之前相同的四个，该主机无法执行）；fault injection 20、integration 233（0 skipped）、acceptance 12 通过；关键 mutation **31/31 KILLED**。这是第一个覆盖 `--per-commit`、精简页面格式、`--split` 与 `--lazy` 的已记录运行。细节、命令、JUnit 文件与尚未处理的项目（其中一项需要项目负责人决定）：[evidence/council-review-2-2026-11-04](evidence/council-review-2-2026-11-04/README.md)。这不是 `scripts/qualify.py` 的资格认定运行。
+
+### Council review 修复与已验证的运行（2026-11-04）
+
+六位专家对整个代码库进行审查，发现了包括一个 **High** 在内的多个问题：diff-impact 运行 git 时会套用仓库自身的配置，因此当 partial clone 的配置指定了 `remote.<x>.uploadpack`，`svw_diff_impact`（或 `graph export --diff-base`）在读取缺失的 blob 时，就会在主机上执行该命令。这已修复（不读取用户／系统配置、禁止任何传输协议、拒绝 partial clone、超时确实生效），同时修复的还有：通过 `svweave.yaml` 泄露环境变量秘密（**不兼容变更：** filelist 中的 `$VAR` 现在也必须列在受信的 `policy.json` 的 `environment_allowlist` 中）、只检查 20 条变更的 roll-forward 关卡（新增 mutation M30）、没有 sandbox 的构建不留记录、rename 行数被减半，以及若干接口缺陷。每一项都先重现过；每个修复都有一个在旧代码上会失败的测试。
+
+在 `a3777ff`、于一个 4 CPU 的云端 session 中验证（不是 CI），`SVWEAVE_REQUIRE_BACKENDS=1`：unit + contract 1737 通过、0 失败、4 个 BLOCKED（该主机无法执行）；fault injection 20、集成测试 219（0 skip）、acceptance 12 全部通过；关键 mutation **30/30 KILLED**。第一次运行曾发现这些修复中的一个回归，该记录也一并保留。细节、命令、JUnit 文件以及未修复的项目：[evidence/council-review-2026-11-04](evidence/council-review-2026-11-04/README.md)。这不是 `scripts/qualify.py` 的资格认定运行。
+
+### 图的子树与 git diff 视图（2026-11-04）
+
+`svweave graph export` 现在可以只绘制构建的一部分，而无需重新编译：
+
+- `--instance INSTANCE`：只绘制一个实例及其子孙，只从构建中读取这些数据行。
+- `--diff-base REF [--diff-head REF]`：只绘制 `git diff` 修改到的 module/interface 的实例（红框），连同其子树，以及连接它们的祖先（虚线框，作为上下文）。在修改前或修改后构建均可；每个文件对应与构建快照相符的那一侧 diff。
+
+在分支 `claude/partial-compile-html-1eyxxd` 的 `c641509`、于一个 4 CPU 的云端 session 中验证（不是 CI 运行）：unit + contract **1731 通过、0 失败**；在 `SVWEAVE_REQUIRE_BACKENDS=1` 下使用真实的 pyslang、codebase-memory-mcp、Serena 和 UVM 运行集成测试 **214 通过、0 skip**。该次运行没有保留任何文件；之后代码的已记录运行，是上面的 council review 运行。新测试使用手写 RTL `fixtures/language/grf_subtree`，并以完整页面逐一核对每个子树页面，以及 diff 页面中被修改的实例。
+
+使用 `scripts/benchmark_graph_subtree.py` 在该主机上测量，41,090 个实例，CLI 实际耗时（[测量证据](evidence/bench/graph-subtree/README.md)）：
+
+| 页面 | 绘制的实例 | 时间 | 大小 |
+|---|---:|---:|---:|
+| 整个构建 | 41,090 | 14.6 s | 77.6 MB |
+| `--instance` 一个 cluster | 642 | 1.70 s | 1.2 MB |
+| `--diff-base`，修改了一个有 65 个实例的 module | 130 | 1.63 s | 0.2 MB |
+| `--diff-base`，修改了一个有 8,192 个实例的 module | 41,025 | 15.7 s | 78.2 MB |
+
+修改越集中，节省越多：若修改的 module 几乎到处都有实例，就几乎要绘制全部，而且比完整导出还慢。在 90 个实例的设计上，各模式的时间都是 Python 启动时间（约 1.5 s）。这是单一主机上的单一合成设计：不是计划 22.3 的参考语料，也不构成任何资格认定。
 
 ### 快照 I/O 更新验证（2026-10-29）
 
@@ -169,7 +216,7 @@ Slurm 22.05.9 与 MUNGE 0.5.18 已安装于仓库外，但 MUNGE Unix stream soc
 
 **开发者预览版 v0.1.0-dev。UNQUALIFIED**，除非资格认定报告（`.svweave/qualification/report.json`，由 `scripts/qualify.py` 生成，证据位于 `evidence/`）显示 `ACCEPTED_STATIC_PREVIEW`。工具的“静态预览”状态绝不代表仿真、形式验证或 EDA 结果：`eda_compile`、`simulation` 和 `formal` 均为 `NOT_RUN`，除非你导入自己的证据；而导入的证据是 `EXTERNAL_DECLARED`，从不由 SVWeave 验证。依赖任何结果之前，请先阅读 `docs/limitations.md`。
 
-**最近一次完整测试运行（2026-10-20，Linux x86_64，仅限此主机）：** 用文档所述的离线流程（`vendor/`，含 Serena）安装的一份全新副本，以 `SVWEAVE_REQUIRE_BACKENDS=1` 运行：**1066 通过，1 跳过，0 失败**；`ruff`、`mypy` 和 `svweave schema emit --check` 均无问题。它覆盖了影响分析、diff 影响分析、重命名预览和图导出工具，以及 2026-10-19/20 两轮评审的修复（见 `CHANGELOG.md`）。
+**最近一次完整测试运行（2026-10-20，Linux x86_64，仅限此主机；未留存记录：没有保留 JUnit、日志或 lock hash，因此不是 AGENTS 规则 12 意义上的证据）：** 用文档所述的离线流程（`vendor/`，含 Serena）安装的一份全新副本，以 `SVWEAVE_REQUIRE_BACKENDS=1` 运行：**1066 通过，1 跳过，0 失败**；`ruff`、`mypy` 和 `svweave schema emit --check` 均无问题。它覆盖了影响分析、diff 影响分析、重命名预览和图导出工具，以及 2026-10-19/20 两轮评审的修复（见 `CHANGELOG.md`）。
 
 **最近一次记录的资格认定运行（2026-10-14，git HEAD `b6ba45c` 加未提交的改动；上述工具加入后未重新运行）：**
 
@@ -184,7 +231,7 @@ Slurm 22.05.9 与 MUNGE 0.5.18 已安装于仓库外，但 MUNGE Unix stream soc
 
 G0 不是单纯的 PASS，因为 codebase-memory-mcp 和 Serena 的探测结果为 `DEGRADED`（在声明的子集之内），且负责人尚未签署豁免。证据副本位于 `evidence/qualification/`。这是某一次运行的快照，不是长期有效的声明；要了解你自己代码树的状态，请重新运行 `scripts/qualify.py`。
 
-**在真实 SoC 上试用**（2026-10-20，不属于测试套件）：一个基于 Arm SSE-315 的设计，包含 3835 个 HDL 文件（135 MiB），用时 606 s 构建完成（worker 峰值 11 GB），得到 115,552 个实例和 605,874 个端口关联；结果如实地为 `PARTIAL`（门级 PHY 模型中的编译错误、未解析的引用、6637 个空模块体）。这次运行发现并修复了 `CHANGELOG.md` 中列出的实例数组 id 冲突和信封过大问题。
+**在真实 SoC 上试用**（2026-10-20，不属于测试套件；单一主机上的一次性观察，未保留证据文件，不是性能声明）：一个基于 Arm SSE-315 的设计，包含 3835 个 HDL 文件（135 MiB），用时 606 s 构建完成（worker 峰值 11 GB），得到 115,552 个实例和 605,874 个端口关联；结果如实地为 `PARTIAL`（门级 PHY 模型中的编译错误、未解析的引用、6637 个空模块体）。这次运行发现并修复了 `CHANGELOG.md` 中列出的实例数组 id 冲突和信封过大问题。
 
 | 后端（在 `toolchain.lock.json` 中锁定） | 角色 |
 |---|---|
@@ -321,7 +368,7 @@ svweave doctor --probe             # starts each backend once with a real fixtur
 svweave build --profile rtl_demo   # the shipped demo: exit 0
 ```
 
-预期结果：`svweave doctor` 以退出码 0 结束，`outcome` 为 `OK`；`client_boundary` 始终是 `WARN`（`not qualified`，见 `docs/security.md` 第 4 节），而随附的 `svweave.yaml` 在你映射该外部根之前会给出 `root_mapping:uvm` `WARN`。任何 `FAIL` 都会使退出码为 4、`outcome` 为 `ERROR`；只有在跳过 Serena（`--skip-serena`）时，`backend:serena_exe FAIL` 才是预期的。`svweave build --profile rtl_demo` 以退出码 0 结束，带有 `"completeness": "COMPLETE"`、`"diagnostic_outcome": "NO_ERRORS"` 和 `"published": true`，并打印可用于[快速开始](#快速开始)查询的 `build_id` 和 `snapshot_id`；完整输出见[实例演练：随附的演示](#实例演练随附的演示)。
+预期结果：`svweave doctor` 以退出码 0 结束，`outcome` 为 `OK`；`client_boundary` 始终是 `WARN`（`not qualified`，见 `docs/security.md` 第 4 节），而随附的 `svweave.yaml` 在你映射该外部根之前会给出 `root_mapping:uvm` `WARN`。任何 `FAIL` 都会使 `outcome` 为 `ERROR`，退出码取自最根本的失败检查（与检查顺序无关）：配置 2、策略 6、缺少输入或根映射 3、后端 4（`error.details.failed_checks` 列出所有失败的检查）；只有在跳过 Serena（`--skip-serena`）时，`backend:serena_exe FAIL`（退出码 4）才是预期的。`svweave build --profile rtl_demo` 以退出码 0 结束，带有 `"completeness": "COMPLETE"`、`"diagnostic_outcome": "NO_ERRORS"` 和 `"published": true`，并打印可用于[快速开始](#快速开始)查询的 `build_id` 和 `snapshot_id`；完整输出见[实例演练：随附的演示](#实例演练随附的演示)。
 
 ### 从较早的安装升级
 
@@ -329,6 +376,8 @@ svweave build --profile rtl_demo   # the shipped demo: exit 0
 
 * 由 build backend 尚未锁定之前（2026-10-20 之前）的安装程序填充的 uv 缓存，可能含有用未锁定 backend 构建的 `proxy-tools` 或 `serena-agent` wheel，而 uv 会复用这类已构建的 wheel。升级后请删除 `.toolchain/state/uv-cache`（或你的 `--uv-cache-dir`）一次。在 `vendor/` 路径上，之后请重新解压 `vendor/uv-cache.tar.gz`：它已用锁定的 backend 和锁定版本的 uv 重新生成（由其他 uv 版本写入的缓存使用不同的缓存 bucket，离线时无法使用）。
 * 文档所述的流程不再以 `uv venv` 开头；先前以该方式创建的 `.venv` 会被保留，并由 `--create-venv` 复用。
+* 自 2026-11-05 起，SVWeave 只信任它记录过的 `.svweave/`（破坏性变更）：请在每个既有工作区对你自己创建的状态目录运行一次 `svweave init --adopt-state`（否则第一个命令会以 `state_dir_not_adopted` 拒绝）。`svweave-mcp` 也会在 stderr 打印同样的提示。`init` 认领的是 `<project.root>/.svweave`，也就是每个命令使用的目录。由 2026-11-05 第一版记录过的工作区会自动重新记录。组或其他人可写的状态目录也会被拒绝（`chmod go-w .svweave`）。
+* 会展开 `$VAR` 的 filelist，也需要该变量出现在受信 policy 的 `environment_allowlist` 中（2026-11-04，破坏性变更）。
 
 ### 安装一次，跨项目共享
 
@@ -439,6 +488,7 @@ cat /ABS/PATH/docs/agents/AGENTS.snippet.md >> /ABS/PATH/TO/PROJECT/AGENTS.md
 | `--verify-only`：`gateway venv missing: nothing to verify` | `--verify-only` 在 `--create-venv` 之前运行，或针对了另一个 `--venv-dir`；加上 `--no-venv` 可只检查工具链。 |
 | `codebase-memory-mcp` 出现 `GLIBC_2.38' not found` | 锁文件正是为此固定了 `linux-amd64-portable`（静态）版本；不要换成标准版本（`docs/install.md` 第 4 节）。 |
 | Serena 无法启动；其 stderr 日志显示 `/usr/bin/env: '.../serena-venv/bin/serena': No such file or directory` | 这是沙箱尚未重建解释器符号链接链之前的版本（venv 建在 python-build-standalone 运行环境上，例如 `.toolchain/runtime/`）。更新 SVWeave 即可，不需要重建 venv。 |
+| `uvm_core: download of https://github.com/accellera-official/uvm-core/archive/... failed (HTTP Error 403: Forbidden)` | 网络允许 GitHub release 下载，但不允许源码压缩包（在 Claude Code 云端 session 中，是 session 的 GitHub 仓库访问范围所致）。可从 git tag 重建锁定的压缩包（`git archive` + `gzip -n` 可重现 lock 中的 sha256；安装程序会校验），或用 `--skip-uvm` 在不含 UVM 的情况下安装（标记为已跳过，绝不标记为已验证）：见 `docs/install.md` 的“When a locked archive cannot be downloaded”。 |
 | 失败的安装留下不完整的 `.toolchain/` | 重新运行同一条命令：已存在且 sha256 正确的 artifact 会被复用，其他的会重新下载并重新校验。卸载：删除 `.venv`、`.toolchain/`、`.svweave/`，以及（如需要）受信目录。 |
 
 ## 快速开始
@@ -463,6 +513,8 @@ svweave query impact --build BUILD_ID --name demo_lane
 svweave query diff-impact --build BUILD_ID                       # your uncommitted git changes
 svweave query rename-preview --build BUILD_ID --name demo_lane.valid_i --to valid_in
 svweave graph export --build BUILD_ID                            # .svweave/exports/graph-<id>.html
+svweave graph export --build BUILD_ID --instance demo_top.g_lane[0].u_lane   # 只画一个子树
+svweave graph export --build BUILD_ID --diff-base HEAD           # 只画你的 git diff 改到的部分
 
 # serve the MCP gateway for your client (stdio)
 svweave serve --transport stdio
@@ -493,7 +545,7 @@ SVWeave 从不修改客户端的配置。请把类似下面的条目加入你自
 
 这四个工具都读取一个构建并明确说明这一点：信封携带构建 id、完整性、新鲜度和限制，列表有上限但附带完整总数，它们报告的任何内容都不是风险评分。
 
-<p align="center"><img src="docs/images/analysis-tools.svg" alt="分析工具。上方：一次构建，build_id 为 snapshot_id、config_id、toolchain_id 和模式版本的哈希，完整性为 COMPLETE 或 PARTIAL，新鲜度为 CURRENT、STALE 或 HISTORICAL；其中包含不可变的快照字节、在 profile 顶层之下展开的实例树、带有静态解析引用的声明，以及直接的端口关联。四列读取它。影响分析（svw_impact、svweave query impact）：用 --name、--symbol、--file 加 --byte 或 --instance 指定一个目标；对模块或接口返回每个实例、--depth 层内的依赖方、依赖项和引用，对端口返回每个连接处和依赖方，对 net、变量或参数返回已解析的引用和连接，对实例返回其祖先、子树和端口连接；名称有歧义时返回 AMBIGUOUS_SYMBOL。Git diff 影响分析（svw_diff_impact、svweave query diff-impact）：从 --base HEAD 到 --head（默认为工作树）的 git diff -U0，固定 argv、不经 shell、有大小上限；旧侧的行映射到快照字节，逐文件为 aligned 或 approximate；返回变更的声明、其模块的实例和依赖方，以及变更的端口和其连接处；构建之外的文件只列出，头文件不重新展开。重命名预览（svw_rename_preview、svweave query rename-preview），只读：声明、已解析的引用、具名连接的形式名称、结尾标签和 bind 目标，每一处都与快照字节核对；返回 diff、阻断项、警告、其他字面出现处，以及就绪时的 edit_request；遇到未解析引用、.* 和 .name 连接、宏位置、名称冲突、非 COMPLETE 且 CURRENT 的构建，以及具名参数覆盖时会阻断。图导出（svweave graph export --build B，仅限 CLI）：一个静态文件 .svweave/exports/graph-build.html，含实例树，以及在直接端口关联中使用同一个信号声明的实例之间的虚线连线；扇出超过 --max-fanout 16 的节点只列出，最多 --max-instances 5000 个、由浅到深，以 file:// 打开、严格 CSP，不是 netlist。下方：影响分析和 diff 影响分析返回 JSON 信封，重命名预览以其 edit_request 交给受控编辑流程，图导出则直接从磁盘用浏览器打开。" width="100%"></p>
+<p align="center"><img src="docs/images/analysis-tools.svg" alt="分析工具。上方：一次构建，build_id 为 snapshot_id、config_id、toolchain_id 和模式版本的哈希，完整性为 COMPLETE 或 PARTIAL，新鲜度为 CURRENT、STALE 或 HISTORICAL；其中包含不可变的快照字节、在 profile 顶层之下展开的实例树、带有静态解析引用的声明，以及直接的端口关联。四列读取它。影响分析（svw_impact、svweave query impact）：用 --name、--symbol、--file 加 --byte 或 --instance 指定一个目标；对模块或接口返回每个实例、--depth 层内的依赖方、依赖项和引用，对端口返回每个连接处和依赖方，对 net、变量或参数返回已解析的引用和连接，对实例返回其祖先、子树和端口连接；名称有歧义时返回 AMBIGUOUS_SYMBOL。Git diff 影响分析（svw_diff_impact、svweave query diff-impact）：从 --base HEAD 到 --head（默认为工作树）的 git diff -U0，固定 argv、不经 shell、有大小上限；旧侧的行映射到快照字节，逐文件为 aligned 或 approximate；返回变更的声明、其模块的实例和依赖方，以及变更的端口和其连接处；构建之外的文件只列出，头文件不重新展开。重命名预览（svw_rename_preview、svweave query rename-preview），只读：声明、已解析的引用、具名连接的形式名称、结尾标签和 bind 目标，每一处都与快照字节核对；返回 diff、阻断项、警告、其他字面出现处，以及就绪时的 edit_request；遇到未解析引用、.* 和 .name 连接、宏位置、名称冲突、非 COMPLETE 且 CURRENT 的构建，以及具名参数覆盖时会阻断。图导出（svweave graph export --build B，仅限 CLI）：一个静态文件 .svweave/exports/graph-build.html，含实例树，以及在直接端口关联中使用同一个信号声明的实例之间的虚线连线；默认绘制所有实例与所有信号（完整拓扑）；--max-fanout 与 --max-instances 是可选的缩减，以 file:// 打开、严格 CSP，不是 netlist。下方：影响分析和 diff 影响分析返回 JSON 信封，重命名预览以其 edit_request 交给受控编辑流程，图导出则直接从磁盘用浏览器打开。" width="100%"></p>
 
 *这四个工具都是同一次已存储构建的不同视角；没有一个会重新展开设计或触碰源代码树。它们的区别在于起点（一个声明或实例、一个 git diff、一个重命名目标、整棵树），以及交出去的东西：一个信封、一个只有[受控编辑工作流](#受控编辑工作流)才能应用的 `edit_request`，或一个静态 HTML 页面。每个工具都沿用该次构建的完整性和新鲜度，所以 `PARTIAL` 或 `STALE` 的构建得到的答案会如实标明；重命名预览只在 `COMPLETE`、`CURRENT` 的构建上才会报告“就绪”。*
 
@@ -524,11 +576,48 @@ SVWeave 从不修改客户端的配置。请把类似下面的条目加入你自
 
 ```bash
 svweave graph export --build BUILD_ID          # writes .svweave/exports/graph-<build>.html
-svweave graph export --build BUILD_ID --root top.u_sub   # 只画该实例及其子孙
+svweave graph export --build BUILD_ID --instance top.u_sub   # 只画该实例及其子孙
 svweave graph export --build BUILD_ID --diff-base HEAD    # 只画 `git diff HEAD` 改到的部分
 ```
 
-在浏览器中打开该文件（`file://`，无需服务器）。它显示该构建展开后的实例树（双击折叠子树，搜索会展开到匹配项，拖动和滚轮用于平移和缩放），并以虚线显示从该构建的直接端口关联推导出的连接：两个实例引用同一个信号声明，方向由所声明的端口方向决定。一条线代表两个节点之间的所有信号；点击它可查看列表。被多于 `--max-fanout` 个实例（默认 16）使用的类时钟信号以枢纽形式列出，不绘制。页面携带该构建的完整性和新鲜度，并在其为 PARTIAL、STALE 或被截断（`--max-instances`，优先保留最浅层）时明确说明。它不是网表。页面没有网络访问（严格 CSP），并把源码文本视为数据。在上述 115k 实例的 SoC 上，导出耗时 27 s，绘制了最浅的 5000 个实例（38 MB）。`--root INSTANCE`（路径或实例 id）只读取并绘制同一构建中该实例的子树：不会重新编译，深度从 root 起算，在子树之外声明的信号（root 的端口所连接的信号）列为边界信号，不绘制。`--diff-base REF`（可再加 `--diff-head REF`）以与 `svweave query diff-impact` 相同的方式读取 git diff，只绘制被修改的 module/interface 的实例（红框）及其子树，并以其祖先作为上下文。在修改前或修改后构建均可：每个文件使用与构建快照相符的那一侧 diff。对应不到任何实例的变更（package、不在构建中的文件）只列出，不绘制。设计依据：`docs/adr/ADR-014-static-graph-export.md`。
+在浏览器中打开该文件（`file://`，无需服务器）。它显示该构建展开后的实例树（双击折叠子树，搜索会展开到匹配项，拖动和滚轮用于平移和缩放），并以虚线显示从该构建的直接端口关联推导出的连接：两个实例引用同一个信号声明，方向由所声明的端口方向决定。一条线代表两个节点之间的所有信号；点击它可查看列表。**默认页面就是该构建的完整拓扑**：所有实例和所有信号都会绘制，只是较深的层级一开始是折叠的。缩减是选项：`--max-instances N`（优先保留最浅层）与 `--max-fanout N`（被多于 N 个实例使用的信号列为枢纽而不绘制），和下方的 `--instance`、`--diff-base` 一样。页面携带该构建的完整性和新鲜度，并在其为 PARTIAL、STALE 或被截断（`--max-instances`，优先保留最浅层）时明确说明。它不是网表。页面没有网络访问（严格 CSP），并把源码文本视为数据。在 C906 minimal SoC（2,072 个实例）上，完整页面有 30,378 条连接，以精简格式写成 2.0 MB；超过 20,000 个实例或 64 MiB 时，envelope 会警告浏览器可能变慢，并建议改用 `--split` / `--lazy`。（在旧的默认上限下，上述 115k 实例的 SoC 只绘制最浅的 5000 个实例，38 MB，耗时 27 秒。）`--instance INSTANCE`（路径或实例 id）只读取并绘制同一构建中该实例的子树：不会重新编译，深度从 root 起算，在子树之外声明的信号（root 的端口所连接的信号）列为边界信号，不绘制。`--diff-base REF`（可再加 `--diff-head REF`）以与 `svweave query diff-impact` 相同的方式读取 git diff，只绘制被修改的 module/interface 的实例（红框）及其子树，并以其祖先作为上下文。在修改前或修改后构建均可：每个文件使用与构建快照相符的那一侧 diff。对应不到任何实例的变更（package、不在构建中的文件）只列出，不绘制。设计依据：`docs/adr/ADR-014-static-graph-export.md`。
+
+**从 git diff 到页面。** 构建就是“编译”；页面只读取 diff 触及的那一部分。两种顺序都可以：
+
+```bash
+# A. 先构建已提交的状态，再修改：对应每个文件的旧侧（old）
+svweave build --profile rtl_demo                      # -> BUILD_ID
+vi rtl/my_block.sv                                    # 你的修改，尚未提交
+svweave graph export --build BUILD_ID --diff-base HEAD
+
+# B. 先修改，再构建修改后的工作树：对应新侧（new）
+svweave build --profile rtl_demo
+svweave graph export --build BUILD_ID --diff-base HEAD
+
+# C. commit 对 commit（只读 git blob；在配置了 git filter 的环境也能用）
+svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature
+
+# D. 多个小 commit 画在同一页，每个被修改的实例标示是哪些 commit 改的
+#    （请先构建 --diff-head 那个版本）
+svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature --per-commit
+```
+
+加上 `--per-commit` 时，页面会列出 `main..my-feature` 的所有 commit；每个被修改的实例会标示改过其 module 的 commit（用 `git log -L` 追踪该 module 在 head 版本中的行，因此只删除行的 commit 也能找到），点击某个 commit 即可高亮它修改的部分。标示的单位是 module 定义：同一个 module 的两个实例会带相同的 commit。这需要 head 版本的构建；否则不加标示并给出警告。真实 SoC 示例（C906，若干子系统各被修改多次）：[evidence/c906-per-commit-example](evidence/c906-per-commit-example/README.md)。
+
+响应信封的 `data.diff` 会列出：被修改的定义及其 `instances` 与 `instances_drawn`、被修改的文件及所用的那一侧（`old`/`new`；`aligned: false` 表示近似对应，并附带警告）、不在构建中的文件，以及不属于任何 module 的变更（package、class）。加上 `--instance INSTANCE` 可只保留某个实例之下的变更（其他的计入 `outside_root`）。若 diff 触及不到任何实例（例如没有修改的工作树），这是一个答案而不是错误：退出码 0、`data.written: false`、`data.path: null`，`data.diff.nothing_to_draw` 说明原因，且不会写出页面。与 `diff-impact` 相同，在此模式下 STALE 的构建不会改变退出码；若仓库配置了 git clean/process filter，与工作树比较会被拒绝（请改用 C）；partial clone（promisor remote）也会被拒绝，因为读取它可能触发下载。
+
+**非常大的 SoC。** 页面以精简且无损的格式写出（`svweave-graph/2`：在 C906 SoC 上比原来小 8 倍），但十万级实例 SoC 的完整拓扑仍是约 40 MB、需约 10 秒才能打开的单一页面。有两种输出可把它切成每份至多 `--page-budget` 个实例的部分（默认 5000）；所有部分合起来恰好就是完整拓扑：
+
+```bash
+svweave graph export --build BUILD_ID --split   # 互相链接的多页：.svweave/exports/<name>/index.html
+svweave graph export --build BUILD_ID --lazy    # 单一页面，打开时才加载其他部分
+```
+
+放不下的子树会成为“入口节点”：它在上一层页面上是一个节点（带着自己的端口连接），可打开它那一部分（`--split`：链接到它的页面；`--lazy`：双击即在同一张图中加载）。索引页可搜索整个设计的所有实例，并打开正确的部分。在 115,562 个实例上：单一页面打开需 10.1 秒，`--split` 或 `--lazy` 的索引页约 0.55 秒，打开一条搜索结果约 1 秒（[测量证据](evidence/bench/graph-large/README.md)）。`--lazy` 的页面 CSP 允许加载同一目录的脚本（读取本地文件所必需；仅在 Chromium 验证）；`--split` 保持严格的 CSP，任何浏览器都能用。每个页面只会执行它自己的查看器脚本（CSP 写明其 sha256，没有 `'unsafe-inline'` 的脚本）。`--split` 与 `--lazy` 写出一个目录（由 `--name` 命名），并拒绝 `--max-instances` / `--max-fanout`：它们的页面合起来就是完整拓扑，要让页面变小请用 `--page-budget`（至少 100）。每页都会注明唯一的例外：通过没有任何实例声明的信号（例如 package 变量）连接位于不同页面之实例的连接不会画出。
+
+各模式的 envelope `data`（`data.mode`：单一页面为 `page`、`--split` 为 `split`、`--lazy` 为 `lazy`）：单一页面（默认、`--instance`、`--diff-base`）有 `path`、`bytes`、`sha256`、`stats`、`truncated`、`root`（`--diff-base` 时另有 `diff`）；“没有东西可画”时为 `path: null`、`written: false` 与 `diff`。`--split` / `--lazy` 写出一个目录：`path`（其 `index.html`）、`directory`、`root`，以及 `parts` 摘要：`pages`、`budget`、`largest_page`、`oversized_pages`、`bytes_total`、`largest_file_bytes`、`files`（至多 200 个名称）、`files_total`、`files_truncated`。
+
+`graph export` 的退出码：写出页面（或没有东西可画）时为 0；与 `query` 命令相同，PARTIAL 的构建为 3、STALE/HISTORICAL 为 5（页面仍会写出，并在页面上注明），除非加上 `--allow-partial` / `--allow-stale`；使用 `--diff-base` 时，STALE 不会改变退出码。`--max-instances` 截断绘图时 `pagination.truncated` 为 true。
 
 ## 在 Claude Code 和 Codex 中使用 SVWeave
 
@@ -797,7 +886,7 @@ profiles:
     library_dirs: []
     library_files: []
     library_extensions: [".v", ".sv"]
-    environment_allowlist: []          # only these variables may be expanded in paths
+    environment_allowlist: []          # variables a path may expand; each must ALSO be in policy.json
     generated_inputs: []               # must already exist; nothing is generated
     diagnostic_policy: "no_errors"
     # language_options:                # allowlisted slang knobs, part of config_id
@@ -839,7 +928,7 @@ root_mappings:
 
 外部根中的文件以 `@uvm/relative/path` 的形式寻址。使用未映射的外部根是一个 `MISSING_INPUT` 阻断项（`reason: root_unmapped`），因此在映射存在之前，`uvm_smoke` profile 一直是 BLOCKED。
 
-**受信策略。** `policy.json` 位于 `$XDG_CONFIG_HOME/svweave/workspaces/<workspace_key>/policy.json`（回退到 `~/.config`），其中 `workspace_key` 是 `sha256(realpath(dir of svweave.yaml))` 的前 16 个十六进制字符。`svweave init` 创建它，且从不覆盖它。它刻意位于仓库之外：仓库内容（以及智能体写入其中的任何东西）不得能够扩大自身的权限。仓库中的文件只能收紧策略；仓库本地的策略文件会被忽略，而位于项目树内的 `--policy` 路径为 `POLICY_DENIED`。
+**受信策略。** `policy.json` 位于 `$XDG_CONFIG_HOME/svweave/workspaces/<workspace_key>/policy.json`（回退到 `~/.config`），其中 `workspace_key` 是 `sha256(realpath(dir of svweave.yaml))` 的前 16 个十六进制字符。`svweave init` 创建它，且从不覆盖它。它刻意位于仓库之外：仓库内容（以及智能体写入其中的任何东西）不得能够扩大自身的权限。仓库中的文件只能收紧策略；仓库本地的策略文件会被忽略，而位于项目树内的 `--policy` 路径为 `POLICY_DENIED`。同一个目录也记录 SVWeave 为此工作区创建的是哪一个 `.svweave/`（`state_dir.json`：SVWeave 存放在 `.svweave/.svweave-id` 的随机 token 的 sha256，以目录的实际路径为键）：其他任何非空的 `.svweave/`（随仓库或 tarball 附带、在删除后的原位置解压、被移动或复制到其他路径）都会以 `state_dir_not_adopted` 拒绝，直到你对自己创建的状态目录运行 `svweave init --adopt-state`。
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
@@ -850,6 +939,7 @@ root_mappings:
 | `network_enabled` | `false` | 后端无网络 |
 | `editing_enabled` | `false` | 总开关；编辑还需要 `svweave.yaml` 中的 `editing.enabled` |
 | `allow_test_approvals` | `false` | 接受未经资格认定的测试令牌审批路径；只有人工编辑此文件才能设置 |
+| `environment_allowlist` | `[]` | profile 可在 filelist 路径中展开的环境变量；profile 自己的 `environment_allowlist` 只能缩小这个范围 |
 
 同一个受信目录中还保存 `approval.key`（权限 0600）、`cursor.key`、审批记录以及最近一次后端探测记录。
 
@@ -862,7 +952,7 @@ root_mappings:
 | `+incdir+a+b`、`-I DIR`、`-IDIR` | include 目录，保留顺序，绝不排序或去重 |
 | `+define+N=V+M`、`-DN=V` | 宏文本按 token 精确处理；`NAME`、`NAME=` 和 `NAME=V` 互不相同；冲突的重定义为 `INVALID_CONFIG` |
 | `-v FILE`、`-y DIR`、`+libext+.v+.sv` | 库文件、库目录、库扩展名 |
-| 路径 token 中的 `$VAR`、`${VAR}` | 仅当该变量在 `environment_allowlist` 中且已设置时，否则为 `MISSING_INPUT` |
+| 路径 token 中的 `$VAR`、`${VAR}` | 仅当该变量同时在 profile 的 `environment_allowlist` 与受信任 `policy.json` 的 `environment_allowlist` 中且已设置时可用；否则为 `MISSING_INPUT`（`env_not_allowed_by_policy` 会指出 policy 字段） |
 | `-l`、`-logfile`、`-nologo`、`-quiet`、`-q` | 仅影响输出的选项：丢弃并记录为已忽略 |
 
 | 拒绝 | 结果 |
@@ -903,7 +993,7 @@ root_mappings:
 | `svweave query search --snapshot S --query Q` | 图候选或带标记的文本回退（`--scope`、`--no-graph`） |
 | `svweave report --build B` | 由真实数据填充的状态报告；未评估的门禁会如实说明 |
 | `svweave evidence import --manifest FILE` | 导入外部证据（存储为 `EXTERNAL_DECLARED`） |
-| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--root I] [--diff-base R [--diff-head R]]` | 写出 `.svweave/exports/<name>.html`：实例层次加上端口关联连接，一个自包含页面，不提供任何服务（ADR-014）；`--root` 只绘制实例 I 的子树；`--diff-base` 只绘制 git diff 改到的实例 |
+| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R [--per-commit]]] [--split \| --lazy [--page-budget N]] [--allow-stale] [--allow-partial]` | 写出 `.svweave/exports/<name>.html`，一个自包含页面（使用 `--split`/`--lazy` 时则写出目录 `.svweave/exports/<name>/`，以 `index.html` 开始；这两者拒绝 `--max-instances`/`--max-fanout`）：实例层次加上端口关联连接，不提供任何服务（ADR-014）；`--instance` 只绘制实例 I 的子树；`--diff-base` 只绘制 git diff 改到的实例 |
 | `svweave cache gc [--no-dry-run]` | 对快照做垃圾回收；保留最近 3 个及被引用的快照；默认为试运行 |
 | `svweave debug bundle --build B [--out DIR]` | 复现包：哈希、清单、诊断摘要、脱敏路径 |
 | `svweave schema emit [--check] [--out DIR]` | 写出或校验 `schemas/*.schema.json` |
@@ -972,7 +1062,7 @@ root_mappings:
 | `UNSUPPORTED_OPTION` | slang 适配器无法遵从的选项 | 3 |
 | `PARTIAL_ANALYSIS` | 部分结果 | 3 |
 | `AMBIGUOUS_SYMBOL` | 有多个带作用域的候选 | 3 |
-| `PATH_NOT_ALLOWED` | 路径在允许的根、include/exclude 规则或符号链接目标规则之外 | 6 |
+| `PATH_NOT_ALLOWED` | 路径在允许的根、include/exclude 规则或符号链接目标规则之外 | 6；`build`/`update` 时若构建本身读取了快照之外的文件则为 3（`details.reason: dependency_leak`，outcome `BLOCKED`） |
 | `POLICY_DENIED` | 策略拒绝该操作 | 6 |
 | `APPROVAL_REQUIRED`、`APPROVAL_EXPIRED` | 缺失、伪造或已过期的审批 | 6 |
 | `WORKSPACE_UNSTABLE`、`STALE_SNAPSHOT` | 捕获期间工作区发生变化，或 `expected_snapshot_id` 不匹配 | 5 |
@@ -1070,6 +1160,7 @@ root_mappings:
 .venv/bin/python -m pytest tests/fault_injection                        # commit crash and recovery
 SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest -m integration    # real backends, skips fail
 SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest tests/acceptance  # end-to-end demo flow, docs check
+SVWEAVE_REQUIRE_BROWSER=1 .venv/bin/python -m pytest tests/browser     # viewer in Chromium (opt-in: node + Playwright)
 .venv/bin/python scripts/qualify.py                                     # release gates G0-G5
 ```
 
@@ -1077,7 +1168,7 @@ SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest tests/acceptance  # end-to
 
 **门禁。** `scripts/qualify.py` 根据实际结果计算 G0 至 G5，并写入 `.svweave/qualification/report.{json,md}`：G0 锁定文件校验、后端探测和沙箱测试；G1 清单、快照、配置和路径策略；G2 语义测试套件（真实的 pyslang 和 UVM）；G3 后端测试套件和 MCP 契约；G4 编辑安全和全部关键变异；G5 每个 P0 测试套件都没有 FAIL、BLOCKED 和 SKIP，验收测试，覆盖率至少 85% 语句和 80% 分支，文档检查，以及符合计划 22.3 预算的基准测试。由未运行步骤计算出的门禁为 `NOT_EVALUATED`，绝不是 PASS。只有当每个门禁都通过且没有未关闭的阻断项时，发布决定才是 `ACCEPTED_STATIC_PREVIEW`；否则为带原因的 `BLOCKED`。
 
-**变异测试套件（Mutation suite）。** `scripts/mutation_suite.py` 每次向仓库的一次性副本注入一个关键变异，共 29 个（M01–M29，涵盖计划 20.5 及额外的写入／工作区绑定／快照复用安全防护），并运行映射的测试；当测试因该变异而失败时，该变异即被杀死（killed）。`--only M01,M05` 可选择其中几个；缺少 patch 锚点、超时或失败 baseline 等结果是 `ERROR`，不算 killed。
+**变异测试套件（Mutation suite）。** `scripts/mutation_suite.py` 每次向仓库的一次性副本注入一个关键变异，共 45 个（M01–M45，涵盖计划 20.5 及额外的写入／工作区绑定／快照复用安全防护），并运行映射的测试；当测试因该变异而失败时，该变异即被杀死（killed）。`--only M01,M05` 可选择其中几个；缺少 patch 锚点、超时或失败 baseline 等结果是 `ERROR`，不算 killed。
 
 **基准测试。** `scripts/gen_corpus.py` 写出一个确定性的合成语料库，`scripts/benchmark.py` 记录主机、语料库和原始耗时（`evidence/bench/`），然后与计划 22.3 的预算进行比较。参考语料库为规模 1.0：约 500 个文件、100,000 行；缩小的规模会如实标注。
 
@@ -1166,6 +1257,7 @@ SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest tests/acceptance  # end-to
 | 决策记录 | `docs/adr/` |
 | 工具链 spike 事实 | `docs/m0_spike_report.md` |
 | 编码智能体规则 | `AGENTS.md` |
+| 待办与交接（2026-11-05） | `2026_1105_hand_off.md` |
 
 ## 贡献
 

@@ -23,6 +23,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from svweave.adapters.capability import (
+    CBM_ALLOWLIST,
+    CBM_CORE_FEATURES,
+    CBM_FEATURES,
+    CapabilityComparison,
+    compare_capabilities,
+)
 from svweave.adapters.codebase_memory import config as cfg
 from svweave.adapters.codebase_memory import normalize as nz
 from svweave.adapters.codebase_memory.models import (
@@ -40,15 +47,8 @@ from svweave.adapters.mcp_client import (
     ToolInfo,
     ToolResult,
 )
+from svweave.adapters.toolchain import Toolchain, sha256_file
 from svweave.domain.errors import ErrorCode, SvwError
-from svweave.orchestration.capability import (
-    CBM_ALLOWLIST,
-    CBM_CORE_FEATURES,
-    CBM_FEATURES,
-    CapabilityComparison,
-    compare_capabilities,
-)
-from svweave.orchestration.toolchain import Toolchain, sha256_file
 from svweave.security.redaction import Redactor
 from svweave.security.sandbox import IsolationMode, SandboxRunner, SandboxSpec
 

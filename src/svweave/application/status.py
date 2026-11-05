@@ -9,14 +9,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from svweave.application.build import DB_FILENAME
 from svweave.application.semantic_common import freshness_of
 from svweave.application.session import Session, load_probe
 from svweave.domain.envelope import AnalysisCoverage, Envelope, Outcome
 from svweave.domain.states import TERMINAL_TRANSACTION_STATES, Completeness, Freshness
 from svweave.orchestration.registry import BACKEND_NAMES, CBM
 from svweave.security.sandbox import probe_host
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 
 CLIENT_BOUNDARY_MESSAGE = (
     "client boundary not qualified: SVWeave only controls operations that pass through its "

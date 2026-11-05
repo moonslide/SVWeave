@@ -47,11 +47,9 @@ from svweave.manifest.models import NormalizedManifest
 from svweave.manifest.resolver import resolve_profile, write_manifest
 from svweave.snapshot.capture import capture_snapshot, snapshots_dir
 from svweave.snapshot.models import SnapshotRecord
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 from svweave.storage.lock import WorkspaceBusy, build_lock, workspace_lock
 from svweave.storage.semantic import dumps
-
-DB_FILENAME = "svweave.db"
 
 # ---------------------------------------------------------------------------- job registry
 _REGISTRY: dict[str, WorkerHandle] = {}
@@ -173,14 +171,14 @@ def run_build(
     (exclusive non-blocking build lock, shared by the CLI and the MCP job manager). With
     ``expected_snapshot_id`` the build stops with STALE_SNAPSHOT when the captured snapshot differs.
     ``test_fault`` is a TEST-ONLY hook that is never read from configuration."""
-    return _run_build_with_capture(
+    return run_build_with_capture(
         opts, profile, request_id, reuse=reuse, handle=handle, on_job=on_job,
         test_fault=test_fault, job_id=job_id, expected_snapshot_id=expected_snapshot_id,
         expected_execution_fingerprint=expected_execution_fingerprint,
     )
 
 
-def _run_build_with_capture(
+def run_build_with_capture(
     opts: WorkspaceOptions,
     profile: str | None,
     request_id: str,
@@ -545,6 +543,7 @@ def _run_job(
         result, rec, build_id, job_id, list(nm.top_modules), stubs=nm.stubs,
         extra_gaps=gaps_extra,
     )
+    _record_isolation(ing, outcome)
     if had_complete:
         return _verified_rerun(ctx, db, run, request_id, build_id, ing, outcome)
     if gaps_extra:
@@ -588,6 +587,22 @@ def _run_job(
     _surface_isolation(env, outcome)
     run.write("result.json", env.model_dump(mode="json"))
     return env
+
+
+DEGRADED_WORKER_NOTE = (
+    "the HDL worker that produced this build ran WITHOUT bwrap isolation (mode {mode}, "
+    "SVWEAVE_ALLOW_DEGRADED_WORKER): no network/filesystem confinement was in force; the result "
+    "is not a qualified sandboxed analysis"
+)
+
+
+def _record_isolation(ing: Any, outcome: WorkerOutcome) -> None:
+    """Persist the worker isolation with the build (stats + a standing limitation), so every
+    later query of it, and a reuse of it, still says how it was produced; not only the one
+    envelope of the build call."""
+    ing.summary["worker_isolation"] = outcome.isolation
+    if outcome.isolation != "bwrap":
+        ing.limitations.insert(0, DEGRADED_WORKER_NOTE.format(mode=outcome.isolation))
 
 
 def _surface_isolation(env: Envelope, outcome: WorkerOutcome) -> Envelope:
@@ -808,9 +823,14 @@ def _blocked(
                 "unresolved_count": 0,
                 "dynamic_count": 0,
                 "reasons": dumps(reasons),
-                "limitations": dumps(["Results withheld: dependency leak."]),
+                # the stored verdict says how it was produced too (not only this envelope)
+                "limitations": dumps(
+                    ([DEGRADED_WORKER_NOTE.format(mode=outcome.isolation)]
+                     if outcome.isolation != "bwrap" else [])
+                    + ["Results withheld: dependency leak."]),
                 "stats": dumps(
-                    {**result["stats"], "semantic_deviations": list(nm.semantic_deviations)}
+                    {**result["stats"], "semantic_deviations": list(nm.semantic_deviations),
+                     "worker_isolation": outcome.isolation}
                 ),
                 "dependency_report": dumps(dep),
                 "source_map": dumps(source_map),
@@ -848,7 +868,8 @@ def _blocked(
             code=ErrorCode.PATH_NOT_ALLOWED.value,
             message="the build read files outside the snapshot inventory; "
             "analysis is BLOCKED and was not published",
-            details={"violations": dep["violations"]},
+            # exit 3 like every BLOCKED build, not 6: the reason says why (interface finding 5)
+            details={"reason": "dependency_leak", "violations": dep["violations"]},
         ),
     )
     _surface_isolation(env, outcome)

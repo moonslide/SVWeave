@@ -105,7 +105,12 @@ jobs:
             exit "$probe_status"
           fi
       - name: Unit tests
-        run: .venv/bin/python -m pytest tests/unit -q --no-cov
+        # the viewer's JavaScript checks need node (preinstalled on the runner): never a skip
+        env:
+          SVWEAVE_REQUIRE_NODE: "1"
+        run: |
+          node --version
+          .venv/bin/python -m pytest tests/unit -q --no-cov
       - name: Contract tests
         run: .venv/bin/python -m pytest tests/contract -q --no-cov
       - name: Paired snapshot I/O benchmark (correctness gate, no speed threshold)

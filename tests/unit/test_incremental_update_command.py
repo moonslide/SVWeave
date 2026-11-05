@@ -244,7 +244,7 @@ def test_UPD_10_capture_strategy_still_checks_expected_snapshot_before_semantics
 ) -> None:
     opts = configure(ws)
     with pytest.raises(SvwError) as err:
-        build._run_build_with_capture(
+        build.run_build_with_capture(
             opts, "p", "expected", expected_snapshot_id="f" * 64,
             capture=lambda ctx, nm: update.capture_snapshot_incremental(ctx, nm)[0],
         )

@@ -10,10 +10,8 @@ from svweave.domain.ids import is_sha256_hex
 from svweave.domain.states import Completeness, Freshness
 from svweave.manifest.resolver import resolve_profile, write_manifest
 from svweave.snapshot.capture import capture_snapshot, check_freshness, load_record, snapshots_dir
-from svweave.storage.db import Database, run_gc
+from svweave.storage.db import DB_FILENAME, Database, run_gc
 from svweave.storage.lock import workspace_lock
-
-DB_FILENAME = "svweave.db"
 
 
 def _coverage(scope: str, basis: str) -> AnalysisCoverage:

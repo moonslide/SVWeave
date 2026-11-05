@@ -75,7 +75,10 @@ files = ["src/svweave"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --cov=svweave --cov-report=term-missing:skip-covered"
-markers = ["integration: uses the real pinned backends (pyslang worker, UVM library, ...)"]
+markers = [
+    "integration: uses the real pinned backends (pyslang worker, UVM library, ...)",
+    "browser: drives the graph viewer in Chromium (Playwright; not in the lock, opt-in suite)",
+]
 
 [tool.coverage.run]
 source = ["svweave"]

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 from svweave.application.graph_template import dumps_safe, render_html
+from tests.node_support import node_or_skip
 
 HOSTILE = '</script><script>alert(1)</script><!-- &     "quote" \\'
 
@@ -29,6 +31,14 @@ def test_GRF_U02_page_has_one_data_block_a_strict_csp_and_no_network_or_html_sin
         assert sink not in script, sink
     assert not re.search(r'(?:src|href)\s*=\s*["\']?(?:https?:)?//', page)  # no external resource
     assert "@@SVWEAVE_GRAPH_DATA@@" not in page
+    # council review 2: every script element / src / href the viewer creates is behind a guard
+    lines = script.splitlines()
+    for i, ln in enumerate(lines):
+        if 'createElement("script")' in ln or ".src = " in ln:
+            guard = "\n".join(lines[max(0, i - 6):i + 1])
+            assert "safeChunk(" in guard, ln
+        if ".href = " in ln and not ln.rstrip().endswith('.href = "#";'):
+            assert "safeHref(" in "\n".join(lines[max(0, i - 3):i + 1]), ln
 
 
 def test_GRF_U03_subtree_root_and_boundary_text_are_data() -> None:
@@ -53,3 +63,41 @@ def test_GRF_U04_diff_view_text_is_data_and_marks_are_rendered() -> None:
     assert page.count("</script>") == 2 and "<script>alert" not in page
     script = page.split("<script>")[1]
     assert "function changes()" in script and ".node.changed rect" in page and "innerHTML" not in script
+
+
+def test_GRF_U05_the_viewer_script_parses_as_javascript(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """The template is a Python string: an escape like "\\n" in the JS silently becomes a real
+    newline and breaks every page (it happened once, unseen by the substring checks above). Parse
+    the rendered script with node's own parser."""
+    import subprocess
+
+
+    node = node_or_skip("parse the viewer script")
+    page = render_html({"nodes": [], "edges": [], "hubs": [], "meta": {}})
+    script = page.split("<script>")[1].split("</script>")[0]
+    f = tmp_path / "viewer.js"
+    f.write_text(script)
+    r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-800:]
+
+
+def test_GRF_U06_the_viewer_is_a_javascript_file_and_its_optional_keys_come_from_the_codec(
+        tmp_path: Path) -> None:
+    """Second council review (architecture 3/4): the viewer lived in a non-raw Python string
+    (escapes doubled by hand, not lintable) and its optional node keys were a second copy."""
+    import json as _json
+    import subprocess
+
+    from svweave.application import graph_template as gt
+    from svweave.application.graph_codec import OPTIONAL_KEYS
+
+    js = (Path(gt.__file__).parent / "graph_viewer.js").read_text()
+    assert js.count("@@SVWEAVE_OPTIONAL_KEYS@@") == 1
+    filled = js.replace("@@SVWEAVE_OPTIONAL_KEYS@@", _json.dumps(list(OPTIONAL_KEYS)))
+    assert f"<script>{filled}</script>" in gt._PAGE  # exactly the file is inlined (and hashed)
+    assert '"use strict";' not in Path(gt.__file__).read_text()  # no JavaScript left in Python
+    node = node_or_skip("parse the viewer file")
+    f = tmp_path / "viewer.js"
+    f.write_text(filled)
+    r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True, check=False)
+    assert r.returncode == 0, r.stderr[-800:]

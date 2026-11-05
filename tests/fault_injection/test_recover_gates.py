@@ -112,3 +112,141 @@ def test_a3_roll_forward_still_works_with_all_gates_green(ws: EditWs) -> None:
     crash(ws, tid, h)
     r = roll(ws, tid)
     assert r.data["recovery"]["block_cleared"] and b"4'd2;" in ws.read("rtl/top.sv")
+
+
+def test_a3_a_foreign_change_behind_twenty_own_changes_is_still_refused(
+    ws: EditWs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Council review: the gate used to look only at the first 20 changes (a display cut). With
+    more than 20 of the transaction's own applied files listed first (max_files_per_patch has no
+    upper bound), a foreign dependency edit further down was never seen and roll-forward wrote."""
+    tid, h, _ = two_file_txn(ws)
+    crash(ws, tid, h)  # one file of the transaction is already at its after-hash
+    (ws.root / "rtl/defs.svh").write_text("`define BUMP 7\n")  # a foreign dependency edit
+    real = E.check_freshness
+
+    def many_own_first(ctx: Any, rec: Any) -> Any:
+        res = real(ctx, rec)
+        own = [c for c in res.changed if c.change == "modified" and c.path != "rtl/defs.svh"]
+        assert own, "setup: the crashed transaction's own applied file must be listed"
+        res.changed = own * 25 + [c for c in res.changed if c not in own]
+        return res
+
+    monkeypatch.setattr(E, "check_freshness", many_own_first)
+    e = refused(ws, tid)
+    assert e.code is ErrorCode.EDIT_CONFLICT and e.details["reason"] == "workspace_changed"
+    assert [c["path"] for c in e.details["changed"]] == ["rtl/defs.svh"]
+
+
+def test_a3_roll_forward_of_a_journal_for_another_patch_is_refused(ws: EditWs) -> None:
+    """First council review (test-evidence finding 6): the journal_patch_mismatch gate had no
+    negative test; the journal must describe exactly the approved patch."""
+    import json
+    import os
+
+    tid, h, _ = two_file_txn(ws)
+    crash(ws, tid, h)
+    jp = ws.root / ".svweave" / "journal" / f"{tid}.json"
+    j = json.loads(jp.read_text())
+    j["patch_hash"] = "e" * 64  # a journal that belongs to another patch
+    os.chmod(jp, 0o600)
+    jp.write_text(json.dumps(j, indent=2, sort_keys=True) + "\n")
+    e = refused(ws, tid)
+    assert e.code is ErrorCode.APPROVAL_REQUIRED and e.details["reason"] == "journal_patch_mismatch"
+
+
+# ---------------------------------------------------------------- rollback (third council review)
+def back(ws: EditWs, tid: str) -> Any:
+    return E.recover(ws.opts, "r", transaction_id=tid, mode="rollback")
+
+
+def refused_back(ws: EditWs, tid: str) -> SvwError:
+    pkg = ws.read("rtl/pkg.sv")
+    with pytest.raises(SvwError) as ei:
+        back(ws, tid)
+    assert ws.read("rtl/pkg.sv") == pkg, "rollback wrote a file although a gate refused"
+    return ei.value
+
+
+def _edit_journal(ws: EditWs, tid: str, **over: Any) -> None:
+    import json
+    import os
+
+    jp = ws.root / ".svweave" / "journal" / f"{tid}.json"
+    j = json.loads(jp.read_text())
+    j.update(over)
+    os.chmod(jp, 0o600)
+    jp.write_text(json.dumps(j, indent=2, sort_keys=True) + "\n")
+
+
+def test_rb_rollback_without_a_valid_approval_is_refused(ws: EditWs) -> None:
+    """Third council review M1: rollback writes the base bytes into the original source, so it
+    needs what roll-forward needs; it used to need nothing but the journal in .svweave/."""
+    tid, h, _ = two_file_txn(ws)
+    crash(ws, tid, h)  # rtl/pkg.sv is already at its after-hash
+    (ws.trusted() / "approvals" / f"{tid}.json").unlink()
+    e = refused_back(ws, tid)
+    assert e.code is ErrorCode.APPROVAL_REQUIRED and e.details["reason"] == "approval_missing"
+    assert state(ws, tid) == "RECOVERY_REQUIRED"
+
+
+def test_rb_rollback_with_editing_disabled_is_refused(ws: EditWs) -> None:
+    tid, h, _ = two_file_txn(ws)
+    crash(ws, tid, h)
+    p = ws.root / "svweave.yaml"
+    m = yaml.safe_load(p.read_text())
+    m["editing"]["enabled"] = False
+    p.write_text(yaml.safe_dump(m, sort_keys=False))
+    e = refused_back(ws, tid)
+    assert e.code is ErrorCode.POLICY_DENIED and e.details["reason"] == "editing_disabled"
+
+
+def test_rb_rollback_of_a_journal_for_another_base_or_patch_is_refused(ws: EditWs) -> None:
+    tid, h, _ = two_file_txn(ws)
+    crash(ws, tid, h)
+    _edit_journal(ws, tid, base_snapshot_id="../../../../elsewhere")  # unvalidated path part
+    e = refused_back(ws, tid)
+    assert e.code is ErrorCode.APPROVAL_REQUIRED and e.details["reason"] == "journal_patch_mismatch"
+    _edit_journal(ws, tid, base_snapshot_id="f" * 64)  # well-formed, another snapshot
+    e = refused_back(ws, tid)
+    assert e.details["reason"] == "journal_patch_mismatch"
+
+
+def test_rb_rollback_of_a_journal_naming_an_unapproved_file_is_refused(ws: EditWs) -> None:
+    tid, h, _ = two_file_txn(ws)
+    crash(ws, tid, h)
+    import json
+
+    jp = ws.root / ".svweave" / "journal" / f"{tid}.json"
+    files = json.loads(jp.read_text())["files"]
+    from svweave.domain.ids import sha256_hex
+
+    defs = ws.read("rtl/defs.svh")
+    # not part of the approved patch, listed as "applied" (its after-hash is what is on disk)
+    files.append({**files[0], "logical_path": "rtl/defs.svh", "after_sha256": sha256_hex(defs)})
+    _edit_journal(ws, tid, files=files)
+    e = refused_back(ws, tid)
+    assert ws.read("rtl/defs.svh") == defs
+    assert e.code is ErrorCode.APPROVAL_REQUIRED
+    assert e.details["reason"] == "journal_files_not_approved"
+
+
+def test_rb_rollback_takes_the_base_bytes_from_the_validated_snapshot_only(ws: EditWs) -> None:
+    """A linked directory on the way to a base file (whose bytes still have the right hash) is
+    not followed: the snapshot tree is read with no link in any component."""
+    import os
+    import shutil
+
+    tid, h, base = two_file_txn(ws)
+    crash(ws, tid, h)
+    sdir = ws.root / ".svweave" / "snapshots" / base.snapshot_id / "files"
+    rtl = next(p for p in sdir.rglob("pkg.sv")).parent
+    kept = ws.root.parent / "kept-rtl"
+    shutil.copytree(rtl, kept)
+    for d in (rtl.parent, rtl, *rtl.rglob("*")):
+        os.chmod(d, 0o700)
+    shutil.rmtree(rtl)
+    rtl.symlink_to(kept, target_is_directory=True)
+    e = refused_back(ws, tid)
+    assert e.code is ErrorCode.MISSING_INPUT and e.details["reason"] == "base_missing"
+    assert state(ws, tid) == "RECOVERY_REQUIRED"

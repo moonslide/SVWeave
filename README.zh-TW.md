@@ -47,7 +47,7 @@
 | 對模組、連接埠、訊號或實例的變更會觸及哪些地方 | `svweave query impact` | `svw_impact` | 該建置的實例樹與已解析的參照 |
 | 一份 git diff 會觸及哪些地方 | `svweave query diff-impact` | `svw_diff_impact` | 對應到該建置快照上的 `git diff` |
 | 重新命名會做出的每一處編輯，以及阻擋因素 | `svweave query rename-preview` | `svw_rename_preview` | 已解析的參照，加上經驗證的詞法掃描（唯讀） |
-| 可瀏覽的階層及其連線圖譜 | `svweave graph export` | （僅限 CLI） | 該建置，寫成單一靜態 HTML 檔 |
+| 可瀏覽的階層及其連線圖譜；也可只畫一個子樹（`--instance`）或只畫 git diff 改到的部分（`--diff-base`） | `svweave graph export` | （僅限 CLI） | 該建置，寫成單一靜態 HTML 檔 |
 | 安全地修改程式碼 | `svweave edit ...` | `svw_edit`（無法核准） | 候選副本、slang 驗證、人工核准、compare-and-set |
 | 狀態、證據、報告 | `svweave doctor`, `svweave query evidence`, `svweave report` | `svw_status`, `svw_evidence` | 已記錄的執行；EDA、模擬與形式驗證維持 `NOT_RUN` |
 
@@ -60,6 +60,53 @@
 *用戶端只與一個閘道溝通。閘道掌管政策、工作、來源追溯與錯誤對應，並透過轉接器驅動三個後端。每個後端都在關閉網路的 `bwrap` 沙箱中執行，且沒有原始碼的可寫掛載（甚至完全沒有掛載）；pyslang worker 同樣處於沙箱內。後端讀取不可變的快照，或把內容寫入 `.svweave/` 之下的候選副本。受信任目錄（政策、核准 HMAC 金鑰、游標金鑰）位於儲存庫之外。使用者的原始碼工作區只能透過唯一一條路徑存取：編輯協調器經核准的 compare-and-set 寫入（TB4）。虛線為信任邊界 TB1 至 TB4。*
 
 ## 狀態
+
+**待辦與交接（2026-11-05）：** [2026_1105_hand_off.md](2026_1105_hand_off.md) 依建議順序列出所有尚未處理的項目：需要專案負責人決定的事（`--lazy` CSP 核准的可驗證紀錄、PR 與合併、`AGENTS.md` 的修改、舊格式狀態紀錄、`init` 的新行為），接著是安全與正確性、架構與文件、測試證據，並說明怎麼驗證與注意事項。專案仍是 developer preview、UNQUALIFIED：這個分支上沒有跑過 `scripts/qualify.py`。
+
+### 兩次審查的後續處理與第三次 Council review（2026-11-05）
+
+前兩次審查留下的所有項目都已處理，並依專案負責人 2026-11-05 的決定進行：核准 `--lazy` 的 CSP 放寬（ADR-014）；SVWeave 只信任它自己建立或由人認領的 `.svweave/`（**破壞性變更：** 每個既有工作區請執行一次 `svweave init --adopt-state`）；第一次審查的遺留項目也一併處理。內容包括修正（共用建置的發布、候選快照在鎖內建立、request key 驗證、寫入外部根目錄時不跟隨連結、用法錯誤也輸出 envelope、doctor 結束碼、qualify 關卡）、新測試與 mutation M32–M40，以及不改變行為的重構（公開的查詢核心、單一 git runner、寫入安全程式碼移到 `editing/`、圖譜匯出拆分、檢視器改為 JavaScript 檔、`docs/architecture.md`）。在 `de0e6fe` 驗證（run5，一個 4 CPU 雲端 session，不是 CI，`SVWEAVE_REQUIRE_BACKENDS=1`）：unit + contract 1793 通過，4 個 BLOCKED 與之前相同；fault injection 21、integration 240、acceptance 12、browser 1 通過；mutation **40/40 KILLED**。第一次執行（run4）抓到一個測試 helper 的回歸，紀錄保留。細節：[evidence/council-review-followup-2026-11-05](evidence/council-review-followup-2026-11-05/README.md)。
+
+接著針對該狀態（`41e99df`）做的第三次六位專家審查發現了新問題；其中高嚴重度與已確認的中嚴重度項目現在都**已修正**，各有測試：
+- 強化過的 git runner 停用儲存庫 hook，且不再刷新 index（對連同 `.git/` 一起交付的儲存庫，`svw_diff_impact` 原本可能執行其 `.git/hooks/post-index-change`；修正前先重現）；
+- `svweave init --adopt-state` 認領的是每個指令使用的 `.svweave/`（`<project.root>/.svweave`）；狀態紀錄改為 `.svweave/` 內的隨機 token（不再比對 device/inode），登記過程加鎖序列化，群組或其他人可寫入的狀態目錄會被拒絕；
+- 沒有通過驗證的工作區時，`doctor` 的 probe 狀態不會寫進專案；
+- `edit recover --rollback` 與 roll-forward 有相同的關卡，並從驗證過的 base snapshot 讀取原始位元組，不跟隨連結；
+- `schema emit` 發生錯誤時結束碼不為 0，`git status` 失敗時 qualify 關卡會擋下，MCP launcher 會印出 `--adopt-state` 提示。
+
+新增 mutation M41–M45。在 `aaecbee` 驗證（run7，一個 4 CPU 雲端 session，不是 CI，`SVWEAVE_REQUIRE_BACKENDS=1`）：unit + contract 1804 通過，4 個 BLOCKED 與之前相同；fault injection 26、integration 240、acceptance 12、browser 1 通過；mutation **45/45 KILLED**。前一次執行（run6）抓到一個過時的測試假設，紀錄保留。仍未處理：專案負責人對 `--lazy` CSP 核准的可驗證紀錄（H4）、儲存庫寫進已登記 `.svweave/` 的檔案（M1 的內容部分），以及架構／文件項目。細節：[evidence/council-review-3-2026-11-05](evidence/council-review-3-2026-11-05/README.md)。這不是 `scripts/qualify.py` 的資格認定執行。
+
+### 第二次 Council review：修正與已驗證的執行（2026-11-04）
+
+第二次六位專家審查（針對之後的程式碼：大型 SoC 頁面、`--per-commit`、預設完整拓撲）發現兩個 **High** 問題，皆已先重現再修正：`graph export --per-commit` 執行的 `git log` 在儲存庫設定 `log.showSignature` 時，會為已簽章的 commit 執行儲存庫指定的 `gpg.program`；以及儲存庫附帶的 `.svweave/` 可以放一個 `files` 為符號連結（例如指向 `$HOME`）的快照，文字搜尋會走訪它，且 `snapshot.json` 會被原樣信任。另外也修正了：圖譜頁面只執行自己的檢視器腳本（以 hash 指定）；`--split`/`--lazy` 拒絕每頁上限，且不再在單一頁面上宣稱完整；沙箱綁定 `$HOME` 的上層目錄；以及正確性與介面缺陷。每個修正都有在舊程式碼上會失敗的測試（新增 mutation M31）。
+
+在 `4491a54`、於一個 4 CPU 的雲端 session 中驗證（不是 CI），`SVWEAVE_REQUIRE_BACKENDS=1`：unit + contract 1752 通過、0 失敗、4 個 BLOCKED（與之前相同的四個，該主機無法執行）；fault injection 20、integration 233（0 skipped）、acceptance 12 通過；關鍵 mutation **31/31 KILLED**。這是第一個涵蓋 `--per-commit`、精簡頁面格式、`--split` 與 `--lazy` 的已記錄執行。細節、指令、JUnit 檔與尚未處理的項目（其中一項需要專案負責人決定）：[evidence/council-review-2-2026-11-04](evidence/council-review-2-2026-11-04/README.md)。這不是 `scripts/qualify.py` 的資格認定執行。
+
+### Council review 修正與已驗證的執行（2026-11-04）
+
+六位專家對整個程式碼庫進行審查，發現了包括一個 **High** 在內的多個問題：diff-impact 執行 git 時會套用儲存庫自己的設定，因此當 partial clone 的設定指定了 `remote.<x>.uploadpack`，`svw_diff_impact`（或 `graph export --diff-base`）在讀取缺少的 blob 時，就會在主機上執行該指令。這已修正（不讀取使用者／系統設定、禁止任何傳輸協定、拒絕 partial clone、逾時確實生效），同時修正的還有：透過 `svweave.yaml` 洩漏環境變數秘密（**不相容變更：** filelist 中的 `$VAR` 現在也必須列在可信的 `policy.json` 的 `environment_allowlist` 中）、只檢查 20 筆變更的 roll-forward 關卡（新增 mutation M30）、沒有 sandbox 的 build 不留紀錄、rename 行數被減半，以及數個介面缺陷。每一項都先重現過；每個修正都有一個在舊程式碼上會失敗的測試。
+
+在 `a3777ff`、於一個 4 CPU 的雲端 session 中驗證（不是 CI），`SVWEAVE_REQUIRE_BACKENDS=1`：unit + contract 1737 通過、0 失敗、4 個 BLOCKED（該主機無法執行）；fault injection 20、整合測試 219（0 skip）、acceptance 12 全數通過；關鍵 mutation **30/30 KILLED**。第一次執行曾抓到這些修正中的一個回歸，該紀錄也一併保留。細節、指令、JUnit 檔案以及未修正的項目：[evidence/council-review-2026-11-04](evidence/council-review-2026-11-04/README.md)。這不是 `scripts/qualify.py` 的資格認定執行。
+
+### 圖譜子樹與 git diff 檢視（2026-11-04）
+
+`svweave graph export` 現在可以只畫出建置的一部分，而不必重新編譯：
+
+- `--instance INSTANCE`：只畫一個實例及其子孫，只從建置中讀出這些資料列。
+- `--diff-base REF [--diff-head REF]`：只畫 `git diff` 改到的 module/interface 的實例（紅框），連同其子樹，以及連接它們的祖先（虛線框，作為脈絡）。在修改前或修改後建置皆可；每個檔案會對應與建置快照相符的那一側 diff。
+
+在分支 `claude/partial-compile-html-1eyxxd` 的 `c641509`、於一個 4 CPU 的雲端 session 中驗證（不是 CI 執行）：unit + contract **1731 通過、0 失敗**；在 `SVWEAVE_REQUIRE_BACKENDS=1` 下以真實的 pyslang、codebase-memory-mcp、Serena 與 UVM 執行整合測試 **214 通過、0 skip**。該次執行沒有保留任何檔案；之後程式碼的已記錄執行，是上面的 council review 執行。新測試使用手寫 RTL `fixtures/language/grf_subtree`，並以完整頁面逐一核對每個子樹頁面，以及 diff 頁面中被改到的實例。
+
+以 `scripts/benchmark_graph_subtree.py` 在該主機上量測，41,090 個實例，CLI 實際耗時（[量測證據](evidence/bench/graph-subtree/README.md)）：
+
+| 頁面 | 畫出的實例 | 時間 | 大小 |
+|---|---:|---:|---:|
+| 整個建置 | 41,090 | 14.6 s | 77.6 MB |
+| `--instance` 一個 cluster | 642 | 1.70 s | 1.2 MB |
+| `--diff-base`，改到一個有 65 個實例的 module | 130 | 1.63 s | 0.2 MB |
+| `--diff-base`，改到一個有 8,192 個實例的 module | 41,025 | 15.7 s | 78.2 MB |
+
+改動越集中，省下越多：若改到的 module 幾乎到處都有實例，就幾乎要畫出全部，而且比完整匯出還慢。在 90 個實例的設計上，各種模式的時間都是 Python 啟動時間（約 1.5 s）。這是單一主機上的單一合成設計：不是計畫 22.3 的參考語料，也不構成任何資格認定。
 
 ### 快照 I/O 更新驗證（2026-10-29）
 
@@ -169,7 +216,7 @@ Slurm 22.05.9 與 MUNGE 0.5.18 已安裝於儲存庫外，但 MUNGE Unix stream 
 
 **開發者預覽版 v0.1.0-dev。UNQUALIFIED**，除非資格認定報告（`.svweave/qualification/report.json`，由 `scripts/qualify.py` 產生，證據位於 `evidence/` 之下）顯示 `ACCEPTED_STATIC_PREVIEW`。工具的「靜態預覽」狀態絕不代表模擬、形式驗證或 EDA 結果：除非你自行匯入證據，否則 `eda_compile`、`simulation` 與 `formal` 皆為 `NOT_RUN`，而匯入的證據是 `EXTERNAL_DECLARED`，SVWeave 永遠不會加以驗證。在依賴任何結果之前，請先閱讀 `docs/limitations.md`。
 
-**最近一次完整測試執行（2026-10-20，Linux x86_64，僅限這部主機）：** 以文件所述的離線程序（`vendor/`，含 Serena）安裝的全新副本，並以 `SVWEAVE_REQUIRE_BACKENDS=1` 執行：**1066 個通過、1 個略過、0 個失敗**；`ruff`、`mypy` 與 `svweave schema emit --check` 皆無問題。它涵蓋影響範圍、diff 影響、重新命名預覽與圖譜匯出工具，以及 2026-10-19/20 審查的修正（見 `CHANGELOG.md`）。
+**最近一次完整測試執行（2026-10-20，Linux x86_64，僅限這部主機；未留存紀錄：沒有保留 JUnit、日誌或 lock hash，因此不是 AGENTS 規則 12 意義上的證據）：** 以文件所述的離線程序（`vendor/`，含 Serena）安裝的全新副本，並以 `SVWEAVE_REQUIRE_BACKENDS=1` 執行：**1066 個通過、1 個略過、0 個失敗**；`ruff`、`mypy` 與 `svweave schema emit --check` 皆無問題。它涵蓋影響範圍、diff 影響、重新命名預覽與圖譜匯出工具，以及 2026-10-19/20 審查的修正（見 `CHANGELOG.md`）。
 
 **最近一次記錄的資格認定執行（2026-10-14，git HEAD `b6ba45c` 加上未提交的變更；加入上述工具之後尚未重新執行）：**
 
@@ -184,7 +231,7 @@ Slurm 22.05.9 與 MUNGE 0.5.18 已安裝於儲存庫外，但 MUNGE Unix stream 
 
 G0 不是單純的 PASS，因為 codebase-memory-mcp 與 Serena 的探測結果為 `DEGRADED`（在宣告的子集合之內），且擁有者尚未簽署豁免。證據副本位於 `evidence/qualification/`。這是單次執行的快照，不是常態性的宣稱；請重新執行 `scripts/qualify.py` 以取得你的程式碼樹的狀態。
 
-**在真實 SoC 上試用**（2026-10-20，不屬於測試套件）：一個以 Arm SSE-315 為基礎、共 3835 個 HDL 檔案（135 MiB）的設計，在 606 s 內完成建置（worker 尖峰 11 GB），得到 115,552 個實例與 605,874 個連接埠關聯；結果如實為 `PARTIAL`（閘級 PHY 模型中的編譯錯誤、未解析的參照、6637 個空的模組本體）。這次執行找出並修正了 `CHANGELOG.md` 中列出的實例陣列 id 衝突與過大的回應封包問題。
+**在真實 SoC 上試用**（2026-10-20，不屬於測試套件；單一主機上的一次性觀察，未保留證據檔，不是效能宣稱）：一個以 Arm SSE-315 為基礎、共 3835 個 HDL 檔案（135 MiB）的設計，在 606 s 內完成建置（worker 尖峰 11 GB），得到 115,552 個實例與 605,874 個連接埠關聯；結果如實為 `PARTIAL`（閘級 PHY 模型中的編譯錯誤、未解析的參照、6637 個空的模組本體）。這次執行找出並修正了 `CHANGELOG.md` 中列出的實例陣列 id 衝突與過大的回應封包問題。
 
 | 後端（於 `toolchain.lock.json` 中固定版本） | 角色 |
 |---|---|
@@ -321,7 +368,7 @@ svweave doctor --probe             # starts each backend once with a real fixtur
 svweave build --profile rtl_demo   # the shipped demo: exit 0
 ```
 
-預期結果：`svweave doctor` 以結束碼 0 結束，`outcome` 為 `OK`；`client_boundary` 永遠是 `WARN`（`not qualified`，見 `docs/security.md` 第 4 節），而隨附的 `svweave.yaml` 在你對應該外部根目錄之前會給出 `root_mapping:uvm` `WARN`。任何 `FAIL` 都會使結束碼為 4、`outcome` 為 `ERROR`；只有在略過 Serena（`--skip-serena`）時，`backend:serena_exe FAIL` 才是預期的。`svweave build --profile rtl_demo` 以結束碼 0 結束，帶有 `"completeness": "COMPLETE"`、`"diagnostic_outcome": "NO_ERRORS"` 與 `"published": true`，並印出可用於[快速入門](#快速入門)查詢的 `build_id` 與 `snapshot_id`；完整輸出見[實例演練：隨附的示範](#實例演練隨附的示範)。
+預期結果：`svweave doctor` 以結束碼 0 結束，`outcome` 為 `OK`；`client_boundary` 永遠是 `WARN`（`not qualified`，見 `docs/security.md` 第 4 節），而隨附的 `svweave.yaml` 在你對應該外部根目錄之前會給出 `root_mapping:uvm` `WARN`。任何 `FAIL` 都會使 `outcome` 為 `ERROR`，結束碼取自最根本的失敗檢查（與檢查順序無關）：設定 2、政策 6、缺少輸入或根目錄對應 3、後端 4（`error.details.failed_checks` 列出所有失敗的檢查）；只有在略過 Serena（`--skip-serena`）時，`backend:serena_exe FAIL`（結束碼 4）才是預期的。`svweave build --profile rtl_demo` 以結束碼 0 結束，帶有 `"completeness": "COMPLETE"`、`"diagnostic_outcome": "NO_ERRORS"` 與 `"published": true`，並印出可用於[快速入門](#快速入門)查詢的 `build_id` 與 `snapshot_id`；完整輸出見[實例演練：隨附的示範](#實例演練隨附的示範)。
 
 ### 從較早的安裝升級
 
@@ -329,6 +376,8 @@ svweave build --profile rtl_demo   # the shipped demo: exit 0
 
 * 由 build backend 尚未鎖定之前（2026-10-20 之前）的安裝程式所填入的 uv 快取，可能含有以未鎖定 backend 建置的 `proxy-tools` 或 `serena-agent` wheel，而 uv 會重用這類已建置的 wheel。升級後請刪除 `.toolchain/state/uv-cache`（或你的 `--uv-cache-dir`）一次。在 `vendor/` 路徑上，之後請重新解壓縮 `vendor/uv-cache.tar.gz`：它已用鎖定的 backend 與鎖定版本的 uv 重新產生（由其他 uv 版本寫入的快取使用不同的快取 bucket，離線時無法使用）。
 * 文件所述的流程不再以 `uv venv` 開頭；先前以該方式建立的 `.venv` 會被保留，並由 `--create-venv` 重用。
+* 自 2026-11-05 起，SVWeave 只信任它記錄過的 `.svweave/`（破壞性變更）：請在每個既有工作區對你自己建立的狀態目錄執行一次 `svweave init --adopt-state`（否則第一個指令會以 `state_dir_not_adopted` 拒絕）。`svweave-mcp` 也會在 stderr 印出同樣的提示。`init` 認領的是 `<project.root>/.svweave`，也就是每個指令使用的目錄。由 2026-11-05 第一版記錄過的工作區會自動重新記錄。群組或其他人可寫入的狀態目錄也會被拒絕（`chmod go-w .svweave`）。
+* 會展開 `$VAR` 的 filelist，也需要該變數出現在受信任 policy 的 `environment_allowlist` 中（2026-11-04，破壞性變更）。
 
 ### 安裝一次，跨專案共用
 
@@ -439,6 +488,7 @@ cat /ABS/PATH/docs/agents/AGENTS.snippet.md >> /ABS/PATH/TO/PROJECT/AGENTS.md
 | `--verify-only`：`gateway venv missing: nothing to verify` | `--verify-only` 在 `--create-venv` 之前執行，或針對了另一個 `--venv-dir`；加上 `--no-venv` 可只檢查工具鏈。 |
 | `codebase-memory-mcp` 出現 `GLIBC_2.38' not found` | 鎖定檔正是為此固定了 `linux-amd64-portable`（靜態）版本；不要換成標準版本（`docs/install.md` 第 4 節）。 |
 | Serena 無法啟動；其 stderr 日誌顯示 `/usr/bin/env: '.../serena-venv/bin/serena': No such file or directory` | 這是沙箱尚未重建直譯器符號連結鏈之前的版本（venv 建在 python-build-standalone 執行環境上，例如 `.toolchain/runtime/`）。更新 SVWeave 即可，不需重建 venv。 |
+| `uvm_core: download of https://github.com/accellera-official/uvm-core/archive/... failed (HTTP Error 403: Forbidden)` | 網路允許 GitHub release 下載，但不允許原始碼壓縮檔（在 Claude Code 雲端 session 中，是 session 的 GitHub 儲存庫存取範圍所致）。可從 git tag 重建鎖定的壓縮檔（`git archive` + `gzip -n` 可重現 lock 中的 sha256；安裝程式會驗證），或以 `--skip-uvm` 在不含 UVM 的情況下安裝（會標示為已略過，絕不標示為已驗證）：見 `docs/install.md` 的「When a locked archive cannot be downloaded」。 |
 | 失敗的安裝留下不完整的 `.toolchain/` | 重新執行同一個指令：已存在且 sha256 正確的 artifact 會被重用，其他的會重新下載並重新驗證。解除安裝：移除 `.venv`、`.toolchain/`、`.svweave/`，以及（若需要）受信任目錄。 |
 
 ## 快速入門
@@ -463,6 +513,8 @@ svweave query impact --build BUILD_ID --name demo_lane
 svweave query diff-impact --build BUILD_ID                       # your uncommitted git changes
 svweave query rename-preview --build BUILD_ID --name demo_lane.valid_i --to valid_in
 svweave graph export --build BUILD_ID                            # .svweave/exports/graph-<id>.html
+svweave graph export --build BUILD_ID --instance demo_top.g_lane[0].u_lane   # 只畫一個子樹
+svweave graph export --build BUILD_ID --diff-base HEAD           # 只畫你的 git diff 改到的部分
 
 # serve the MCP gateway for your client (stdio)
 svweave serve --transport stdio
@@ -493,7 +545,7 @@ SVWeave 絕不會修改用戶端的設定。請在你自己的用戶端加入類
 
 四者都只讀取一個建置，而且會明白標示：回應封包帶有建置 id、完整度、新鮮度與限制，清單有數量上限但附上完整總數，而且它們回報的任何東西都不是風險分數。
 
-<p align="center"><img src="docs/images/analysis-tools.svg" alt="分析工具。上方：一次建置，build_id 為 snapshot_id、config_id、toolchain_id 與結構描述版本的雜湊，完整度為 COMPLETE 或 PARTIAL，新鮮度為 CURRENT、STALE 或 HISTORICAL；內含不可變的快照位元組、在 profile 頂層之下展開的實例樹、帶有靜態解析參照的宣告，以及直接的埠關聯。四個欄位讀取它。影響範圍（svw_impact、svweave query impact）：以 --name、--symbol、--file 加 --byte 或 --instance 指定一個目標；對模組或介面回傳每個實例、--depth 層內的相依者、相依項與參照，對埠回傳每個連接處與相依者，對 net、變數或參數回傳已解析的參照與連接，對實例回傳其祖先、子樹與埠連接；名稱有歧義時回傳 AMBIGUOUS_SYMBOL。Git diff 影響（svw_diff_impact、svweave query diff-impact）：從 --base HEAD 到 --head（預設為工作樹）的 git diff -U0，固定 argv、不經 shell、有大小上限；舊側的行對應到快照位元組，逐檔為 aligned 或 approximate；回傳變更的宣告、其模組的實例與相依者，以及變更的埠與其連接處；建置之外的檔案只列出，標頭檔不重新展開。重新命名預覽（svw_rename_preview、svweave query rename-preview），唯讀：宣告、已解析的參照、具名連接的形式名稱、結尾標籤與 bind 目標，每一處都與快照位元組核對；回傳 diff、阻擋條件、警告、其他字面出現處，以及就緒時的 edit_request；遇到未解析參照、.* 與 .name 連接、巨集位置、名稱衝突、非 COMPLETE 且 CURRENT 的建置，以及具名參數覆寫時會阻擋。圖譜匯出（svweave graph export --build B，僅限 CLI）：一個靜態檔 .svweave/exports/graph-build.html，含實例樹，以及在直接埠關聯中使用同一個訊號宣告的實例之間的虛線連線；扇出超過 --max-fanout 16 的節點只列出，最多 --max-instances 5000 個、由淺到深，以 file:// 開啟、嚴格 CSP，不是 netlist。下方：影響範圍與 diff 影響回傳 JSON 回應封包，重新命名預覽以其 edit_request 交給受控編輯流程，圖譜匯出則直接從磁碟以瀏覽器開啟。" width="100%"></p>
+<p align="center"><img src="docs/images/analysis-tools.svg" alt="分析工具。上方：一次建置，build_id 為 snapshot_id、config_id、toolchain_id 與結構描述版本的雜湊，完整度為 COMPLETE 或 PARTIAL，新鮮度為 CURRENT、STALE 或 HISTORICAL；內含不可變的快照位元組、在 profile 頂層之下展開的實例樹、帶有靜態解析參照的宣告，以及直接的埠關聯。四個欄位讀取它。影響範圍（svw_impact、svweave query impact）：以 --name、--symbol、--file 加 --byte 或 --instance 指定一個目標；對模組或介面回傳每個實例、--depth 層內的相依者、相依項與參照，對埠回傳每個連接處與相依者，對 net、變數或參數回傳已解析的參照與連接，對實例回傳其祖先、子樹與埠連接；名稱有歧義時回傳 AMBIGUOUS_SYMBOL。Git diff 影響（svw_diff_impact、svweave query diff-impact）：從 --base HEAD 到 --head（預設為工作樹）的 git diff -U0，固定 argv、不經 shell、有大小上限；舊側的行對應到快照位元組，逐檔為 aligned 或 approximate；回傳變更的宣告、其模組的實例與相依者，以及變更的埠與其連接處；建置之外的檔案只列出，標頭檔不重新展開。重新命名預覽（svw_rename_preview、svweave query rename-preview），唯讀：宣告、已解析的參照、具名連接的形式名稱、結尾標籤與 bind 目標，每一處都與快照位元組核對；回傳 diff、阻擋條件、警告、其他字面出現處，以及就緒時的 edit_request；遇到未解析參照、.* 與 .name 連接、巨集位置、名稱衝突、非 COMPLETE 且 CURRENT 的建置，以及具名參數覆寫時會阻擋。圖譜匯出（svweave graph export --build B，僅限 CLI）：一個靜態檔 .svweave/exports/graph-build.html，含實例樹，以及在直接埠關聯中使用同一個訊號宣告的實例之間的虛線連線；預設畫出所有實例與所有訊號（完整拓撲）；--max-fanout 與 --max-instances 是可選的縮減，以 file:// 開啟、嚴格 CSP，不是 netlist。下方：影響範圍與 diff 影響回傳 JSON 回應封包，重新命名預覽以其 edit_request 交給受控編輯流程，圖譜匯出則直接從磁碟以瀏覽器開啟。" width="100%"></p>
 
 *這四個工具都是同一次已儲存建置的不同視角；沒有一個會重新展開設計或碰觸原始碼樹。它們的差別在於起點（一個宣告或實例、一個 git diff、一個重新命名目標、整棵樹），以及交出去的東西：一個回應封包、一個只有[受控編輯工作流程](#受控編輯工作流程)才能套用的 `edit_request`，或一個靜態 HTML 頁面。每個工具都沿用該次建置的完整度與新鮮度，所以 `PARTIAL` 或 `STALE` 的建置得到的答案會如實標明；重新命名預覽只在 `COMPLETE`、`CURRENT` 的建置上才會回報「就緒」。*
 
@@ -524,11 +576,48 @@ SVWeave 絕不會修改用戶端的設定。請在你自己的用戶端加入類
 
 ```bash
 svweave graph export --build BUILD_ID          # writes .svweave/exports/graph-<build>.html
-svweave graph export --build BUILD_ID --root top.u_sub   # 只畫該實例及其子孫
+svweave graph export --build BUILD_ID --instance top.u_sub   # 只畫該實例及其子孫
 svweave graph export --build BUILD_ID --diff-base HEAD    # 只畫 `git diff HEAD` 改到的部分
 ```
 
-以瀏覽器開啟該檔案（`file://`，不需要伺服器）。它顯示該單一建置的 elaborated 實例樹（雙擊可收合子樹，搜尋會展開到符合項，拖曳與滾輪可平移與縮放），並以虛線顯示從該建置的直接連接埠關聯推導出的連線：兩個實例參照同一個訊號宣告，方向依宣告的連接埠方向而定。一條線代表兩個節點之間的所有訊號；點擊它可看到清單。被超過 `--max-fanout` 個實例（預設 16）使用的類時脈訊號會被列為 hub，而不會畫出來。頁面帶有該建置的完整度與新鮮度，並在其為 PARTIAL、STALE 或被截斷（`--max-instances`，由最淺層優先）時如實說明。它不是 netlist。頁面沒有網路存取（嚴格的 CSP），並把原始碼文字當作資料處理。在上述 115k 個實例的 SoC 上，匯出耗時 27 s，畫出最淺層的 5000 個實例（38 MB）。`--root INSTANCE`（路徑或實例 id）只讀取並畫出同一建置中該實例的子樹：不會重新編譯，深度從 root 起算，在子樹之外宣告的訊號（root 的連接埠所接到的訊號）會列為邊界訊號，而不會畫出來。`--diff-base REF`（可再加 `--diff-head REF`）以與 `svweave query diff-impact` 相同的方式讀取 git diff，只畫出被改到的 module/interface 的實例（紅框）及其子樹，並以其祖先作為脈絡。在修改前或修改後建置皆可：每個檔案會使用與建置快照相符的那一側 diff。對應不到任何實例的變更（package、不在建置中的檔案）只會列出，不會畫出。設計理由：`docs/adr/ADR-014-static-graph-export.md`。
+以瀏覽器開啟該檔案（`file://`，不需要伺服器）。它顯示該單一建置的 elaborated 實例樹（雙擊可收合子樹，搜尋會展開到符合項，拖曳與滾輪可平移與縮放），並以虛線顯示從該建置的直接連接埠關聯推導出的連線：兩個實例參照同一個訊號宣告，方向依宣告的連接埠方向而定。一條線代表兩個節點之間的所有訊號；點擊它可看到清單。**預設頁面就是該建置的完整拓撲**：所有實例與所有訊號都會畫出，只是較深的層級一開始是收合的。縮減是選項：`--max-instances N`（由最淺層優先）與 `--max-fanout N`（被超過 N 個實例使用的訊號列為 hub 而不畫出），和下方的 `--instance`、`--diff-base` 一樣。頁面帶有該建置的完整度與新鮮度，並在其為 PARTIAL、STALE 或被截斷（`--max-instances`，由最淺層優先）時如實說明。它不是 netlist。頁面沒有網路存取（嚴格的 CSP），並把原始碼文字當作資料處理。在 C906 minimal SoC（2,072 個實例）上，完整頁面有 30,378 條連線，以精簡格式寫成 2.0 MB；超過 20,000 個實例或 64 MiB 時，envelope 會警告瀏覽器可能變慢，並建議改用 `--split` / `--lazy`。（在舊的預設上限下，上述 115k 實例的 SoC 只畫出最淺層的 5000 個實例，38 MB，耗時 27 秒。）`--instance INSTANCE`（路徑或實例 id）只讀取並畫出同一建置中該實例的子樹：不會重新編譯，深度從 root 起算，在子樹之外宣告的訊號（root 的連接埠所接到的訊號）會列為邊界訊號，而不會畫出來。`--diff-base REF`（可再加 `--diff-head REF`）以與 `svweave query diff-impact` 相同的方式讀取 git diff，只畫出被改到的 module/interface 的實例（紅框）及其子樹，並以其祖先作為脈絡。在修改前或修改後建置皆可：每個檔案會使用與建置快照相符的那一側 diff。對應不到任何實例的變更（package、不在建置中的檔案）只會列出，不會畫出。設計理由：`docs/adr/ADR-014-static-graph-export.md`。
+
+**從 git diff 到頁面。** 建置就是「編譯」；頁面只讀取 diff 觸及的那一部分。兩種順序都可以：
+
+```bash
+# A. 先建置已提交的狀態，再修改：對應每個檔案的舊側（old）
+svweave build --profile rtl_demo                      # -> BUILD_ID
+vi rtl/my_block.sv                                    # 你的修改，尚未提交
+svweave graph export --build BUILD_ID --diff-base HEAD
+
+# B. 先修改，再建置修改後的工作樹：對應新側（new）
+svweave build --profile rtl_demo
+svweave graph export --build BUILD_ID --diff-base HEAD
+
+# C. commit 對 commit（只讀 git blob；在設定了 git filter 的環境也能用）
+svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature
+
+# D. 多個小 commit 畫在同一頁，每個被改到的實例標示是哪些 commit 改的
+#    （請先建置 --diff-head 那個版本）
+svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature --per-commit
+```
+
+加上 `--per-commit` 時，頁面會列出 `main..my-feature` 的所有 commit；每個被改到的實例會標示改過其 module 的 commit（以 `git log -L` 追蹤該 module 在 head 版本中的行，因此只刪除行的 commit 也找得到），點擊某個 commit 即可高亮它改到的部分。標示的單位是 module 定義：同一個 module 的兩個實例會帶相同的 commit。這需要 head 版本的建置；否則不加標示並發出警告。真實 SoC 範例（C906，數個子系統各被修改多次）：[evidence/c906-per-commit-example](evidence/c906-per-commit-example/README.md)。
+
+回應封包的 `data.diff` 會列出：被改到的定義及其 `instances` 與 `instances_drawn`、被改到的檔案及所用的那一側（`old`/`new`；`aligned: false` 代表近似對應，並會附上警告）、不在建置中的檔案，以及不屬於任何 module 的變更（package、class）。加上 `--instance INSTANCE` 可只保留某個實例之下的變更（其他的計入 `outside_root`）。若 diff 觸及不到任何實例（例如沒有修改的工作樹），這是一個答案而不是錯誤：結束碼 0、`data.written: false`、`data.path: null`，`data.diff.nothing_to_draw` 說明原因，且不會寫出頁面。與 `diff-impact` 相同，在此模式下 STALE 的建置不會改變結束碼；若儲存庫設定了 git clean/process filter，與工作樹比較會被拒絕（請改用 C）；partial clone（promisor remote）也會被拒絕，因為讀取它可能觸發下載。
+
+**非常大的 SoC。** 頁面以精簡且無損的格式寫出（`svweave-graph/2`：在 C906 SoC 上比原本小 8 倍），但十萬級實例 SoC 的完整拓撲仍是約 40 MB、需約 10 秒才能開啟的單一頁面。有兩種輸出可把它切成每份至多 `--page-budget` 個實例的部分（預設 5000）；所有部分合起來恰好就是完整拓撲：
+
+```bash
+svweave graph export --build BUILD_ID --split   # 互相連結的多頁：.svweave/exports/<name>/index.html
+svweave graph export --build BUILD_ID --lazy    # 單一頁面，打開時才載入其他部分
+```
+
+放不下的子樹會成為「入口節點」：它在上一層頁面上是一個節點（帶著自己的連接埠連線），可開啟它那一部分（`--split`：連到它的頁面；`--lazy`：雙擊即在同一張圖中載入）。索引頁可搜尋整個設計的所有實例，並開啟正確的部分。在 115,562 個實例上：單一頁面開啟需 10.1 秒，`--split` 或 `--lazy` 的索引頁約 0.55 秒，開啟一筆搜尋結果約 1 秒（[量測證據](evidence/bench/graph-large/README.md)）。`--lazy` 的頁面 CSP 允許載入同一目錄的腳本（讀取本機檔案所必需；僅在 Chromium 驗證）；`--split` 維持嚴格的 CSP，任何瀏覽器都能用。每個頁面只會執行它自己的檢視器腳本（CSP 寫明其 sha256，沒有 `'unsafe-inline'` 的腳本）。`--split` 與 `--lazy` 寫出一個目錄（由 `--name` 命名），並拒絕 `--max-instances` / `--max-fanout`：它們的頁面合起來就是完整拓撲，要讓頁面變小請用 `--page-budget`（至少 100）。每頁都會註明唯一的例外：透過沒有任何實例宣告的訊號（例如 package 變數）、連接位於不同頁面之實例的連線不會畫出。
+
+各模式的 envelope `data`（`data.mode`：單一頁面為 `page`、`--split` 為 `split`、`--lazy` 為 `lazy`）：單一頁面（預設、`--instance`、`--diff-base`）有 `path`、`bytes`、`sha256`、`stats`、`truncated`、`root`（`--diff-base` 時另有 `diff`）；「沒有東西可畫」時為 `path: null`、`written: false` 與 `diff`。`--split` / `--lazy` 寫出一個目錄：`path`（其 `index.html`）、`directory`、`root`，以及 `parts` 摘要：`pages`、`budget`、`largest_page`、`oversized_pages`、`bytes_total`、`largest_file_bytes`、`files`（至多 200 個名稱）、`files_total`、`files_truncated`。
+
+`graph export` 的結束碼：寫出頁面（或沒有東西可畫）時為 0；與 `query` 指令相同，PARTIAL 的建置為 3、STALE/HISTORICAL 為 5（頁面仍會寫出，並在頁面上註明），除非加上 `--allow-partial` / `--allow-stale`；使用 `--diff-base` 時，STALE 不會改變結束碼。`--max-instances` 截斷繪圖時 `pagination.truncated` 為 true。
 
 ## 在 Claude Code 與 Codex 中使用 SVWeave
 
@@ -797,7 +886,7 @@ profiles:
     library_dirs: []
     library_files: []
     library_extensions: [".v", ".sv"]
-    environment_allowlist: []          # only these variables may be expanded in paths
+    environment_allowlist: []          # variables a path may expand; each must ALSO be in policy.json
     generated_inputs: []               # must already exist; nothing is generated
     diagnostic_policy: "no_errors"
     # language_options:                # allowlisted slang knobs, part of config_id
@@ -839,7 +928,7 @@ root_mappings:
 
 外部根目錄中的檔案以 `@uvm/relative/path` 定址。使用未對應的外部根目錄是 `MISSING_INPUT` 阻擋條件（`reason: root_unmapped`），因此在對應存在之前，`uvm_smoke` profile 會維持 BLOCKED。
 
-**受信任政策。** `policy.json` 位於 `$XDG_CONFIG_HOME/svweave/workspaces/<workspace_key>/policy.json`（備援為 `~/.config`），其中 `workspace_key` 是 `sha256(realpath(dir of svweave.yaml))` 的前 16 個十六進位字元。`svweave init` 會建立它，而且絕不覆寫。它刻意放在儲存庫之外：儲存庫內容（以及代理人寫入其中的任何東西）不得有能力擴張自己的權限。儲存庫中的檔案只能收緊政策；儲存庫內的政策檔會被忽略，而位於專案樹內的 `--policy` 路徑會得到 `POLICY_DENIED`。
+**受信任政策。** `policy.json` 位於 `$XDG_CONFIG_HOME/svweave/workspaces/<workspace_key>/policy.json`（備援為 `~/.config`），其中 `workspace_key` 是 `sha256(realpath(dir of svweave.yaml))` 的前 16 個十六進位字元。`svweave init` 會建立它，而且絕不覆寫。它刻意放在儲存庫之外：儲存庫內容（以及代理人寫入其中的任何東西）不得有能力擴張自己的權限。儲存庫中的檔案只能收緊政策；儲存庫內的政策檔會被忽略，而位於專案樹內的 `--policy` 路徑會得到 `POLICY_DENIED`。同一個目錄也記錄 SVWeave 為此工作區建立的是哪一個 `.svweave/`（`state_dir.json`：SVWeave 存放在 `.svweave/.svweave-id` 的隨機 token 的 sha256，以目錄的實際路徑為鍵）：其他任何非空的 `.svweave/`（隨儲存庫或 tarball 附帶、在刪除後的原位置解壓、被搬移或複製到其他路徑）都會以 `state_dir_not_adopted` 拒絕，直到你對自己建立的狀態目錄執行 `svweave init --adopt-state`。
 
 | 欄位 | 預設值 | 意義 |
 |---|---|---|
@@ -850,6 +939,7 @@ root_mappings:
 | `network_enabled` | `false` | 後端沒有網路 |
 | `editing_enabled` | `false` | 總開關；編輯同時也需要 `svweave.yaml` 中的 `editing.enabled` |
 | `allow_test_approvals` | `false` | 接受未經資格認定的測試權杖核准路徑；只有人類編輯此檔案才能設定它 |
+| `environment_allowlist` | `[]` | profile 可在 filelist 路徑中展開的環境變數；profile 自己的 `environment_allowlist` 只能縮小這個範圍 |
 
 同一個受信任目錄還存放 `approval.key`（權限 0600）、`cursor.key`、核准記錄以及最近一次的後端探測記錄。
 
@@ -862,7 +952,7 @@ root_mappings:
 | `+incdir+a+b`, `-I DIR`, `-IDIR` | include 目錄，保留順序，絕不排序或去重 |
 | `+define+N=V+M`, `-DN=V` | 巨集文字逐 token 精確保留；`NAME`、`NAME=` 與 `NAME=V` 各不相同；衝突的重新定義會得到 `INVALID_CONFIG` |
 | `-v FILE`, `-y DIR`, `+libext+.v+.sv` | 函式庫檔案、函式庫目錄、函式庫副檔名 |
-| 路徑 token 中的 `$VAR`, `${VAR}` | 只有當該變數位於 `environment_allowlist` 且已設定時才可用，否則為 `MISSING_INPUT` |
+| 路徑 token 中的 `$VAR`, `${VAR}` | 只有當該變數同時位於 profile 的 `environment_allowlist` 與受信任 `policy.json` 的 `environment_allowlist`，且已設定時才可用；否則為 `MISSING_INPUT`（`env_not_allowed_by_policy` 會指出 policy 欄位） |
 | `-l`, `-logfile`, `-nologo`, `-quiet`, `-q` | 僅影響輸出的選項：被捨棄並記錄為已忽略 |
 
 | 被拒絕 | 結果 |
@@ -903,7 +993,7 @@ root_mappings:
 | `svweave query search --snapshot S --query Q` | 圖譜候選項，或有標示的純文字備援（`--scope`、`--no-graph`） |
 | `svweave report --build B` | 以真實資料填寫的狀態報告；未評估的關卡會如實標明 |
 | `svweave evidence import --manifest FILE` | 匯入外部證據（以 `EXTERNAL_DECLARED` 儲存） |
-| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--root I] [--diff-base R [--diff-head R]]` | 寫出 `.svweave/exports/<name>.html`：實例階層加上連接埠關聯連線，單一自含式頁面，不提供任何服務（ADR-014）；`--root` 只畫實例 I 的子樹；`--diff-base` 只畫 git diff 改到的實例 |
+| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R [--per-commit]]] [--split \| --lazy [--page-budget N]] [--allow-stale] [--allow-partial]` | 寫出 `.svweave/exports/<name>.html`，單一自含式頁面（使用 `--split`/`--lazy` 時則寫出目錄 `.svweave/exports/<name>/`，以 `index.html` 開始；這兩者拒絕 `--max-instances`/`--max-fanout`）：實例階層加上連接埠關聯連線，不提供任何服務（ADR-014）；`--instance` 只畫實例 I 的子樹；`--diff-base` 只畫 git diff 改到的實例 |
 | `svweave cache gc [--no-dry-run]` | 對快照做垃圾回收；保留最近 3 個與被參照的快照；預設為試執行（dry run） |
 | `svweave debug bundle --build B [--out DIR]` | 重現用套件：雜湊、manifest、診斷摘要、已遮蔽的路徑 |
 | `svweave schema emit [--check] [--out DIR]` | 寫出或驗證 `schemas/*.schema.json` |
@@ -972,7 +1062,7 @@ root_mappings:
 | `UNSUPPORTED_OPTION` | slang 轉接器無法遵守的選項 | 3 |
 | `PARTIAL_ANALYSIS` | 部分結果 | 3 |
 | `AMBIGUOUS_SYMBOL` | 有多個限定範圍內的候選項 | 3 |
-| `PATH_NOT_ALLOWED` | 路徑位於允許的根目錄之外，或違反 include/exclude 規則或符號連結目標規則 | 6 |
+| `PATH_NOT_ALLOWED` | 路徑位於允許的根目錄之外，或違反 include/exclude 規則或符號連結目標規則 | 6；`build`/`update` 時若建置本身讀取了快照之外的檔案則為 3（`details.reason: dependency_leak`，outcome `BLOCKED`） |
 | `POLICY_DENIED` | 政策拒絕該操作 | 6 |
 | `APPROVAL_REQUIRED`, `APPROVAL_EXPIRED` | 核准缺少、偽造或過期 | 6 |
 | `WORKSPACE_UNSTABLE`, `STALE_SNAPSHOT` | 擷取期間工作區變動，或 `expected_snapshot_id` 不一致 | 5 |
@@ -1070,6 +1160,7 @@ root_mappings:
 .venv/bin/python -m pytest tests/fault_injection                        # commit crash and recovery
 SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest -m integration    # real backends, skips fail
 SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest tests/acceptance  # end-to-end demo flow, docs check
+SVWEAVE_REQUIRE_BROWSER=1 .venv/bin/python -m pytest tests/browser     # viewer in Chromium (opt-in: node + Playwright)
 .venv/bin/python scripts/qualify.py                                     # release gates G0-G5
 ```
 
@@ -1077,7 +1168,7 @@ SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest tests/acceptance  # end-to
 
 **關卡（Gates）。** `scripts/qualify.py` 依實際結果計算 G0 至 G5，並寫入 `.svweave/qualification/report.{json,md}`：G0 為 lock 已驗證、後端探測與沙箱測試；G1 為 manifest、快照、設定與路徑政策；G2 為語意測試套件（真實的 pyslang 與 UVM）；G3 為後端測試套件與 MCP 契約；G4 為編輯安全性與所有關鍵變異；G5 為每個 P0 測試套件都沒有 FAIL、BLOCKED 與 SKIP、驗收測試、至少 85% 述句與 80% 分支的覆蓋率、文件檢查，以及在計畫 22.3 預算之內的基準測試。由未執行的步驟所算出的關卡為 `NOT_EVALUATED`，絕不是 PASS。只有在每個關卡都通過且沒有任何開放的阻擋條件時，發行決定才會是 `ACCEPTED_STATIC_PREVIEW`；否則為 `BLOCKED` 並附上原因。
 
-**變異測試套件（Mutation suite）。** `scripts/mutation_suite.py` 一次一個地把 29 個關鍵變異（M01–M29，涵蓋計畫 20.5 及額外的寫入／工作區綁定／快照重用安全防護）注入到儲存庫的拋棄式副本中，並執行對應的測試；當這些測試失敗時，該變異即被殺死（killed）。`--only M01,M05` 可選擇其中幾個；任何不是乾淨失敗的結果（缺少 patch 錨點、逾時、基準（baseline）為紅燈）都是 `ERROR`，絕不算被殺死。
+**變異測試套件（Mutation suite）。** `scripts/mutation_suite.py` 一次一個地把 45 個關鍵變異（M01–M45，涵蓋計畫 20.5 及額外的寫入／工作區綁定／快照重用安全防護）注入到儲存庫的拋棄式副本中，並執行對應的測試；當這些測試失敗時，該變異即被殺死（killed）。`--only M01,M05` 可選擇其中幾個；任何不是乾淨失敗的結果（缺少 patch 錨點、逾時、基準（baseline）為紅燈）都是 `ERROR`，絕不算被殺死。
 
 **基準測試（Benchmark）。** `scripts/gen_corpus.py` 寫出確定性的合成語料，`scripts/benchmark.py` 記錄主機、語料與原始計時（`evidence/bench/`），然後與計畫 22.3 的預算比較。參考語料為 scale 1.0：約 500 個檔案與 100,000 行；縮小規模的執行會被如此標示。
 
@@ -1166,6 +1257,7 @@ SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest tests/acceptance  # end-to
 | 決策 | `docs/adr/` |
 | 工具鏈 spike 事實 | `docs/m0_spike_report.md` |
 | 給程式碼代理人的規則 | `AGENTS.md` |
+| 待辦與交接（2026-11-05） | `2026_1105_hand_off.md` |
 
 ## 貢獻
 

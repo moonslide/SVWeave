@@ -69,6 +69,9 @@ def policy_dict(root: Path) -> dict[str, object]:
         "approval_required": True,
         "network_enabled": False,
         "editing_enabled": False,
+        # environment variables a profile may read (manifest environment_allowlist is bounded by
+        # this list; empty: none)
+        "environment_allowlist": [],
     }
 
 

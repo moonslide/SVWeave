@@ -1,0 +1,93 @@
+.....................................................F.................. [  4%]
+........................................................................ [  8%]
+........................................................................ [ 12%]
+........................................................................ [ 16%]
+........................................................................ [ 20%]
+........................................................................ [ 24%]
+......................................................................F. [ 28%]
+........................................................................ [ 33%]
+..................................F..................................... [ 37%]
+........................................................................ [ 41%]
+........................................................................ [ 45%]
+........................................................................ [ 49%]
+........................................................................ [ 53%]
+..........FF............................................................ [ 57%]
+........................................................................ [ 62%]
+........................................................................ [ 66%]
+..................................................................E..... [ 70%]
+........................................................................ [ 74%]
+........................................................................ [ 78%]
+........................................................................ [ 82%]
+........................................................................ [ 86%]
+........................................................................ [ 90%]
+........................................................................ [ 95%]
+........................................................................ [ 99%]
+.............                                                            [100%]
+==================================== ERRORS ====================================
+_ ERROR at setup of test_N6_unreadable_lookup_dir_raises_instead_of_dropping_subtree _
+tests/unit/test_review_fixes.py::test_N6_unreadable_lookup_dir_raises_instead_of_dropping_subtree: required qualification test did not execute (SVWEAVE_REQUIRE_BACKENDS=1); skip is not PASS:
+('${REPO}/tests/unit/test_review_fixes.py', 633, 'Skipped: root ignores directory permissions')
+=================================== FAILURES ===================================
+_________ test_f10_python_bind_is_narrowed_to_exe_stdlib_and_libpython _________
+tests/unit/test_adapters_hardening.py::test_f10_python_bind_is_narrowed_to_exe_stdlib_and_libpython: required qualification test did not execute (SVWEAVE_REQUIRE_BACKENDS=1); skip is not PASS:
+('${REPO}/tests/unit/test_adapters_hardening.py', 463, 'Skipped: interpreter lives under /usr: nothing extra to bind')
+_ test_edt02_stale_expected_hash_check_protects_the_target_even_if_snapshot_check_passes _
+
+ws = <tests.unit._edit_fx.EditWs object at 0x7f60cadf4740>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f60c9451af0>
+
+    def test_edt02_stale_expected_hash_check_protects_the_target_even_if_snapshot_check_passes(
+        ws: EditWs, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Defence in depth: even if the freshness check were skipped, the per-file compare-and-set on
+        the before-hash refuses to overwrite (guards the 'cancel expected hash' mutation)."""
+        base = ws.build()
+        tid, h = to_approval(ws, base, [ws.range_edit("rtl/pkg.sv", *TASK)], serena=False)
+        monkeypatch.setattr(E, "_stale", lambda ctx, rec: None)
+        (ws.root / "rtl/pkg.sv").write_text(ws.text("rtl/pkg.sv") + "// human\n")
+        human = ws.read("rtl/pkg.sv")
+        err = code_of(commit, ws, tid, h)
+>       assert err.code is ErrorCode.EDIT_CONFLICT and err.details["reason"] == "expected_hash_mismatch"
+E       AssertionError: assert (<ErrorCode.EDIT_CONFLICT: 'EDIT_CONFLICT'> is <ErrorCode.EDIT_CONFLICT: 'EDIT_CONFLICT'> and 'workspace_changed' == 'expected_hash_mismatch'
+E        +  where <ErrorCode.EDIT_CONFLICT: 'EDIT_CONFLICT'> = SvwError('EDIT_CONFLICT: the workspace changed since validation (a source or dependency was edited); nothing was written').code
+E        +  and   <ErrorCode.EDIT_CONFLICT: 'EDIT_CONFLICT'> = ErrorCode.EDIT_CONFLICT
+E         
+E         - expected_hash_mismatch
+E         + workspace_changed)
+
+tests/unit/test_edit_commit.py:301: AssertionError
+________ test_m7b_the_pre_journal_cas_refuses_before_any_journal_exists ________
+
+ws = <tests.unit._edit_fx.EditWs object at 0x7f60c9d1c6b0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f60c9d1c0e0>
+
+    def test_m7b_the_pre_journal_cas_refuses_before_any_journal_exists(
+        ws: EditWs, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base = ws.build()
+        tid, h = to_approval(ws, base, [ws.range_edit("rtl/pkg.sv", *TASK)], serena=False)
+        monkeypatch.setattr(E, "_stale", lambda ctx, rec: None)  # freshness check "passes"
+        (ws.root / "rtl/pkg.sv").write_text(ws.text("rtl/pkg.sv") + "// human\n")
+        human = ws.read("rtl/pkg.sv")
+        monkeypatch.setattr(jr, "apply_files", lambda *a, **k: pytest.fail("apply must not start"))
+        e = err(C, ws, tid, h)
+>       assert e.details["reason"] == "expected_hash_mismatch"
+E       AssertionError: assert 'workspace_changed' == 'expected_hash_mismatch'
+E         
+E         - expected_hash_mismatch
+E         + workspace_changed
+
+tests/unit/test_edit_review_fixes.py:445: AssertionError
+_______ test_DEP_01_actual_wheel_contains_byte_identical_runtime_assets ________
+tests/unit/test_installed_runtime_assets.py::test_DEP_01_actual_wheel_contains_byte_identical_runtime_assets: required qualification test did not execute (SVWEAVE_REQUIRE_BACKENDS=1); skip is not PASS:
+('${REPO}/tests/unit/test_installed_runtime_assets.py', 152, 'Skipped: offline artifact build requires already-installed hatchling==1.29.0')
+_____________ test_DEP_01_actual_sdist_retains_wheel_asset_sources _____________
+tests/unit/test_installed_runtime_assets.py::test_DEP_01_actual_sdist_retains_wheel_asset_sources: required qualification test did not execute (SVWEAVE_REQUIRE_BACKENDS=1); skip is not PASS:
+('${REPO}/tests/unit/test_installed_runtime_assets.py', 152, 'Skipped: offline artifact build requires already-installed hatchling==1.29.0')
+=========================== short test summary info ============================
+FAILED tests/unit/test_adapters_hardening.py::test_f10_python_bind_is_narrowed_to_exe_stdlib_and_libpython
+FAILED tests/unit/test_edit_commit.py::test_edt02_stale_expected_hash_check_protects_the_target_even_if_snapshot_check_passes
+FAILED tests/unit/test_edit_review_fixes.py::test_m7b_the_pre_journal_cas_refuses_before_any_journal_exists
+FAILED tests/unit/test_installed_runtime_assets.py::test_DEP_01_actual_wheel_contains_byte_identical_runtime_assets
+FAILED tests/unit/test_installed_runtime_assets.py::test_DEP_01_actual_sdist_retains_wheel_asset_sources
+ERROR tests/unit/test_review_fixes.py::test_N6_unreadable_lookup_dir_raises_instead_of_dropping_subtree

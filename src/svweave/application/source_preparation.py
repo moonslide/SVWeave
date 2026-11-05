@@ -7,7 +7,7 @@ from pathlib import Path
 
 from svweave.adapters.verilator.protected import SOURCE_LIMIT, prepare_protected_source
 from svweave.application.options import WorkspaceOptions
-from svweave.application.supplement import _encode, _read
+from svweave.application.supplement import encode_record, read_bounded
 from svweave.domain.envelope import AnalysisCoverage, Envelope, Outcome, Provenance
 from svweave.domain.states import Completeness, EvidenceKind
 from svweave.security import safeio
@@ -15,11 +15,11 @@ from svweave.security import safeio
 
 def prepare_source(opts: WorkspaceOptions, source: Path, request_id: str) -> Envelope:
     ctx = opts.load()
-    original = _read(ctx, source, SOURCE_LIMIT)
+    original = read_bounded(ctx, source, SOURCE_LIMIT)
     prepared, report = prepare_protected_source(original)
     # Exact input hash + algorithm/report version; original path is not followed downstream.
     report["source_path"] = str(source)
-    encoded = _encode(report)
+    encoded = encode_record(report)
     preparation_id = hashlib.sha256(encoded).hexdigest()
     directory = f".svweave/supplements/prepared/{preparation_id}"
     safeio.ensure_private_dir(ctx.project_root, directory)

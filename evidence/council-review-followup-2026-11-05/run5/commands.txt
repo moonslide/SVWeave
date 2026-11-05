@@ -1,0 +1,10 @@
+ruff: .venv/bin/ruff check .
+mypy: .venv/bin/mypy
+schema_check: .venv/bin/svweave schema emit --check
+lock_verify: .venv/bin/python scripts/bootstrap_locked.py --verify-only
+unit_contract: .venv/bin/python -m pytest -p no:cacheprovider --no-cov -q -rfEs tests/unit tests/contract --junitxml=evidence/council-review-followup-2026-11-05/run5/junit-unit-contract.xml
+fault_injection: .venv/bin/python -m pytest -p no:cacheprovider --no-cov -q -rfEs tests/fault_injection --junitxml=evidence/council-review-followup-2026-11-05/run5/junit-fault-injection.xml
+integration: .venv/bin/python -m pytest -p no:cacheprovider --no-cov -q -rfEs -m integration tests/integration --junitxml=evidence/council-review-followup-2026-11-05/run5/junit-integration.xml
+acceptance: .venv/bin/python -m pytest -p no:cacheprovider --no-cov -q -rfEs -m acceptance --junitxml=evidence/council-review-followup-2026-11-05/run5/junit-acceptance.xml
+browser: env SVWEAVE_REQUIRE_BROWSER=1 .venv/bin/python -m pytest -p no:cacheprovider --no-cov -q -rfEs tests/browser --junitxml=evidence/council-review-followup-2026-11-05/run5/junit-browser.xml
+mutation: .venv/bin/python scripts/mutation_suite.py --out evidence/council-review-followup-2026-11-05/run5/mutation.json

@@ -17,15 +17,17 @@ from svweave.application import graph, queries
 from svweave.application import impact as impact_mod
 from svweave.application import rename as rename_mod
 from svweave.application import status as status_mod
+from svweave.application.exports import check_export_name, write_export
+from svweave.application.options import WorkspaceOptions
 from svweave.application.search import svw_search
 from svweave.application.session import Session
 from svweave.domain.envelope import AnalysisCoverage, Envelope, ErrorInfo, Outcome
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import is_sha256_hex
 from svweave.domain.states import Completeness, Freshness
-from svweave.security.safeio import ensure_private_dir, write_under
+from svweave.security.safeio import require_real_dir
 from svweave.snapshot.capture import check_freshness, load_record, snapshots_dir
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 
 JOB_LIMITATIONS = [
     "A finished job says the worker ran, not that the design is correct; read analysis_coverage "
@@ -187,16 +189,20 @@ def search(
         )
     ctx = session.opts.load()
     sdir = snapshots_dir(ctx) / snapshot_id
-    with Database(ctx.state_dir / "svweave.db") as db:
-        row = db.conn.execute(
-            "SELECT gc_state FROM snapshots WHERE snapshot_id=?", (snapshot_id,)
-        ).fetchone()
-    if row is None or row["gc_state"] != "PRESENT" or not (sdir / "snapshot.json").is_file():
+    with Database(ctx.state_dir / DB_FILENAME) as db:
+        gc_state = db.snapshot_gc_state(snapshot_id)
+    if gc_state != "PRESENT" or not (sdir / "snapshot.json").is_file():
         raise SvwError(
             ErrorCode.MISSING_INPUT,
             f"snapshot {snapshot_id} not found",
             {"reason": "snapshot_missing", "snapshot_id": snapshot_id},
         )
+    try:  # the text fallback walks this tree: no link anywhere on the way (a planted
+        # `.svweave/snapshots/<id>/files -> /home` would be walked as the snapshot)
+        require_real_dir(snapshots_dir(ctx), f"{snapshot_id}/files")
+    except FileNotFoundError as e:
+        raise SvwError(ErrorCode.MISSING_INPUT, f"snapshot {snapshot_id} not found",
+                       {"reason": "snapshot_missing", "snapshot_id": snapshot_id}) from e
     rec = load_record(sdir)
     env = svw_search(
         snapshot_id=snapshot_id,
@@ -335,12 +341,8 @@ def rename_preview(
     write_spec: str | None = None,
 ) -> Envelope:
     clean_text(new_name=new_name, symbol_id=symbol_id, file=file, name=name, write_spec=write_spec)
-    if write_spec is not None and (
-        write_spec.startswith(".") or not graph._SAFE_NAME.fullmatch(write_spec + ".json")
-    ):
-        raise SvwError(
-            ErrorCode.INVALID_CONFIG, "write_spec must match [A-Za-z0-9._-]+ (no path)", {}
-        )
+    if write_spec is not None:
+        check_export_name(write_spec + ".json", "write_spec")
     env = rename_mod.rename_preview(
         session.opts,
         build_id,
@@ -358,10 +360,8 @@ def rename_preview(
             env.warnings.append("write_spec: nothing written, the preview has blockers")
         else:
             ctx = session.opts.load()
-            exports = ensure_private_dir(ctx.state_dir, graph.EXPORT_DIR)
             payload = (json.dumps(req, indent=2, sort_keys=True) + "\n").encode("utf-8")
-            write_under(exports, write_spec + ".json", payload)
-            env.data["spec_path"] = f".svweave/{graph.EXPORT_DIR}/{write_spec}.json"
+            env.data["spec_path"] = write_export(ctx.state_dir, write_spec + ".json", payload)
     return env
 
 
@@ -371,13 +371,17 @@ def graph_export(
     *,
     build_id: str,
     name: str | None = None,
-    max_instances: int = graph.DEFAULT_MAX_INSTANCES,
-    max_fanout: int = graph.DEFAULT_MAX_FANOUT,
-    root: str | None = None,
+    max_instances: int | None = graph.DEFAULT_MAX_INSTANCES,
+    max_fanout: int | None = graph.DEFAULT_MAX_FANOUT,
+    instance: str | None = None,
     diff_base: str | None = None,
     diff_head: str | None = None,
+    per_commit: bool = False,
+    split: bool = False,
+    page_budget: int | None = None,
+    lazy: bool = False,
 ) -> Envelope:
-    clean_text(name=name, root=root, diff_base=diff_base, diff_head=diff_head)
+    clean_text(name=name, instance=instance, diff_base=diff_base, diff_head=diff_head)
     return graph.export_graph(
         session.opts,
         build_id,
@@ -385,9 +389,13 @@ def graph_export(
         name=name,
         max_instances=max_instances,
         max_fanout=max_fanout,
-        root=root,
+        instance=instance,
         diff_base=diff_base,
         diff_head=diff_head,
+        per_commit=per_commit,
+        split=split,
+        page_budget=page_budget,
+        lazy=lazy,
     )
 
 
@@ -504,3 +512,28 @@ def edit(session: Session, request_id: str, *, action: str, **args: Any) -> Enve
     if action == "abort":
         return edit_mod.abort(opts, request_id, transaction_id=args["transaction_id"])
     raise SvwError(ErrorCode.INVALID_CONFIG, "unknown svw_edit action", {"action": action})
+
+
+def build_sync(
+    opts: WorkspaceOptions, profile: str | None, request_id: str, *, reuse: bool = True
+) -> Envelope:
+    """A synchronous build (the CLI) with the same post-build step as an MCP build job."""
+    from svweave.application.build import run_build
+    from svweave.application.evidence import post_build
+
+    env = run_build(opts, profile, request_id, reuse=reuse)
+    post_build(opts, env.build_id)
+    return env
+
+
+def update_sync(
+    opts: WorkspaceOptions, profile: str | None, request_id: str, *, base: str | None = None,
+    git: bool = True,
+) -> Envelope:
+    """``svweave update`` with the same post-build step as a build."""
+    from svweave.application.evidence import post_build
+    from svweave.application.update import run_update
+
+    env = run_update(opts, profile, request_id, base=base, git=git)
+    post_build(opts, env.build_id)
+    return env

@@ -170,8 +170,7 @@ def test_B5_top_parameter_override_is_scoped_to_its_top(tmp_path: Path) -> None:
 
 
 def test_B10_real_blocked_envelope_is_redacted(tmp_path: Path) -> None:
-    from svweave.gateway.tools import redact_envelope
-    from svweave.security.redaction import Redactor
+    from svweave.security.redaction import Redactor, redact_envelope
 
     # the sandboxed worker only sees what the sandbox exposes: a minimal /etc entry still reaches
     # the post-hoc dependency check (see test_api_semantic)

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import os
 from importlib import metadata
 from pathlib import Path
@@ -18,6 +17,7 @@ from typing import Any
 
 import svweave.adapters.slang as _slang_pkg
 from svweave.adapters.slang.protocol import DTO_SCHEMA, EXTRACTOR_VERSION
+from svweave.config.toolchain_lock import read_lock
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import SEMANTIC_SCHEMA_VERSION, compute_toolchain_id
 from svweave.orchestration.toolchain import ENV_ROOT, LOCK_NAME, installed_root, locate_root
@@ -157,7 +157,7 @@ def verify_pyslang_install(locked_record_sha256: str | None) -> str:
 
 
 def toolchain_parts(lock_path: Path) -> dict[str, Any]:
-    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    lock = read_lock(lock_path)  # the same validated reader as Toolchain.load
     comps = lock["components"]
     py = comps["pyslang"]
     sl = comps["slang"]

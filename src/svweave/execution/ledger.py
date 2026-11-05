@@ -13,6 +13,7 @@ from pathlib import Path
 
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.execution.models import AttemptRecord
+from svweave.storage.paths import DB_FILENAME
 
 MAX_RECORD_BYTES = 64 * 1024
 
@@ -131,7 +132,7 @@ class ExecutionLedger:
 def _references(state_dir: Path, conn: sqlite3.Connection | None) -> list[tuple[str, str, str, str]]:
     own_connection = None
     if conn is None:
-        path = state_dir / "svweave.db"
+        path = state_dir / DB_FILENAME
         if not path.exists() and not path.is_symlink():
             return []
         if path.is_symlink() or not path.is_file():

@@ -25,7 +25,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from svweave.application.build import DB_FILENAME
 from svweave.application.keys import cursor_key
 from svweave.application.options import WorkspaceOptions
 from svweave.application.queries import fit_items, flag_oversize
@@ -48,7 +47,7 @@ from svweave.domain.envelope import (
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import canonical_hash, is_sha256_hex
 from svweave.domain.states import Completeness, EvidenceKind, Freshness
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 
 HEX64 = r"^[0-9a-f]{64}$"
 MAX_MANIFEST_BYTES = 1 << 20
@@ -393,6 +392,13 @@ def ensure_static(db: Database, build: sqlite3.Row) -> str:
             ),
         )
     return eid
+
+
+def post_build(opts: WorkspaceOptions, build_id: str | None) -> None:
+    """THE step after every build or update, CLI and MCP alike (services.build_sync /
+    update_sync and the job runner): add a new post-build step here, once (first council review,
+    architecture finding 10). Today: the build's static evidence record."""
+    record_static_for(opts, build_id)
 
 
 def record_static_for(opts: WorkspaceOptions, build_id: str | None) -> None:

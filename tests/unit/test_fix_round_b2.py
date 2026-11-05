@@ -14,8 +14,8 @@ import jsonschema
 import pytest
 
 from svweave.application import services
+from svweave.application.schemas import check_schemas
 from svweave.application.semantic_common import _dir_sigs
-from svweave.config.schemas import check_schemas
 from svweave.domain.states import Completeness
 from tests.conftest import Ws, profile
 

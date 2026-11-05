@@ -1,0 +1,5 @@
+python: Python 3.12.3
+node: v22.23.4
+playwright (node, preinstalled): 1.63.0
+nproc: 4
+Linux 6.18.44-fc-v236 x86_64

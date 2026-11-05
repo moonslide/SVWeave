@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Critical mutation suite (plan 20.5, release gate "Critical invariants").
 
-Twenty-nine deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
+Forty-five deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
 the M12–M22 extra write-safety rules, M23–M26 Slurm boundaries, and M27 shared-launcher workspace
-binding, plus M28–M29 verified incremental-snapshot reuse. They are injected, one at a time, into a THROWAWAY COPY of the
+binding, plus M28–M29 verified incremental-snapshot reuse, M30 the complete change list of
+the roll-forward input gate and M31 the verified candidate snapshot of edit validate M32 the recorded state directory, M33 no-follow writes into external roots and M34–M39 the
+commit freeze check, approval binding, test-token, expiry and key-mode checks and the
+roll-forward journal/patch match, M40 the exact-range patch's expected bytes, M41–M42 the
+recovery rollback's gates and no-follow base read, M43 the state-dir token, M44 disabled
+repository hooks in the git runner and M45 the source writer's own no-follow. They are injected, one at a time, into a THROWAWAY COPY of the
 repository. For each one the mapped test subset is run against the copy; a mutation is ``KILLED`` when the subset
 fails (pytest exit 1 with at least one FAILED test) and ``SURVIVED`` when it stays green. Anything
 else (patch anchor missing, syntax/collection error, timeout, red baseline) is ``ERROR`` and is
@@ -121,7 +126,7 @@ MUTATIONS: list[Mutation] = [
                "    if sha256_hex(data[e.start_byte : e.end_byte]) != e.expected_sha256:\n",
                "    if False:  # " + MARK + ":M05\n"),
          Patch("src/svweave/application/edit.py",
-               "            if jr.current_sha(p) != jf.before_sha256:\n"
+               "            if jr.target_sha(ctx, jf.logical_path) != jf.before_sha256:\n"
                "                raise SvwError(\n"
                "                    ErrorCode.EDIT_CONFLICT,\n"
                "                    f\"{jf.logical_path} changed since the base snapshot; refusing to overwrite\",\n"
@@ -177,7 +182,7 @@ MUTATIONS: list[Mutation] = [
                "        else:\n            v = \"conflict\"\n",
                "        else:\n            v = \"applied\"  # " + MARK + ":M08\n"),
          Patch("src/svweave/application/edit.py",
-               "    if jr.current_sha(path) != expect_current:\n"
+               "    if jr.target_sha(ctx, logical) != expect_current:\n"
                "        raise SvwError(ErrorCode.EDIT_CONFLICT, \"file changed during recovery\",\n",
                "    if False:  # " + MARK + ":M08\n"
                "        raise SvwError(ErrorCode.EDIT_CONFLICT, \"file changed during recovery\",\n")],
@@ -391,6 +396,170 @@ MUTATIONS: list[Mutation] = [
                "                if False:  # " + MARK + ":M29\n")],
         ["tests/unit/test_incremental_snapshot.py::test_SNP_INC_07_noop_race_retries_and_continuous_changes_are_bounded"],
     ),
+    m(
+        "M30", "roll-forward decides on a display-truncated change list (first 20 changes only)",
+        "A3 (beyond 20.5); council review 2026-11-04",
+        [Patch("src/svweave/application/edit.py",
+               "        changed = stale.all_changes if isinstance(stale, _StaleError) else stale.details[\"changed\"]\n",
+               "        changed = stale.details[\"changed\"]  # " + MARK + ":M30\n")],
+        ["tests/fault_injection/test_recover_gates.py::"
+         "test_a3_a_foreign_change_behind_twenty_own_changes_is_still_refused"],
+    ),
+    m(
+        "M31", "edit validate reuses a candidate snapshot directory found on disk unverified",
+        "A3 (beyond 20.5); council review 2 2026-11-04",
+        [Patch("src/svweave/editing/candsnap.py",
+               "        if (not final.is_symlink() and content_matches(final, files)\n",
+               "        if (not final.is_symlink()  # " + MARK + ":M31\n")],
+        ["tests/unit/test_snapshot_trust.py::"
+         "test_SEC_SNP05_validate_never_reuses_a_planted_candidate_snapshot"],
+    ),
+    m(
+        "M32", "trust a .svweave/ that SVWeave did not create (repository-shipped state)",
+        "SEC (beyond 20.5); council review 2, owner decision 2026-11-05",
+        [Patch("src/svweave/config/trusted.py",
+               "    if state_dir_registered(trusted, state):\n        return\n",
+               "    return  # " + MARK + ":M32\n")],
+        ["tests/unit/test_state_trust.py::"
+         "test_SEC_STA01_a_shipped_state_dir_is_refused_by_every_command",
+         "tests/unit/test_state_trust.py::"
+         "test_SEC_STA04_a_replaced_or_forged_state_dir_does_not_match_its_record"],
+    ),
+    m(
+        "M33", "edit writes into an external root follow linked parent directories",
+        "A1/SEC (beyond 20.5); first council review, security finding 4",
+        [Patch("src/svweave/editing/journal.py",
+               "    base, rel = ctx.write_base(logical)\n    try:\n        st = safeio.lstat_under(base, rel)\n",
+               "    base, rel = ctx.write_base(logical)  # " + MARK + ":M33\n    try:\n"
+               "        st = os.lstat(ctx.to_abs(logical))\n"),
+         Patch("src/svweave/editing/journal.py",
+               "    try:\n        return sha256_hex(safeio.read_regular_under(base, rel))\n",
+               "    try:  # " + MARK + ":M33\n        return sha256_hex(safeio.read_regular(ctx.to_abs(logical)))\n"),
+         Patch("src/svweave/editing/journal.py",
+               "    safeio.write_under(base, rel, data, mode, durable=True)\n",
+               "    p = ctx.to_abs(logical)  # " + MARK + ":M33\n"
+               "    safeio.write_under(p.parent, p.name, data, mode, durable=True)\n")],
+        ["tests/unit/test_external_root_writes.py"],
+    ),
+    m(
+        "M34", "commit writes candidate bytes that changed after validation (freeze check removed)",
+        "20.5 #6 neighbour; EDT-04; first council review, test-evidence finding 4",
+        [Patch("src/svweave/application/edit.py",
+               "            fz.failures\n"
+               "            or fz.patch_hash != txn.patch_hash\n"
+               "            or fz.tree_hash != txn.record.get(\"candidate\", {}).get(\"validated_tree_hash\")\n"
+               "        ):\n",
+               "            False  # " + MARK + ":M34\n        ):\n")],
+        ["tests/unit/test_edit_commit.py::"
+         "test_edt04_replacing_patch_bytes_after_approval_invalidates_it"],
+    ),
+    m(
+        "M35", "a signed approval authorizes another transaction (binding check removed)",
+        "20.5 #6 neighbour; SEC-06; first council review, test-evidence finding 4",
+        [Patch("src/svweave/editing/approval.py",
+               "        if body.get(k) != v:\n            raise need(\"approval_binding_mismatch\", field=k)\n",
+               "        if False:  # " + MARK + ":M35\n"
+               "            raise need(\"approval_binding_mismatch\", field=k)\n")],
+        ["tests/unit/test_edit_commit.py::"
+         "test_sec06_approval_of_another_transaction_cannot_be_reused"],
+    ),
+    m(
+        "M36", "a test-token approval is accepted without the trusted policy flag",
+        "20.5 #6 neighbour; F5; first council review, test-evidence finding 4",
+        [Patch("src/svweave/editing/approval.py",
+               "    if body.get(\"method\") != \"tty\" and not allow_test_approvals:\n",
+               "    if False:  # " + MARK + ":M36\n")],
+        ["tests/unit/test_edit_review_fixes.py::test_f5_test_approvals_need_the_trusted_policy_flag"],
+    ),
+    m(
+        "M37", "an expired approval is still honoured",
+        "20.5 #6 neighbour; SEC-06; first council review, test-evidence finding 4",
+        [Patch("src/svweave/editing/approval.py",
+               "    if (now or _utcnow()) >= exp:\n",
+               "    if False:  # " + MARK + ":M37\n")],
+        ["tests/unit/test_edit_commit.py::test_sec06_expired_approval"],
+    ),
+    m(
+        "M38", "an approval key readable by others is used (key mode check removed)",
+        "20.5 #6 neighbour; F9; first council review, test-evidence finding 4",
+        [Patch("src/svweave/editing/approval.py",
+               "        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o077:\n",
+               "        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid():  # " + MARK
+               + ":M38\n")],
+        ["tests/unit/test_edit_review_fixes.py::test_f9_approval_key_must_be_private_and_owned",
+         "tests/unit/test_edit_review_fixes.py::test_f9_unsafe_key_blocks_commit"],
+    ),
+    m(
+        "M39", "roll-forward applies a journal written for another patch",
+        "A3 (beyond 20.5); first council review, test-evidence finding 6",
+        [Patch("src/svweave/application/edit.py",
+               "    if txn.patch_hash is None or txn.base_snapshot_id is None or j.patch_hash != txn.patch_hash:\n",
+               "    if txn.patch_hash is None or txn.base_snapshot_id is None:  # " + MARK + ":M39\n")],
+        ["tests/fault_injection/test_recover_gates.py::"
+         "test_a3_roll_forward_of_a_journal_for_another_patch_is_refused"],
+    ),
+    m(
+        "M40", "the exact-range patch replaces bytes that differ from the expected hash",
+        "20.5 #5 neighbour (ADR-012); first council review, architecture finding 4",
+        [Patch("src/svweave/editing/exact_range.py",
+               "    if hashlib.sha256(data[start_byte:end_byte]).hexdigest() != expected_sha256:\n",
+               "    if False:  # " + MARK + ":M40\n")],
+        ["tests/unit/test_adapters_serena.py", "tests/unit/test_edit_slang_symbol.py"],
+    ),
+    m(
+        "M41", "recovery rollback writes the journal's base bytes without approval/policy/journal checks",
+        "A3/EDT-08 (beyond 20.5); third council review M1",
+        [Patch("src/svweave/application/edit.py",
+               "            base = _rollback_gates(ctx, txn, j)\n",
+               "            base, _ = _base_rec(ctx, txn.base_snapshot_id)  # " + MARK + ":M41\n")],
+        ["tests/fault_injection/test_recover_gates.py::"
+         "test_rb_rollback_without_a_valid_approval_is_refused",
+         "tests/fault_injection/test_recover_gates.py::test_rb_rollback_with_editing_disabled_is_refused",
+         "tests/fault_injection/test_recover_gates.py::"
+         "test_rb_rollback_of_a_journal_naming_an_unapproved_file_is_refused"],
+    ),
+    m(
+        "M42", "recovery rollback reads the base bytes through linked snapshot directories",
+        "A1/SEC (beyond 20.5); third council review M1",
+        [Patch("src/svweave/application/edit.py",
+               "        data = safeio.read_regular_under(snapshots_dir(ctx) / base.snapshot_id, "
+               "entry.snapshot_path)\n",
+               "        data = safeio.read_regular(snapshots_dir(ctx) / base.snapshot_id / "
+               "entry.snapshot_path)  # " + MARK + ":M42\n")],
+        ["tests/fault_injection/test_recover_gates.py::"
+         "test_rb_rollback_takes_the_base_bytes_from_the_validated_snapshot_only"],
+    ),
+    m(
+        "M43", "a recorded state-dir path is trusted without its token (a replaced .svweave/)",
+        "SEC (beyond 20.5); third council review M2",
+        [Patch("src/svweave/config/trusted.py",
+               "    return want is not None and token is not None and hmac.compare_digest(_sha(token), "
+               "want)\n",
+               "    return want is not None  # " + MARK + ":M43\n")],
+        ["tests/unit/test_state_trust.py::"
+         "test_SEC_STA04_a_replaced_or_forged_state_dir_does_not_match_its_record"],
+    ),
+    m(
+        "M44", "the untrusted-repo git runner refreshes the index and lets repository hooks run",
+        "rule 9 (beyond 20.5); third council review H1",
+        [Patch("src/svweave/security/git.py",
+               '    "core.hooksPath=" + os.devnull,\n    "diff.autoRefreshIndex=false",\n',
+               "    # " + MARK + ":M44\n")],
+        ["tests/unit/test_diff_git_hardening.py::"
+         "test_SEC_DIF09_a_working_tree_diff_runs_no_repository_hook_and_leaves_the_index"],
+    ),
+    m(
+        "M45", "the source writer alone follows a parent swapped after the compare-and-set check",
+        "A1/SEC (beyond 20.5); third council review M6 (M33 reverts three sites at once)",
+        [Patch("src/svweave/editing/journal.py",
+               "    safeio.write_under(base, rel, data, mode, durable=True)\n",
+               "    p = ctx.to_abs(logical)  # " + MARK + ":M45\n"
+               "    safeio.write_under(p.parent, p.name, data, mode, durable=True)\n")],
+        ["tests/unit/test_external_root_writes.py::"
+         "test_SEC_EXT03_a_parent_swapped_after_the_compare_and_set_check_is_not_followed",
+         "tests/unit/test_external_root_writes.py::"
+         "test_SEC_EXT04_recovery_writes_into_an_external_root_follow_no_swapped_parent"],
+    ),
 ]
 
 
@@ -549,7 +718,11 @@ def main(argv: list[str] | None = None) -> int:
             rc, out, dur = run(pytest_cmd(py, mut.tests), copy_root, env, a.timeout)
             failed = FAILED_RE.findall(out)
             tail = out.strip().splitlines()[-4:]
-            if rc == 1 and failed:
+            if rc == 1 and failed and a.no_baseline:
+                # without a green baseline a failing test may have been red already: never
+                # counted as killed (first council review, policy finding 8)
+                status = "UNVERIFIED"
+            elif rc == 1 and failed:
                 status = "KILLED"
             elif rc == 0:
                 status = "SURVIVED"
@@ -574,7 +747,10 @@ def main(argv: list[str] | None = None) -> int:
         "total": len(results), "killed": killed,
         "survived": [r["id"] for r in results if r["status"] == "SURVIVED"],
         "errors": [r["id"] for r in results if r["status"] == "ERROR"],
-        "all_killed": killed == len(MUTATIONS) and len(results) == len(MUTATIONS),
+        "baseline_checked": not a.no_baseline,
+        "unverified": [r["id"] for r in results if r["status"] == "UNVERIFIED"],
+        "all_killed": (killed == len(MUTATIONS) and len(results) == len(MUTATIONS)
+                       and not a.no_baseline),
         "baselines": baseline,
         "mutations": results,
     }

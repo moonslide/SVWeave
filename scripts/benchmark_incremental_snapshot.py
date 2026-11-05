@@ -68,7 +68,7 @@ def _stage_timers():
     originals = []
     for module, names in (
         (cap, ("build_spec", "_nested_include_dirs", "_enumerate", "_inventory",
-               "_content_matches", "_freeze", "remove_snapshot_dir", "_hash_file")),
+               "content_matches", "_freeze", "remove_snapshot_dir", "_hash_file")),
         (inc, ("_inventory", "verify_snapshot_tree", "_copy_source", "_clone_verified", "_hash_fd")),
     ):
         for name in names:

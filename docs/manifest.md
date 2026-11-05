@@ -96,9 +96,13 @@ kept once in the semantics and logged as `duplicate_identical`. Same rule for `t
 ### Environment variables
 
 `$VAR` and `${VAR}` are expanded in path-like tokens only. The variable must be in the profile's
-`environment_allowlist`, present in the environment, and non-empty; otherwise the build is
-`MISSING_INPUT` (`env_not_allowlisted` / `env_not_set`). Expansion never yields an empty string.
-Nothing else is read from the environment.
+`environment_allowlist`, **also** in the trusted policy's `environment_allowlist` (`policy.json`,
+outside the repository: a repository profile can only narrow it), present in the environment, and
+non-empty; otherwise the build is `MISSING_INPUT` (`env_not_allowlisted` /
+`env_not_allowed_by_policy` / `env_not_set`). Expansion never yields an empty string. Nothing else
+is read from the environment. Why: `svweave.yaml` is repository content; a profile list alone let
+it read any variable of the gateway process (e.g. a token) and echo the value in a resolved path or
+an error message returned to the MCP client.
 
 ### Substitution and shell syntax (SEC-02)
 
@@ -135,7 +139,7 @@ directory and attach the project as an **external root**. Steps, in order:
      rtl:
        cwd: "@proj"
        source_inputs: [{kind: "filelist", path: "@proj/filelist/top.f", dialect: "svweave-filelist-v1", path_mode: "cwd"}]
-       environment_allowlist: ["project_home"]   # only if the filelist uses $project_home
+       environment_allowlist: ["project_home"]   # only if the filelist uses $project_home; also add it to policy.json
        # ...
    ```
 2. `svweave.local.yaml` next to it (see `svweave.local.example.yaml`; `schema_version` is required):

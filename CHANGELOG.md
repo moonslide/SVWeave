@@ -10,12 +10,78 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
 * **Graph export** (`svweave graph export`, ADR-014): one self-contained HTML page per build, the
   elaborated instance tree plus connections derived from direct port associations. No server, no
   network (strict CSP), source text embedded as escaped JSON. ADR-009 amended.
-* **Graph export subtree view** (`svweave graph export --root INSTANCE`, ADR-014 amendment): reads
+* **Graph export subtree view** (`svweave graph export --instance INSTANCE`; named `--root` during
+  development, never released under that name; ADR-014 amendment): reads
   and draws only one instance and its descendants of the same build (parent-link closure, indexed
   reads); signals declared outside are listed as boundary signals. Content equals the full page
   restricted to the subtree (GRF-I05 on the new `fixtures/language/grf_subtree` RTL); measured
   14.6 s -> 1.70 s CLI for one cluster at 41k instances (`scripts/benchmark_graph_subtree.py`,
   `evidence/bench/graph-subtree/`).
+* **Large SoC pages**: graph pages use a compact lossless format (`svweave-graph/2`, 8x smaller on
+  the C906 SoC); `--split` writes linked pages and `--lazy` one page that loads its parts, each part
+  at most `--page-budget` instances, together exactly the complete topology. 115,562 instances:
+  the single page opens in 10.1 s, the --split/--lazy index in about 0.55 s
+  (`evidence/bench/graph-large/`). `--lazy` relaxes the CSP to `script-src 'self'` on its page
+  only (ADR-014 amendment). `--split`/`--lazy` refuse `--max-instances`/`--max-fanout`.
+* **Graph export draws the complete topology by default** (behaviour change): no `--max-instances`
+  (was 5000) and no `--max-fanout` (was 16) unless given; both are now opt-in reductions. On the
+  C906 SoC the default page went from 19,957 connections with 122 signals left out to 30,378
+  connections, none left out.
+* **Graph export `--per-commit`**: several small commits on one diff page; each changed instance
+  lists the commits of `--diff-base..--diff-head` that changed its module (`git log -L`, deletions
+  included), with a clickable commit list. Example on the C906 minimal SoC:
+  `evidence/c906-per-commit-example/`.
+* **Security fixes from the council review** (each reproduced before the fix, each with a test
+  that fails without it): diff-impact's git no longer reads user/system config, cannot reach a
+  transport (a partial clone's lazy fetch ran `remote.<x>.uploadpack` from the repository config
+  on the host) and refuses partial clones; its timeout now holds while git is silent; diff
+  prefixes are pinned. **Breaking:** `$VAR` expansion in filelists now also needs the variable in
+  the trusted `policy.json` `environment_allowlist` (a repository `svweave.yaml` could read any
+  variable, e.g. a token, and echo it in an error message to the MCP client).
+* **`.svweave/` must be SVWeave's own** (**breaking**, owner decision of 2026-11-05): when
+  SVWeave creates it, a random token goes into `.svweave/.svweave-id` and its sha256, keyed by
+  the directory's real path, into `state_dir.json` in the trusted directory; any other non-empty
+  `.svweave/` (repository-shipped, extracted over a deleted one, moved) is refused
+  (`state_dir_not_adopted`) until `svweave init --adopt-state`. After upgrading, an existing
+  workspace needs that one step (the error, also on the MCP launcher's stderr, says so; a record of
+  the first, device/inode format is accepted once and rewritten). A state directory writable by
+  group or others, or a `.svweave` that is not a directory, is refused. Registration decisions
+  are serialized by a lock in the trusted directory (two first commands could otherwise leave
+  one's token next to the other's record). Mutations M32, M43.
+* **Fixes from the third council review** (`evidence/council-review-3-2026-11-05/`): the
+  untrusted-repo git runner sets `core.hooksPath=/dev/null` and `diff.autoRefreshIndex=false`
+  (a repository delivered with its `.git/` ran `.git/hooks/post-index-change` from
+  `svw_diff_impact`; reproduced; mutation M44); `svweave init` records and adopts the state
+  directory every other command uses (`<project.root>/.svweave`, not `<--root>/.svweave`), honours
+  `--manifest`, and leaves a `project.root` outside the manifest directory to the first command
+  (`data.state_dir.deferred`); `doctor` without a verified workspace keeps backend probe state in a
+  private temporary directory, never in the project's `.svweave/`, and names a refused state
+  directory `state_dir` instead of `policy_tightening`; `edit recover --rollback` now needs what
+  roll-forward needs (editing enabled, trusted location, current policy, the approval, a journal
+  of this transaction naming only its approved files) and reads the base bytes from the validated
+  base snapshot without following links (mutations M41, M42); `svweave schema emit` exits with
+  the error's code (an INTERNAL or POLICY_DENIED error exited 0); `scripts/qualify.py` blocks
+  when `git status` fails (the tree's state is unknown; `tree_state` in the report). The source
+  writer's own no-follow is pinned by a swap-after-check test (mutation M45).
+* **Fixes from the second council review** (each with a test that fails without it):
+  `--per-commit`'s `git log` ran the repository's `gpg.program` for a signed commit when the
+  repository config set `log.showSignature` (reproduced; signature checks, ext-diff and textconv
+  are now off); a symlinked `.svweave/snapshots/<id>/files` (a repository can ship `.svweave/`)
+  made the text search walk e.g. `$HOME`, and a planted `snapshot.json` was trusted: snapshot
+  trees and records are now read without following links and checked against their identity, a
+  reused snapshot or candidate snapshot must hold the captured bytes and record (mutation M31);
+  a read-only sandbox bind of a parent of `$HOME` or of `~/.ssh` is refused; graph pages run
+  only their own hashed viewer script; atlas pages no longer claim completeness and carry their
+  limitations; a hunk past the end of an unaligned file no longer marks the whole file changed;
+  rename preview counts a last line without newline like the edit gate; a BLOCKED build of an
+  unisolated worker stores its isolation. `svweave init` writes `environment_allowlist: []`.
+* **Write-path and record fixes from the council review**: recovery roll-forward decided on the
+  first 20 changes only (a display cut), so a foreign dependency edit behind 20 of the
+  transaction's own files was not seen and the remaining files were written (now the complete
+  list; mutation M30); a build made by a worker without bwrap isolation now keeps that fact in
+  its stored report (stats + a standing limitation in every later answer, also on reuse);
+  rename preview counts changed lines like the edit gate (it halved them, so "ready" requests
+  were refused by `edit prepare`).
 * **Graph export diff view** (`svweave graph export --diff-base REF [--diff-head REF]`, ADR-014
   amendment): only the instances of the modules/interfaces a git diff changes, with subtrees and
   connecting ancestors; per file the diff side matching the build's snapshot is mapped, so building

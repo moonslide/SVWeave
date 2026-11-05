@@ -24,7 +24,7 @@ G0 lock verified + lock fields non-null + backend probe (pyslang/slang READY, cb
 G1 manifest/snapshot/config/path-policy suites (unit + integration) with no FAIL/SKIP.
 G2 semantic suites (SEM/LOC/SVA/UVM/build identity, real pyslang, real UVM) with no FAIL/SKIP.
 G3 backend suites (cbm, Serena, registry, stdio gateway, API) + MCP contract tests.
-G4 edit safety (unit, fault injection, real-backend edit flow) + all 29 critical mutations (10 plan classes plus write/Slurm/workspace/snapshot safety) killed.
+G4 edit safety (unit, fault injection, real-backend edit flow) + all critical mutations (M01–M45: 10 plan classes plus write/Slurm/workspace/snapshot safety) killed.
 G5 every P0 suite has no FAIL/BLOCKED/SKIP, acceptance flow, statement >= 85 %, branch >= 80 %,
    docs check, benchmark within the plan 22.3 budgets on the reference corpus.
 
@@ -462,7 +462,8 @@ def step_docs(out: Path) -> dict[str, Any]:
 
 def eda_states() -> dict[str, Any]:
     """NOT_RUN unless declared evidence exists (never verified by SVWeave)."""
-    out = {k: {"state": "NOT_RUN", "records": []} for k in ("eda_compile", "simulation", "formal")}
+    out = {k: {"state": "NOT_RUN", "records": []}
+           for k in ("eda_compile", "simulation", "formal", "coverage")}
     d = REPO / "evidence" / "eda"
     if not d.is_dir():
         return out
@@ -473,7 +474,8 @@ def eda_states() -> dict[str, Any]:
             continue
         for r in recs if isinstance(recs, list) else [recs]:
             kind = r.get("kind") if isinstance(r, dict) else None
-            key = {"eda_compile": "eda_compile", "simulation": "simulation", "formal": "formal"}.get(kind or "")
+            key = {"eda_compile": "eda_compile", "simulation": "simulation", "formal": "formal",
+                   "coverage": "coverage"}.get(kind or "")
             if key:
                 out[key]["state"] = "EXTERNAL_DECLARED"
                 out[key]["records"].append({"file": str(f.relative_to(REPO)),
@@ -677,8 +679,9 @@ def markdown(R: dict[str, Any]) -> str:
         line("EDA compile:", eda["eda_compile"]["state"]),
         line("Simulation: ", eda["simulation"]["state"]),
         line("Formal:     ", eda["formal"]["state"]),
-        line("Coverage:   ", "MEASURED (SVWeave software QA only, not RTL coverage)"
-             if c and "statement_percent" in c else "NOT_RUN"),
+        # the RTL coverage slot of the EDA block (plan 28.2): never SVWeave's own test coverage,
+        # which is the "Statement / branch coverage" line above (rule 11)
+        line("Coverage:   ", eda["coverage"]["state"]),
         "",
         "Known limitations: docs/limitations.md",
         "Semantic deviations: docs/supported_features.md section 4",
@@ -754,13 +757,20 @@ def main(argv: list[str] | None = None) -> int:
         shutil.rmtree(out)
     (out / "logs").mkdir(parents=True)
 
+    # None: git failed (no checkout, dubious ownership, no git): the tree's state is unknown,
+    # which blocks like a dirty tree (third council review M3: it passed as clean)
+    status = git("status", "--porcelain")
     R: dict[str, Any] = {
         "version": "0.1.0-dev",
         "generated_utc": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "platform": f"{platform.system()} {platform.machine()} {platform.release()} "
                     f"py{platform.python_version()}",
         "source_commit": (git("rev-parse", "HEAD") or "NONE (no commit in this repository)")
-        + (" +dirty" if git("status", "--porcelain") else ""),
+        + (" +unknown-tree" if status is None else " +dirty" if status else ""),
+        # a release decision is computed from a commit: uncommitted changes (tests, goldens,
+        # this script) are tied to no identity, so they block (first council review, policy 3)
+        "uncommitted": (status or "").splitlines()[:50],
+        "tree_state": "unknown" if status is None else "dirty" if status else "clean",
         "lock_sha256": sha256(REPO / "toolchain.lock.json"),
         "source_identity": source_identity(),
         "skipped_steps": sorted(skip),
@@ -810,15 +820,24 @@ def main(argv: list[str] | None = None) -> int:
     R["license_review"] = lm.get("legal_review_status", "UNKNOWN")
     R["owner_items"] = owner_items()
     R["gates"] = compute_gates(R)
-    R["blockers"] = blockers(R)
+    R["blockers"] = blockers(R) + (
+        [f"source tree has {len(R['uncommitted'])} uncommitted change(s) (first: "
+         f"{R['uncommitted'][0].strip()}); qualify a commit"] if R["uncommitted"] else []) + (
+        ["the source tree's state is unknown (`git status` failed: no checkout, an unsafe "
+         "owner or no git); qualify a commit of a git checkout"]
+        if R["tree_state"] == "unknown" else [])
     reasons = [f"{k} {v['status']}: " + "; ".join(v["reasons"] or ["(no detail)"])
                for k, v in R["gates"].items() if v["status"] != "PASS"] + R["blockers"]
     R["decision_reasons"] = reasons
     R["release_decision"] = "ACCEPTED_STATIC_PREVIEW" if not reasons else "BLOCKED"
-    R["evidence_paths"] = [str(p.relative_to(REPO)) for p in
-                           [out / "report.json", out / "report.md", out / "coverage.json",
-                            out / "mutation.json", out / "capability_report.json"] if True] \
-        + ([R["benchmark_ref"][0]] if R["benchmark_ref"][0] else []) + ["evidence/m0/"]
+    # only files that exist (report.json/.md are written just below); no unrelated spike paths
+    def shown(p: Path) -> str:
+        return str(p.relative_to(REPO)) if p.is_relative_to(REPO) else str(p)
+
+    R["evidence_paths"] = [shown(p) for p in (out / "report.json", out / "report.md")] \
+        + [shown(p) for p in (out / "coverage.json", out / "mutation.json",
+                              out / "capability_report.json") if p.is_file()] \
+        + ([R["benchmark_ref"][0]] if R["benchmark_ref"][0] else [])
     (out / "report.json").write_text(json.dumps(R, indent=2, default=str) + "\n")
     (out / "report.md").write_text(markdown(R))
     print((out / "report.md").read_text())

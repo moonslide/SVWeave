@@ -11,11 +11,10 @@ import shutil
 import stat
 from pathlib import Path
 
-from svweave.adapters.serena.config import GENERATED_FILES
-from svweave.adapters.serena.guard import tree_hashes
 from svweave.config.context import WorkspaceContext
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import canonical_hash
+from svweave.editing.tree import GENERATED_FILES, tree_hashes
 
 CANDIDATES_DIR = "candidates"
 _CHUNK = 1 << 20

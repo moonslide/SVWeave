@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import re
 import stat
 from pathlib import Path
 from typing import Any
@@ -17,10 +15,10 @@ pytestmark = pytest.mark.integration
 
 
 def _page_data(path: Path) -> dict[str, Any]:
-    m = re.search(r'<script id="data" type="application/json">(.*?)</script>', path.read_text(), re.S)
-    assert m
-    data: dict[str, Any] = json.loads(m.group(1))
-    return data
+    from svweave.application.graph_codec import FORMAT, read_page
+
+    assert f'"format":"{FORMAT}"' in path.read_text()  # pages are written compact
+    return read_page(path.read_text())
 
 
 def _built(tmp_path: Path, **kw: Any) -> tuple[Path, str]:
@@ -71,7 +69,9 @@ def test_GRF_I03_limits_hubs_and_refusals(tmp_path: Path) -> None:
     assert code == 0 and env["data"]["truncated"] is True
     assert any(w.startswith("truncated:") for w in env["warnings"])
     cut = _page_data(root / env["data"]["path"])
-    assert [n["depth"] for n in cut["nodes"]] == sorted(n["depth"] for n in cut["nodes"])[: len(cut["nodes"])]
+    # shallowest first, exactly: the top and two of the four lanes, not a pre-order prefix
+    # [top, lane0, its SVA bind] (first council review, test-evidence finding 9)
+    assert [n["depth"] for n in cut["nodes"]] == [0, 1, 1]
     for bad in (["--name", "../x"], ["--name", "a/b"], ["--name", ".hidden"], ["--max-fanout", "1"],
                 ["--max-instances", "0"]):
         code, e = run(root, "graph", "export", "--build", bid, *bad)
@@ -81,7 +81,7 @@ def test_GRF_I03_limits_hubs_and_refusals(tmp_path: Path) -> None:
     assert not (root.parent / "x.html").exists()
 
 
-# ------------------------------------------------------------------ subtree view (--root)
+# ------------------------------------------------------------------ subtree view (--instance)
 # fixtures/language/grf_subtree: grf_soc -> g_cl[c].u_cl -> g_core[i].u_core -> 4 grf_stage, plus
 # one grf_reduce per cluster and one at the top. Expectations below are derived from that RTL.
 def _grf(tmp_path: Path, clusters: int = 2, cores: int = 2) -> tuple[Path, str]:
@@ -104,7 +104,7 @@ def _edges(data: dict[str, Any]) -> set[tuple[str, str, str, str]]:
 def test_GRF_I04_subtree_draws_exactly_the_rtl_below_the_root(tmp_path: Path) -> None:
     root, bid = _grf(tmp_path)
     cl = "grf_soc.g_cl[1].u_cl"
-    code, env = run(root, "graph", "export", "--build", bid, "--root", cl)
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", cl)
     assert code == 0 and env["outcome"] == "OK" and env["data"]["root"] == cl
     assert env["data"]["path"].startswith(f".svweave/exports/graph-{bid[:12]}-sub-")
     assert any("subtree view" in x for x in env["analysis_coverage"]["limitations"])
@@ -134,7 +134,7 @@ def test_GRF_I04_subtree_draws_exactly_the_rtl_below_the_root(tmp_path: Path) ->
     assert {(x["signal"], x["instances"]) for x in data["boundary"]} == {
         ("grf_soc.clk", 1), ("grf_soc.rst_n", 1), ("grf_soc.din", 1), ("grf_soc.cluster_bus", 1)}
     # a core: 4 stages, the f2d/d2e/e2w chain, and its port signals from the cluster as boundary
-    code, env = run(root, "graph", "export", "--build", bid, "--root", core0, "--name", "core")
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", core0, "--name", "core")
     core = _page_data(root / env["data"]["path"])
     assert [n["path"] for n in core["nodes"]] == [core0] + [f"{core0}.{s}" for s in stages]
     assert {x["signal"] for x in core["boundary"]} == {
@@ -155,7 +155,7 @@ def test_GRF_I05_every_subtree_equals_the_full_page_restricted_to_it(tmp_path: P
         for n in full["nodes"]:
             kids.setdefault(n["parent"], []).append(n["id"])
         for i, r in enumerate(full["nodes"]):
-            code, env = run(root, "graph", "export", "--build", bid, "--root", r["path"],
+            code, env = run(root, "graph", "export", "--build", bid, "--instance", r["path"],
                             "--max-fanout", fanout, "--name", f"s{fanout}-{i}")
             assert code == 0, env
             sub = _page_data(root / env["data"]["path"])
@@ -183,22 +183,22 @@ def test_GRF_I05_every_subtree_equals_the_full_page_restricted_to_it(tmp_path: P
 def test_GRF_I06_subtree_root_resolution_limits_and_refusals(tmp_path: Path) -> None:
     root, bid = _grf(tmp_path)
     cl = "grf_soc.g_cl[0].u_cl"
-    code, env = run(root, "graph", "export", "--build", bid, "--root", cl, "--name", "by-path")
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", cl, "--name", "by-path")
     iid = next(n["id"] for n in _page_data(root / env["data"]["path"])["nodes"] if n["path"] == cl)
-    code, env = run(root, "graph", "export", "--build", bid, "--root", iid, "--name", "by-id")
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", iid, "--name", "by-id")
     assert code == 0 and env["data"]["root"] == cl  # an instance id names the same subtree
-    code, env = run(root, "graph", "export", "--build", bid, "--root", "grf_soc", "--name", "top")
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", "grf_soc", "--name", "top")
     top = _page_data(root / env["data"]["path"])
     assert len(top["nodes"]) == 26 and top["boundary"] == []  # the top's ports are its own signals
-    code, env = run(root, "graph", "export", "--build", bid, "--root", cl, "--max-instances", "3",
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", cl, "--max-instances", "3",
                     "--name", "cut")
     assert code == 0 and env["data"]["truncated"] is True
     cut = _page_data(root / env["data"]["path"])
     assert [n["path"] for n in cut["nodes"]][0] == cl and [n["depth"] for n in cut["nodes"]] == [0, 1, 1]
-    code, e = run(root, "graph", "export", "--build", bid, "--root", "grf_soc.g_cl[9].u_cl")
+    code, e = run(root, "graph", "export", "--build", bid, "--instance", "grf_soc.g_cl[9].u_cl")
     assert code == 3 and e["error"]["code"] == "MISSING_INPUT"
     for bad in ("", "  ", "grf_soc\nx"):
-        code, e = run(root, "graph", "export", "--build", bid, "--root", bad)
+        code, e = run(root, "graph", "export", "--build", bid, "--instance", bad)
         assert code == 2 and e["error"]["code"] == "INVALID_CONFIG", repr(bad)
     pages = list((root / ".svweave" / "exports").iterdir())
     assert pages and all(stat.S_IMODE(p.stat().st_mode) == 0o600 for p in pages)
@@ -207,12 +207,12 @@ def test_GRF_I06_subtree_root_resolution_limits_and_refusals(tmp_path: Path) -> 
 # ------------------------------------------------------------------ diff view (--diff-base)
 # git diff -> changed module/interface definitions -> their instances with subtrees, plus the
 # ancestors that connect them (context). Expectations derived from the grf_subtree RTL.
-def _git_grf(tmp_path: Path, cores: int = 2) -> Path:
+def _git_grf(tmp_path: Path, cores: int = 2, clusters: int = 2) -> Path:
     from tests.integration.helpers import lang_ws
     from tests.integration.test_diff_impact import git
 
     w = lang_ws(tmp_path, "grf_subtree", "grf_soc", top_parameters=[
-        {"top": "grf_soc", "name": "CLUSTERS", "value": "2"},
+        {"top": "grf_soc", "name": "CLUSTERS", "value": str(clusters)},
         {"top": "grf_soc", "name": "CORES", "value": str(cores)},
     ])
     (w.root / ".gitignore").write_text(".svweave/\n")
@@ -252,6 +252,9 @@ def test_GRF_I07_diff_after_the_build_draws_changed_instances_and_their_ancestor
     d = env["data"]["diff"]
     assert [(x["qualified_name"], x["instances"], x["instances_drawn"])
             for x in d["changed_definitions"]] == [("grf_reduce", 3, 3)]
+    # the envelope carries what the README promises: files with the side used
+    assert d["files"] == [{"path": "grf_reduce.sv", "side": "old", "aligned": True}]
+    assert env["data"]["written"] is True and env["pagination"]["truncated"] is False
     data = _page_data(root / env["data"]["path"])
     assert data["meta"]["diff"] == "HEAD -> working tree" and data["root"] == "grf_soc"
     assert data["diff"]["files"] == [{"path": "grf_reduce.sv", "side": "old", "aligned": True}]
@@ -309,9 +312,9 @@ def test_GRF_I09_root_limits_the_diff_and_commit_to_commit_diffs(tmp_path: Path)
     bid = _build(root)
     _edit(root, "grf_core.sv", "grf_stage #(.W(W), .K(3)) u_exec", "grf_stage #(.W(W), .K(5)) u_exec")
     cl1 = "grf_soc.g_cl[1].u_cl"
-    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD", "--root", cl1)
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD", "--instance", cl1)
     assert code == 0 and env["data"]["diff"]["outside_root"] == 2
-    assert any("outside the root" in w for w in env["warnings"])
+    assert any("outside the instance" in w for w in env["warnings"])
     data = _page_data(root / env["data"]["path"])
     assert data["root"] == cl1 and [n["path"] for n in data["nodes"]][0] == cl1
     assert sorted(p for p, m in _marks(data).items() if m == "changed") == [
@@ -327,26 +330,575 @@ def test_GRF_I09_root_limits_the_diff_and_commit_to_commit_diffs(tmp_path: Path)
 
 
 @pytest.mark.usefixtures("isolated_git")
-def test_GRF_I10_diff_view_refusals(tmp_path: Path) -> None:
+def test_GRF_I10_nothing_to_draw_is_an_answer_and_bad_input_is_refused(tmp_path: Path) -> None:
     root = _git_grf(tmp_path)
     bid = _build(root)
-    code, e = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD")
-    assert code == 3 and e["error"]["code"] == "MISSING_INPUT"  # no change at all
-    assert e["error"]["details"]["reason"] == "diff_touches_no_instance"
+    exports = root / ".svweave" / "exports"
+
+    def nothing(*extra: str) -> dict[str, Any]:
+        code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD", *extra)
+        # like `query diff-impact` on an empty diff: OK, the build is not BLOCKED, no page
+        assert code == 0 and env["outcome"] == "OK", env.get("error")
+        assert env["analysis_coverage"]["completeness"] == "COMPLETE"
+        assert env["data"]["path"] is None and env["data"]["written"] is False
+        assert any(w.startswith("nothing to draw") for w in env["warnings"])
+        d: dict[str, Any] = env["data"]["diff"]
+        return d
+
+    assert "no changed line" in nothing()["nothing_to_draw"]  # clean tree
     (root / "notes.txt").write_text("not RTL\n")
     from tests.integration.test_diff_impact import git
 
     git(root, "add", "notes.txt")
-    code, e = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD")
-    assert code == 3 and e["error"]["details"]["files_not_in_build"] == 1
-    assert e["error"]["details"]["unmapped_files"] == ["notes.txt"]
+    d = nothing()
+    assert d["unmapped_files"] == ["notes.txt"] and d["summary"]["files_not_in_build"] == 1
     _edit(root, "grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];")
     core = "grf_soc.g_cl[0].u_cl.g_core[0].u_core"  # a reducer change does not reach a core
-    code, e = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD", "--root", core)
-    assert code == 3 and "under the root" in e["error"]["message"]
+    d = nothing("--instance", core)
+    assert "under the instance" in d["nothing_to_draw"] and d["outside_root"] == 3
+    assert not exports.exists() or not list(exports.glob("*-diff-*"))
     for bad in (["--diff-head", "HEAD"], ["--diff-base", "-x"], ["--diff-base", "a..b"],
                 ["--diff-base", "HEAD", "--diff-head", "--x"]):
         code, e = run(root, "graph", "export", "--build", bid, *bad)
         assert code == 2 and e["error"]["code"] == "INVALID_CONFIG", bad
     code, e = run(root, "graph", "export", "--build", bid, "--diff-base", "nosuchref")
-    assert code != 0 and e["error"] is not None
+    assert code == 3 and e["error"]["code"] == "MISSING_INPUT"
+    assert e["error"]["details"]["reason"] == "git_failed"
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I11_truncated_diff_view_reports_what_is_really_drawn(tmp_path: Path) -> None:
+    root = _git_grf(tmp_path)
+    bid = _build(root)
+    _edit(root, "grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];")
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD",
+                    "--max-instances", "3")
+    assert code == 0 and env["data"]["truncated"] is True and env["pagination"]["truncated"]
+    assert env["pagination"]["limit"] == 3
+    data = _page_data(root / env["data"]["path"])
+    assert [n["diff"] for n in data["nodes"]] == ["context"] * 3  # soc and both clusters
+    x = env["data"]["diff"]["changed_definitions"][0]
+    assert (x["instances"], x["instances_drawn"]) == (3, 0)  # not "3 drawn"
+    assert data["stats"]["changed_instances"] == 0
+
+
+# ------------------------------------------------------------------ --per-commit labels
+def _commit_series(root: Path) -> None:
+    """Four small commits on top of the base: grf_reduce twice (once a deletion only), grf_core
+    once, and one commit that changes no RTL."""
+    from tests.integration.test_diff_impact import git
+
+    _edit(root, "grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];")
+    git(root, "commit", "-q", "-am", "C1 reduce: add instead of xor")
+    _edit(root, "grf_core.sv", "grf_stage #(.W(W), .K(3)) u_exec", "grf_stage #(.W(W), .K(5)) u_exec")
+    git(root, "commit", "-q", "-am", "C2 core: exec stage K=5")
+    _edit(root, "grf_reduce.sv", "    else dout <= acc;\n", "")
+    git(root, "commit", "-q", "-am", "C3 reduce: delete the else line")
+    (root / "notes.txt").write_text("not RTL\n")
+    git(root, "add", "notes.txt")
+    git(root, "commit", "-q", "-m", "C4 notes only")
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I12_per_commit_labels_each_changed_instance_with_its_commits(tmp_path: Path) -> None:
+    root = _git_grf(tmp_path)
+    _commit_series(root)
+    bid = _build(root)  # build of the head revision: the new side is exact
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~4",
+                    "--diff-head", "HEAD", "--per-commit")
+    assert code == 0, env.get("error")
+    d = env["data"]["diff"]
+    assert [c["subject"] for c in d["commits"]] == [
+        "C1 reduce: add instead of xor", "C2 core: exec stage K=5",
+        "C3 reduce: delete the else line", "C4 notes only"]
+    assert [c["changes_drawn_definitions"] for c in d["commits"]] == [True, True, True, False]
+    by = {x["qualified_name"]: x["commits"] for x in d["changed_definitions"]}
+    assert by == {"grf_reduce": [0, 2], "grf_core": [1]}  # C3 is a pure deletion, still seen
+    assert any("change no drawn module" in w for w in env["warnings"])
+    data = _page_data(root / env["data"]["path"])
+    for n in data["nodes"]:
+        if n["diff"] == "changed":
+            want = [0, 2] if n["definition"] == "grf_reduce" else [1]
+            assert n["commits"] == want, n["path"]
+        else:
+            assert "commits" not in n
+    assert sum(1 for n in data["nodes"] if n["diff"] == "changed") == 3 + 4  # 3 reducers, 4 cores
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I12b_per_commit_is_not_guessed_without_a_head_build(tmp_path: Path) -> None:
+    root = _git_grf(tmp_path)
+    bid = _build(root)  # build of the BASE revision
+    _commit_series(root)
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~4",
+                    "--diff-head", "HEAD", "--per-commit")
+    assert code == 0
+    assert all(x["commits"] is None for x in env["data"]["diff"]["changed_definitions"])
+    assert any("carry no commit labels" in w for w in env["warnings"])
+    for bad in (["--diff-base", "HEAD", "--per-commit"], ["--per-commit"]):
+        code, e = run(root, "graph", "export", "--build", bid, *bad)
+        assert code == 2 and e["error"]["code"] == "INVALID_CONFIG", bad
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I13_an_instance_between_two_changed_ones_is_inside_not_context(
+        tmp_path: Path) -> None:
+    """A changed module nested in another changed module (a baud generator inside a changed
+    sub-system): the instances between them belong to the outer change, they are not context."""
+    from tests.integration.test_diff_impact import git
+
+    root = _git_grf(tmp_path)
+    _edit(root, "grf_cluster.sv", "logic [CORES*W-1:0] core_bus;",
+          "logic [CORES*W-1:0] core_bus;  // cluster change")
+    _edit(root, "grf_stage.sv", "else q <= d + W'(K);", "else q <= d + W'(K);  // stage change")
+    git(root, "commit", "-q", "-am", "cluster and stage")
+    bid = _build(root)
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~1",
+                    "--diff-head", "HEAD", "--per-commit", "--instance", "grf_soc.g_cl[0].u_cl")
+    assert code == 0, env.get("error")
+    marks = _marks(_page_data(root / env["data"]["path"]))
+    cl = "grf_soc.g_cl[0].u_cl"
+    assert marks[cl] == "changed"
+    assert all(marks[f"{cl}.g_core[{i}].u_core"] == "inside" for i in (0, 1))  # was "context"
+    assert all(m == "changed" for p, m in marks.items() if p.endswith(("u_fetch", "u_wb")))
+    assert "context" not in marks.values()
+
+
+def test_GRF_I14_the_default_page_is_the_complete_topology(tmp_path: Path) -> None:
+    """No cap by default: every instance and every signal is drawn (a cluster clock used by 21
+    instances was a hub, not drawn, under the former default --max-fanout 16). Caps are
+    explicit reductions."""
+    root, bid = _grf(tmp_path, clusters=2, cores=20)
+    total = 1 + 2 * (2 + 5 * 20) + 1
+    code, env = run(root, "graph", "export", "--build", bid)
+    assert code == 0
+    d = env["data"]
+    assert d["truncated"] is False and d["stats"]["instances_shown"] == total == 206
+    assert d["stats"]["max_instances"] is None and d["stats"]["max_fanout"] is None
+    assert d["stats"]["hub_signals"] == 0 and env["pagination"] == {
+        "limit": total, "next_cursor": None, "truncated": False}
+    assert not any("hubs" in w for w in env["warnings"])
+    page = _page_data(root / d["path"])
+    assert page["hubs"] == []
+    cl = "grf_soc.g_cl[0].u_cl"
+    clk = {to for frm, to, sig, _ in _edges(page) if sig == f"{cl}.clk" and frm == cl}
+    assert clk == {f"{cl}.g_core[{i}].u_core" for i in range(20)} | {f"{cl}.u_red"}
+    code, env = run(root, "graph", "export", "--build", bid, "--max-fanout", "16", "--name", "r")
+    assert code == 0 and f"{cl}.clk" in {h["signal"] for h in _page_data(
+        root / env["data"]["path"])["hubs"]}  # the reduction still works when asked for
+
+
+# ------------------------------------------------------------------ --split atlas
+def test_GRF_I15_the_atlas_pages_together_are_exactly_the_complete_topology(
+        tmp_path: Path) -> None:
+    root, bid = _grf(tmp_path, clusters=4, cores=30)  # 1 + 4 * (2 + 150) + 1 = 610 instances
+    code, env = run(root, "graph", "export", "--build", bid, "--name", "whole")
+    whole = _page_data(root / env["data"]["path"])
+    code, env = run(root, "graph", "export", "--build", bid, "--split", "--page-budget", "200",
+                    "--name", "atlas")
+    assert code == 0, env.get("error")
+    a = env["data"]["parts"]
+    assert env["data"]["mode"] == "split"
+    assert env["data"]["path"] == ".svweave/exports/atlas/index.html"
+    # the index takes cluster 0 whole (1 + 4 portal-or-cluster nodes + reducer + 151 = 157);
+    # clusters 1..3 (152 each) no longer fit and become pages of their own
+    assert a["pages"] == 4 and a["budget"] == 200 and a["oversized_pages"] == 0
+    assert a["largest_page"] <= 200
+    assert a["files_total"] == 4 and a["files_truncated"] is False
+    d = root / env["data"]["directory"]
+    pages = {f: _page_data(d / f) for f in a["files"]}
+    index = pages["index.html"]
+    portals = [n for n in index["nodes"] if "portal" in n]
+    assert sorted(n["path"] for n in portals) == [f"grf_soc.g_cl[{c}].u_cl" for c in (1, 2, 3)]
+    assert len(index["nodes"]) == 157
+    # each page states its limitations (rule 5), the atlas note among them, like the envelope
+    assert index["meta"]["limitations"] == env["analysis_coverage"]["limitations"][
+        -len(index["meta"]["limitations"]):] and any("atlas:" in x for x in
+                                                    index["meta"]["limitations"])
+    assert any("not a netlist" in x for x in whole["meta"]["limitations"])
+    for p in portals:  # every portal opens an existing page whose root it is
+        sub = pages[p["portal"]["href"]]
+        assert sub["meta"]["root"] == p["path"] and p["portal"]["instances"] == 152
+        assert sub["meta"]["atlas"]["crumbs"][0] == ["index", "index.html"]
+        assert [n["path"] for n in sub["nodes"] if n["parent"] is None] == [p["path"]]
+    # nodes: every instance on exactly one page, a portal counted on its own page
+    seen: dict[str, dict[str, Any]] = {}
+    for pg in pages.values():
+        for n in pg["nodes"]:
+            if "portal" in n:
+                continue
+            assert n["path"] not in seen, n["path"]
+            seen[n["path"]] = n
+    wnodes = {n["path"]: n for n in whole["nodes"]}
+    assert set(seen) == set(wnodes) and len(seen) == 610
+    for path, n in seen.items():
+        assert n["ports"] == wnodes[path]["ports"] and n["params"] == wnodes[path]["params"]
+    # edges: the union over all pages is the complete page's edge set, nothing twice
+    union: list[tuple[str, str, str, str]] = []
+    for pg in pages.values():
+        union += sorted(_edges(pg))
+    assert len(union) == len(set(union)) and set(union) == _edges(whole)
+    # the index page's search covers every instance and points at the page that shows it
+    from svweave.application.graph_codec import decode_search
+
+    found = decode_search(index["atlas_search"])
+    assert sorted(p for p, _ in found) == sorted(wnodes)
+    for path, file in found:
+        assert path in {n["path"] for n in pages[file]["nodes"] if "portal" not in n}
+
+
+def test_GRF_I16_atlas_refusals_and_a_subtree_atlas(tmp_path: Path) -> None:
+    root, bid = _grf(tmp_path, clusters=4, cores=30)
+    for bad in (["--split", "--diff-base", "HEAD"], ["--page-budget", "500"],
+                ["--split", "--page-budget", "10"], ["--split", "--name", "../x"],
+                # council review 2: a per-page cap would silently drop content of every page
+                ["--split", "--max-instances", "100"], ["--lazy", "--max-fanout", "8"]):
+        code, e = run(root, "graph", "export", "--build", bid, *bad)
+        assert code == 2 and e["error"]["code"] == "INVALID_CONFIG", bad
+        # a CLI-only command names its CLI flags (interface review 2)
+        assert e["error"]["details"]["field"].startswith("--"), e["error"]
+        assert e["error"]["details"]["field"] in e["error"]["message"], e["error"]
+    code, env = run(root, "graph", "export", "--build", bid, "--split", "--instance",
+                    "grf_soc.g_cl[1].u_cl", "--page-budget", "100", "--name", "sub")
+    assert code == 0, env.get("error")
+    # 152 instances: the 30 cores (5 each) are below MIN_PORTAL, so one oversized page, said so
+    assert env["data"]["parts"]["pages"] == 1 and env["data"]["parts"]["oversized_pages"] == 1
+    assert any("never split off" in w for w in env["warnings"])
+    index = _page_data(root / env["data"]["path"])
+    assert [n["path"] for n in index["nodes"]][0] == "grf_soc.g_cl[1].u_cl"
+    assert len(index["nodes"]) == 152
+
+
+def _chunk_data(path: Path) -> dict[str, Any]:
+    from svweave.application.graph_codec import read_chunk
+
+    return read_chunk(path.read_text())
+
+
+def test_GRF_I17_lazy_one_page_plus_parts_is_the_complete_topology(tmp_path: Path) -> None:
+    root, bid = _grf(tmp_path, clusters=4, cores=30)
+    code, env = run(root, "graph", "export", "--build", bid, "--name", "whole")
+    whole = _page_data(root / env["data"]["path"])
+    code, env = run(root, "graph", "export", "--build", bid, "--lazy", "--page-budget", "200",
+                    "--name", "lazy")
+    assert code == 0, env.get("error")
+    lz = env["data"]["parts"]
+    assert env["data"]["mode"] == "lazy"
+    assert lz["pages"] == 4 and lz["oversized_pages"] == 0
+    d = root / env["data"]["directory"]
+    assert sorted(lz["files"])[-1] == "index.html" and all(
+        f == "index.html" or (f.startswith("c-") and f.endswith(".js")) for f in lz["files"])
+    html = (d / "index.html").read_text()
+    from svweave.application.graph_template import CSP_LAZY, CSP_STRICT, VIEWER_HASH
+
+    head = html.split("</head>")[0]
+    assert f'content="{CSP_LAZY}"' in head  # only a --lazy page admits 'self'
+    assert f"script-src 'self' {VIEWER_HASH};" in head and "'unsafe-inline';" not in \
+        head.split("script-src")[1].split(";")[0]
+    for other in (root / ".svweave/exports/whole.html",):
+        ohead = other.read_text().split("</head>")[0]
+        assert f'content="{CSP_STRICT}"' in ohead and "'self'" not in ohead
+    index = _page_data(d / "index.html")
+    assert index["meta"]["lazy"] == {"parts": 4, "budget": 200, "instances_total": 610}
+    parts = {f: _chunk_data(d / f) for f in lz["files"] if f != "index.html"}
+    portals = [n for n in index["nodes"] if "portal" in n]
+    assert all(set(p["portal"]) == {"chunk", "instances"} for p in portals)
+    for p in portals:
+        part = parts[p["portal"]["chunk"]]
+        assert part["meta"] == {"chunk": p["portal"]["chunk"], "root": p["path"]}
+        assert part["nodes"][0]["path"] == p["path"]
+    # same disjoint cut as --split: the union is the complete topology
+    seen: set[str] = set()
+    union: list[tuple[str, str, str, str]] = []
+    for pg in [index, *parts.values()]:
+        seen |= {n["path"] for n in pg["nodes"] if "portal" not in n}
+        union += sorted(_edges(pg))
+    assert seen == {n["path"] for n in whole["nodes"]}
+    assert len(union) == len(set(union)) and set(union) == _edges(whole)
+    assert index["atlas_search"]["parent"] == [-1, 0, 0, 0]
+    code, e = run(root, "graph", "export", "--build", bid, "--lazy", "--split")
+    assert code == 2 and e["error"]["code"] == "INVALID_CONFIG"
+
+
+def test_GRF_I18_a_signal_no_instance_declares_is_drawn_on_atlas_pages_too(
+        tmp_path: Path) -> None:
+    """Council review 2: on a page of an atlas (region rows) a signal without an owner instance
+    (a package variable) was listed as boundary, while the complete page draws its sibling edge,
+    so the union of the pages was not the complete topology."""
+    from tests.integration.test_rename_preview import lean_ws
+
+    src = """\
+package gp; logic v; endpackage
+module drv (output logic o); assign o = 1'b1; endmodule
+module snk (input logic i); logic q; assign q = i; endmodule
+module gtop; logic z; assign z = 1'b0; drv u_d (.o(gp::v)); snk u_k (.i(gp::v)); endmodule
+"""
+    root, bid = lean_ws(tmp_path, {"rtl/g.sv": src}, "gtop")
+    code, env = run(root, "graph", "export", "--build", bid, "--name", "whole")
+    whole = _page_data(root / env["data"]["path"])
+    assert ("gtop.u_d", "gtop.u_k", "gp::v", "o -> i") in _edges(whole)
+    for mode in ("--split", "--lazy"):
+        code, env = run(root, "graph", "export", "--build", bid, mode, "--name", mode[2:])
+        assert code == 0, env.get("error")
+        page = _page_data(root / env["data"]["path"])
+        assert _edges(page) == _edges(whole), mode
+        assert not page.get("boundary"), mode
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_SEC_DIF06_every_diff_entry_point_refuses_a_partial_clone_layout(tmp_path: Path) -> None:
+    """Council review 2: SEC-DIF01 tested the helper only; removing the call in collect_changes
+    passed every test. Here the workspace itself is a promisor (partial-clone) repository."""
+    from tests.integration.test_diff_impact import git
+
+    root = _git_grf(tmp_path)
+    bid = _build(root)
+    git(root, "config", "extensions.partialClone", "origin")
+    git(root, "config", "remote.origin.promisor", "true")
+    for args in (["query", "diff-impact", "--build", bid],
+                 ["graph", "export", "--build", bid, "--diff-base", "HEAD"],
+                 ["graph", "export", "--build", bid, "--diff-base", "HEAD", "--diff-head", "HEAD",
+                  "--per-commit"]):
+        code, env = run(root, *args)
+        assert env["error"]["code"] == "POLICY_DENIED", (args, env["error"])
+        assert env["error"]["details"]["reason"] == "partial_clone_unsupported", args
+
+
+def test_GRF_I19_atlas_files_are_private_and_only_stale_pages_are_removed(tmp_path: Path) -> None:
+    """Council review 2: removal of an earlier cut's pages, and the atlas file modes, untested."""
+    root, bid = _grf(tmp_path, clusters=4, cores=30)
+    code, env = run(root, "graph", "export", "--build", bid, "--split", "--page-budget", "200",
+                    "--name", "atlas")
+    assert code == 0, env.get("error")
+    d = root / env["data"]["directory"]
+    assert stat.S_IMODE(d.stat().st_mode) == 0o700
+    first = sorted(env["data"]["parts"]["files"])
+    assert len(first) == 4
+    for f in first:
+        assert stat.S_IMODE((d / f).stat().st_mode) == 0o600, f
+    outside = tmp_path / "keep-me.html"
+    outside.write_text("not ours")
+    (d / "p-0123456789.html").write_text("stale page of another cut")
+    (d / "c-0123456789.js").write_text("stale part")
+    (d / "notes.txt").write_text("the user's own file")
+    (d / "p-link000000.html").symlink_to(outside)
+    code, env = run(root, "graph", "export", "--build", bid, "--split", "--page-budget", "5000",
+                    "--name", "atlas")
+    assert code == 0, env.get("error")
+    assert env["data"]["parts"]["files"] == ["index.html"]  # one page now: the old ones go
+    assert sorted(p.name for p in d.iterdir()) == ["index.html", "notes.txt", "p-link000000.html"]
+    assert outside.read_text() == "not ours" and (d / "p-link000000.html").is_symlink()
+
+
+def test_GRF_I20_the_atlas_planner_opens_subtrees_and_nests_portals() -> None:
+    """Council review 2: the "open" branch of the planner and portals below the index page were
+    never exercised. R -> X0..X2 -> 40 Y each -> 49 leaves each (Y: 50 instances); budget 100:
+    X0 and X1 are opened on the index, X2 no longer fits and is a portal whose page again has
+    portals (Y), so the chain is index -> X2 page -> Y page."""
+    from svweave.application.graph_atlas import INDEX, plan, search_index
+
+    rows: list[dict[str, Any]] = []
+
+    def add(iid: str, parent: str | None, path: str) -> None:
+        rows.append({"instance_id": iid, "parent_id": parent, "path": path, "ord": len(rows)})
+
+    add("R", None, "r")
+    for x in range(3):
+        add(f"X{x}", "R", f"r.x{x}")
+        for y in range(40):
+            add(f"Y{x}_{y}", f"X{x}", f"r.x{x}.y{y}")
+            for leaf in range(49):
+                add(f"L{x}_{y}_{leaf}", f"Y{x}_{y}", f"r.x{x}.y{y}.l{leaf}")
+    pages, size = plan(rows, ["R"], 100)
+    assert size["R"] == len(rows) == 1 + 3 * 40 * 50 + 3
+    index = pages[0]
+    assert index.file == INDEX and index.parent is None
+    assert {"X0", "X1"} <= set(index.members) and not {"X0", "X1"} & set(index.portals)  # opened
+    assert "X2" in index.portals
+    x2 = next(p for p in pages if p.roots == ["X2"])
+    assert x2.portals, "no portal below the index page"
+    for pg in pages[1:]:
+        assert pg.parent is not None and pg.roots[0] in pages[pg.parent].portals
+    assert all(len(p.members) <= 100 for p in pages)
+    # every instance on exactly one page; a portal also as a node of its parent page
+    home: dict[str, int] = {}
+    for i, pg in enumerate(pages):
+        for m in pg.members:
+            if m in pg.portals:
+                continue
+            assert m not in home, m
+            home[m] = i
+    assert set(home) == {r["instance_id"] for r in rows}
+    assert max(len(_chain(pages, i)) for i in range(len(pages))) == 3
+    idx = search_index(rows, pages)
+    assert idx["parent"] == [-1 if p.parent is None else p.parent for p in pages]
+    for i, r in enumerate(rows):
+        assert r["instance_id"] in pages[idx["pg"][i]].members
+
+
+def _chain(pages: list[Any], i: int) -> list[Any]:
+    out = [pages[i]]
+    while out[-1].parent is not None:
+        out.append(pages[out[-1].parent])
+    return out
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I21_per_commit_limits_are_reported(tmp_path: Path,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """Council review 2: the commit-range cap and the traced-definition cap were untested."""
+    import svweave.application.diff_impact as dimp
+    import svweave.application.graph_diff as G
+
+    root = _git_grf(tmp_path)
+    _commit_series(root)
+    bid = _build(root)
+    monkeypatch.setattr(dimp, "MAX_RANGE_COMMITS", 2)
+    monkeypatch.setattr(G, "MAX_RANGE_COMMITS", 2)
+    monkeypatch.setattr(G, "MAX_TRACED_DEFINITIONS", 1)
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~4",
+                    "--diff-head", "HEAD", "--per-commit")
+    assert code == 0, env.get("error")
+    d = env["data"]["diff"]
+    assert [c["subject"] for c in d["commits"]] == [
+        "C1 reduce: add instead of xor", "C2 core: exec stage K=5"]  # the oldest two only
+    assert any("more than 2 commits" in w for w in env["warnings"])
+    assert any("carry no commit labels" in w and "at most 1 definitions" in w
+               for w in env["warnings"])
+    assert sum(1 for x in d["changed_definitions"] if x.get("commits") is not None) == 1
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I22_a_build_of_a_third_revision_is_mapped_approximately_and_says_so(
+        tmp_path: Path) -> None:
+    """First council review (test-evidence finding 2): the approximate (unaligned) mapping of the
+    graph diff view was never exercised: the build's snapshot equals neither side of the diff."""
+    from tests.integration.test_diff_impact import git
+
+    root = _git_grf(tmp_path)
+    _edit(root, "grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];")
+    git(root, "commit", "-q", "-am", "X")
+    _edit(root, "grf_reduce.sv", "acc += din[i*W+:W];", "acc -= din[i*W+:W];")  # a third version
+    bid = _build(root)
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~1",
+                    "--diff-head", "HEAD")
+    assert code == 0, env.get("error")
+    files = {f["path"]: f for f in env["data"]["diff"]["files"]}
+    assert files["grf_reduce.sv"]["aligned"] is not True
+    assert any("match neither side" in w for w in env["warnings"])
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I23_commit_to_commit_on_a_build_of_the_head_maps_the_new_side_exactly(
+        tmp_path: Path) -> None:
+    """test-evidence finding 3: the `head is not None` branch of the new side (cat-file of the
+    head blob) ran in no test."""
+    from tests.integration.test_diff_impact import git
+
+    root = _git_grf(tmp_path)
+    _edit(root, "grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];")
+    git(root, "commit", "-q", "-am", "X")
+    bid = _build(root)  # the build IS the head revision
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~1",
+                    "--diff-head", "HEAD")
+    assert code == 0, env.get("error")
+    f = {x["path"]: x for x in env["data"]["diff"]["files"]}["grf_reduce.sv"]
+    assert (f["side"], f["aligned"]) == ("new", True)
+    assert not any("match neither side" in w for w in env["warnings"])
+    names = {x["qualified_name"] for x in env["data"]["diff"]["changed_definitions"]}
+    assert names == {"grf_reduce"}
+
+
+def test_GRF_I24_resolve_root_says_absence_is_no_proof_on_a_partial_build(tmp_path: Path) -> None:
+    """test-evidence finding 8 (rule 5): the PARTIAL-build branch of --instance was untested."""
+    from tests.conftest import Ws, profile
+
+    w = Ws(tmp_path / "ws")
+    w.write("rtl/t.sv", "module leaf(input logic i); endmodule\n"
+                        "module top; logic a; assign a = 1'b0; leaf u(.i(a)); endmodule\n")
+    w.config({"p": profile(source_inputs=[{"kind": "file", "path": "rtl/t.sv"}],
+                           top_modules=["top"])})
+    w.policy()
+    code, b = run(w.root, "build", "--profile", "p")
+    assert b["analysis_coverage"]["completeness"] == "PARTIAL", b  # empty module body: a stub
+    code, env = run(w.root, "graph", "export", "--build", b["build_id"], "--instance", "top.nope",
+                    "--allow-partial")
+    assert env["error"]["code"] == "MISSING_INPUT"
+    assert env["error"]["details"]["reason"] == "instance_missing"
+    assert "not proof" in env["error"]["message"]
+
+
+def test_GRF_I25_the_chunked_sql_path_draws_the_same_page(tmp_path: Path,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """test-evidence finding 12: the IN-list chunking (_SQL_CHUNK = 900) never ran under pytest;
+    with a chunk of 7 every subtree read is split in many queries."""
+    import svweave.application.graph_model as G
+
+    root, bid = _grf(tmp_path, clusters=2, cores=4)
+    cl = "grf_soc.g_cl[1].u_cl"
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", cl, "--name", "one")
+    ref = _page_data(root / env["data"]["path"])
+    monkeypatch.setattr(G, "_SQL_CHUNK", 7)
+    code, env = run(root, "graph", "export", "--build", bid, "--instance", cl, "--name", "many")
+    got = _page_data(root / env["data"]["path"])
+    assert len(got["nodes"]) > 7 and _edges(got) == _edges(ref)
+    assert [n["path"] for n in got["nodes"]] == [n["path"] for n in ref["nodes"]]
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I26_changed_instances_under_two_tops_have_no_common_ancestor(tmp_path: Path) -> None:
+    """test-evidence finding 13: changed chains with no common ancestor (a multi-top build)."""
+    from tests.conftest import Ws, profile
+    from tests.integration.test_diff_impact import git
+
+    w = Ws(tmp_path / "ws")
+    w.write("rtl/a.sv", "module la(input logic i, output logic o); assign o = i; endmodule\n"
+                        "module ta; logic x, y; assign x = 1'b0; la u(.i(x), .o(y)); endmodule\n")
+    w.write("rtl/b.sv", "module lb(input logic i, output logic o); assign o = i; endmodule\n"
+                        "module tb; logic x, y; assign x = 1'b0; lb u(.i(x), .o(y)); endmodule\n")
+    w.write(".gitignore", ".svweave/\n")
+    w.config({"p": profile(source_inputs=[{"kind": "file", "path": "rtl/a.sv"},
+                                          {"kind": "file", "path": "rtl/b.sv"}],
+                           top_modules=["ta", "tb"])})
+    w.policy()
+    git(w.root, "init", "-q", "-b", "main")
+    git(w.root, "add", "-A")
+    git(w.root, "commit", "-q", "-m", "base")
+    for f, m in (("rtl/a.sv", "la"), ("rtl/b.sv", "lb")):
+        p = w.root / f
+        p.write_text(p.read_text().replace(f"module {m}(input logic i, output logic o); assign o = i;",
+                                           f"module {m}(input logic i, output logic o); assign o = ~i;"))
+    code, b = run(w.root, "build", "--profile", "p")
+    assert code == 0, b.get("error")
+    code, env = run(w.root, "graph", "export", "--build", b["build_id"], "--diff-base", "HEAD")
+    assert code == 0, env.get("error")
+    data = _page_data(w.root / env["data"]["path"])
+    marks = _marks(data)
+    assert marks == {"ta": "context", "ta.u": "changed", "tb": "context", "tb.u": "changed"}
+    assert sorted(n["path"] for n in data["nodes"] if n["parent"] is None) == ["ta", "tb"]
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_GRF_I27_per_commit_attributes_the_branch_commit_not_the_merge(tmp_path: Path) -> None:
+    """Second council review (test evidence 11): merge commits in the range were untested. The
+    change is attributed to the commit that made it; the merge itself changes nothing drawn."""
+    from tests.integration.test_diff_impact import git
+
+    root = _git_grf(tmp_path)
+    git(root, "checkout", "-q", "-b", "feature")
+    _edit(root, "grf_reduce.sv", "acc ^= din[i*W+:W];", "acc += din[i*W+:W];")
+    git(root, "commit", "-q", "-am", "F1 reduce on a branch")
+    git(root, "checkout", "-q", "main")
+    (root / "notes.txt").write_text("main moved on\n")
+    git(root, "add", "notes.txt")
+    git(root, "commit", "-q", "-m", "M1 notes on main")
+    git(root, "merge", "-q", "--no-ff", "-m", "Merge feature", "feature")
+    bid = _build(root)
+    code, env = run(root, "graph", "export", "--build", bid, "--diff-base", "HEAD~1",
+                    "--diff-head", "HEAD", "--per-commit")
+    assert code == 0, env.get("error")
+    d = env["data"]["diff"]
+    subjects = [c["subject"] for c in d["commits"]]
+    assert "F1 reduce on a branch" in subjects and "Merge feature" in subjects
+    by = {x["qualified_name"]: x["commits"] for x in d["changed_definitions"]}
+    assert [subjects[i] for i in by["grf_reduce"]] == ["F1 reduce on a branch"]

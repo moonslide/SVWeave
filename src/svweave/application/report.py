@@ -10,12 +10,10 @@ from __future__ import annotations
 
 import hashlib
 import platform
-import subprocess
 from pathlib import Path
 from typing import Any
 
 from svweave import __version__
-from svweave.application.build import DB_FILENAME
 from svweave.application.evidence import states_for_build
 from svweave.application.semantic_common import build_envelope, report_of, require_build
 from svweave.application.session import Session, load_probe
@@ -24,28 +22,25 @@ from svweave.application.toolchain import find_lock
 from svweave.domain.envelope import Envelope
 from svweave.domain.errors import SvwError
 from svweave.orchestration.registry import BACKEND_NAMES
-from svweave.storage.db import Database
+from svweave.security.git import run_git
+from svweave.storage.db import DB_FILENAME, Database
 
 NOT_EVALUATED = "NOT_EVALUATED"
 GATES = ("G0", "G1", "G2", "G3", "G4", "G5")
 
 
 def _git_commit(root: Path) -> str | None:
+    """HEAD of the project, through the hardened runner (the repository is untrusted: no user or
+    repository-chosen program, no transport; first council review, architecture finding 3)."""
     try:
-        r = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["git", "-C", str(root), "rev-parse", "--verify", "-q", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+        out = run_git(root, ["rev-parse", "--verify", "-q", "HEAD"], timeout_s=5, max_bytes=4096)
+    except SvwError:
         return None
-    out = r.stdout.strip()
-    return out if r.returncode == 0 and out else None
+    sha = out.decode("ascii", "replace").strip()
+    return sha or None
 
 
-def _lock_hash(root: Path) -> str | None:
+def lock_hash(root: Path) -> str | None:
     try:
         return hashlib.sha256(find_lock(root).read_bytes()).hexdigest()
     except (SvwError, OSError):
@@ -88,7 +83,7 @@ def build_report(session: Session, request_id: str, build_id: str) -> Envelope:
         report: dict[str, Any] = {
             "svweave_version": __version__,
             "source_commit": _git_commit(ctx.project_root) or "NO_COMMIT",
-            "toolchain_lock_hash": _lock_hash(ctx.project_root),
+            "toolchain_lock_hash": lock_hash(ctx.project_root),
             "qualified_platform": f"{platform.system()} {platform.machine()} "
             f"python {platform.python_version()} (not a qualification claim)",
             "qualified_feature_subset": "static preview subset in docs/supported_features.md "

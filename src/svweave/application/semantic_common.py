@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Literal
 
@@ -80,8 +81,24 @@ def inputs_unchanged(ctx: WorkspaceContext, build: sqlite3.Row) -> bool:
 # LIMITATION (documented in docs/limitations.md): an edit that preserves size, mtime_ns, ino AND
 # ctime_ns of a file is invisible to the read-path shortcut; ctime cannot be set from user space,
 # so this needs root or a clock rollback.
-_VERDICTS: dict[tuple[str, str], tuple[str, bool | None]] = {}
-_RECORDS: dict[tuple[str, str], SnapshotRecord] = {}
+_VERDICTS: OrderedDict[tuple[str, str], tuple[str, bool | None]] = OrderedDict()
+_RECORDS: OrderedDict[tuple[str, str], SnapshotRecord] = OrderedDict()
+#: bound of each cache: a long-running MCP server must not keep every build and snapshot record
+#: it ever looked at (1-2 GiB hosts; first council review, architecture finding 9)
+CACHE_ENTRIES = 512
+
+
+def _put(cache: OrderedDict[Any, Any], key: Any, value: Any) -> None:
+    cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > CACHE_ENTRIES:
+        cache.popitem(last=False)
+
+
+def reset_caches() -> None:
+    """Forget every cached freshness verdict and snapshot record (``Session.close`` and tests)."""
+    _VERDICTS.clear()
+    _RECORDS.clear()
 
 
 def _sig(path: str) -> tuple[Any, ...]:
@@ -159,20 +176,14 @@ def freshness_of(
     unpublished (running, failed, PARTIAL) does not demote the published build. ``strict`` skips the stat fast path."""
     sid = build["snapshot_id"]
     sdir = snapshots_dir(ctx) / sid
-    snap_row = db.conn.execute(
-        "SELECT gc_state FROM snapshots WHERE snapshot_id=?", (sid,)
-    ).fetchone()
-    if (
-        snap_row is None
-        or snap_row["gc_state"] == "DELETED"
-        or not (sdir / "snapshot.json").is_file()
-    ):
+    gc_state = db.snapshot_gc_state(sid)
+    if gc_state is None or gc_state == "DELETED" or not (sdir / "snapshot.json").is_file():
         return Freshness.HISTORICAL
     key = (str(ctx.state_dir), str(build["build_id"]))
     rec = _RECORDS.get((key[0], sid))
     if rec is None:  # a snapshot directory is immutable: its record can be cached
         rec = load_record(sdir)
-        _RECORDS[(key[0], sid)] = rec
+        _put(_RECORDS, (key[0], sid), rec)
     if strict:
         current = _inputs_current_full(ctx, build, rec)
     else:
@@ -182,7 +193,7 @@ def freshness_of(
             current = hit[1]
         else:
             current = _inputs_current_full(ctx, build, rec)
-            _VERDICTS[key] = (fp, current)
+            _put(_VERDICTS, key, (fp, current))
     if current is None:
         return Freshness.UNKNOWN
     if current:

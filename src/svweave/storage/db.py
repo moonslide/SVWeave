@@ -24,6 +24,8 @@ from svweave.execution.models import AttemptRecord
 from svweave.snapshot.models import SnapshotRecord
 from svweave.storage.lock import WorkspaceBusy, init_lock, workspace_lock
 from svweave.storage.migrations import migrate
+from svweave.storage.paths import DB_FILENAME as DB_FILENAME
+from svweave.storage.paths import db_path as db_path
 
 KEEP_LAST_SUCCESSFUL = 3
 
@@ -303,6 +305,14 @@ class Database:
             if b is None:
                 raise SvwError(ErrorCode.MISSING_INPUT, f"unknown build {build_id}")
             self._publish(c, b["workspace_id"], profile or b["profile"], build_id)
+
+    def snapshot_gc_state(self, snapshot_id: str) -> str | None:
+        """The recorded gc_state of a snapshot (None: never recorded). The one lookup search and
+        freshness share (first council review, architecture finding 6)."""
+        row = self.conn.execute(
+            "SELECT gc_state FROM snapshots WHERE snapshot_id=?", (snapshot_id,)
+        ).fetchone()
+        return None if row is None else str(row["gc_state"])
 
     def published(self, workspace_id: str, profile: str) -> sqlite3.Row | None:
         row: sqlite3.Row | None = self.conn.execute(

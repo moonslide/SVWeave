@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from svweave.domain.envelope import Envelope
+from svweave.security.safeio import write_under
 
 TOOL_NAMES = (
     "svw_status",
@@ -465,9 +466,8 @@ def emit_mcp_schemas(out_dir: Path) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     written = []
     for name, text_ in mcp_schema_files().items():
-        p = out_dir / name
-        p.write_text(text_, encoding="utf-8")
-        written.append(p)
+        write_under(out_dir, name, text_.encode("utf-8"), 0o644)  # atomic, no link followed
+        written.append(out_dir / name)
     return written
 
 

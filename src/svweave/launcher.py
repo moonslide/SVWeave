@@ -9,7 +9,7 @@ import click
 
 from svweave.application.options import WorkspaceOptions
 from svweave.config.discovery import discover_workspace
-from svweave.domain.errors import ErrorCode, SvwError
+from svweave.domain.errors import ErrorCode, SvwError, startup_message
 from svweave.orchestration.toolchain import ENV_ROOT, Toolchain
 
 
@@ -70,7 +70,7 @@ def launcher(
         opts.load()  # authorization before server/log/state initialization
         serve_stdio(opts, use_graph=graph)
     except SvwError as exc:
-        click.echo(f"svweave-mcp: {exc.code.value}: {exc.message}", err=True)
+        click.echo(startup_message("svweave-mcp", exc), err=True)
         raise SystemExit(exc.exit_code) from exc
     finally:
         if toolchain_root is not None:

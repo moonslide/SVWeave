@@ -9,9 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Literal
-
-from pydantic import BaseModel
 
 from svweave.application.options import WorkspaceOptions
 from svweave.config.context import (
@@ -22,20 +19,15 @@ from svweave.config.context import (
 )
 from svweave.config.loader import load_local_config, load_manifest, load_policy
 from svweave.config.models import LocalConfig, Manifest, Policy
-from svweave.config.trusted import load_trusted_policy, policy_path_for
+from svweave.config.trusted import STATE_DIR_REASONS, load_trusted_policy, policy_path_for
+
+# CheckResult/Status are defined in domain.checks and re-exported here for importers
+from svweave.domain.checks import CheckResult as CheckResult
+from svweave.domain.checks import Status as Status
+from svweave.domain.checks import failed_check
 from svweave.domain.envelope import AnalysisCoverage, Envelope, ErrorInfo, Outcome
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.states import Completeness, Freshness
-
-Status = Literal["PASS", "FAIL", "WARN", "SKIP"]
-
-
-class CheckResult(BaseModel):
-    name: str
-    status: Status
-    code: str | None = None
-    message: str = ""
-    details: dict[str, object] = {}
 
 
 @dataclass
@@ -51,6 +43,11 @@ class DoctorContext:
 
 Check = Callable[[DoctorContext], list[CheckResult]]
 CHECKS: list[Check] = []
+#: which failing check decides doctor's error code: the most fundamental first
+_FAILURE_RANK = {c.value: i for i, c in enumerate((
+    ErrorCode.INVALID_CONFIG, ErrorCode.UNSUPPORTED_OPTION, ErrorCode.POLICY_DENIED,
+    ErrorCode.PATH_NOT_ALLOWED, ErrorCode.MISSING_INPUT, ErrorCode.BACKEND_UNAVAILABLE,
+    ErrorCode.CAPABILITY_MISMATCH))}
 
 
 def register_check(fn: Check) -> Check:
@@ -58,10 +55,7 @@ def register_check(fn: Check) -> Check:
     return fn
 
 
-def _fail(name: str, err: SvwError) -> CheckResult:
-    return CheckResult(
-        name=name, status="FAIL", code=err.code.value, message=err.message, details=err.details
-    )
+_fail = failed_check
 
 
 @register_check
@@ -130,7 +124,9 @@ def check_repo_local_policy(dc: DoctorContext) -> list[CheckResult]:
 def check_tightening(dc: DoctorContext) -> list[CheckResult]:
     err = dc.errors.get("workspace")
     if err is not None:
-        return [_fail("policy_tightening", err)]
+        # a refused state directory is not a policy-tightening failure (third council review M5)
+        state = err.details.get("reason") in STATE_DIR_REASONS
+        return [_fail("state_dir" if state else "policy_tightening", err)]
     if dc.workspace is None:
         return [
             CheckResult(
@@ -176,6 +172,31 @@ def check_root_mappings(dc: DoctorContext) -> list[CheckResult]:
     return out
 
 
+@register_check
+def check_environment_allowlist(dc: DoctorContext) -> list[CheckResult]:
+    """A profile variable the trusted policy does not also allow makes that profile's builds
+    BLOCKED (`env_not_allowed_by_policy`): say so before a build does (interface review 2)."""
+    if dc.manifest is None or dc.policy is None:
+        return []
+    allowed = set(dc.policy.environment_allowlist)
+    out = []
+    for name, prof in sorted(dc.manifest.profiles.items()):
+        missing = sorted(set(prof.environment_allowlist) - allowed)
+        if missing:
+            out.append(CheckResult(
+                name=f"environment_allowlist:{name}",
+                status="WARN",
+                code=ErrorCode.MISSING_INPUT.value,
+                message=f"profile {name!r} allows {', '.join(missing)} but the trusted policy's "
+                "environment_allowlist does not; filelists expanding them are BLOCKED until a "
+                "person adds them to policy.json (outside the repository)",
+            ))
+        elif prof.environment_allowlist:
+            out.append(CheckResult(name=f"environment_allowlist:{name}", status="PASS",
+                                   message="every allowed variable is also in the trusted policy"))
+    return out
+
+
 def build_context(options: WorkspaceOptions, probe: bool = False) -> DoctorContext:
     dc = DoctorContext(options=options, probe=probe)
     mpath = options.manifest_path or (options.root / MANIFEST_FILENAME)
@@ -215,11 +236,15 @@ def run_doctor(options: WorkspaceOptions, request_id: str, *, probe: bool = Fals
     warnings = [f"{r.name}: {r.message}" for r in results if r.status == "WARN"]
     error = None
     if failures:
-        f = failures[0]
+        # the most fundamental failure decides the code (and so the exit code), not the order of
+        # the checks: configuration 2, then policy 6, missing input 3, backends 4 (first council
+        # review, interface finding 7); every failing check is listed
+        f = min(failures, key=lambda r: _FAILURE_RANK.get(r.code or ErrorCode.INVALID_CONFIG.value,
+                                                           len(_FAILURE_RANK)))
         error = ErrorInfo(
             code=f.code or ErrorCode.INVALID_CONFIG.value,
             message=f.message,
-            details={"check": f.name},
+            details={"check": f.name, "failed_checks": [r.name for r in failures]},
         )
     return Envelope(
         request_id=request_id,

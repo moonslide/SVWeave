@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from jsonschema import Draft202012Validator
 
-from svweave.config.schemas import check_schemas
+from svweave.application.schemas import check_schemas
 from svweave.gateway import schemas
 from svweave.gateway.tools import TOOLS
 

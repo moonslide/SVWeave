@@ -18,9 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from svweave import __version__
-from svweave.application.build import DB_FILENAME
 from svweave.application.options import WorkspaceOptions
-from svweave.application.report import _lock_hash
+from svweave.application.report import lock_hash
 from svweave.application.semantic_common import build_envelope, report_of, require_build
 from svweave.config.paths import is_within
 from svweave.domain.envelope import Envelope
@@ -28,7 +27,7 @@ from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import canonical_hash
 from svweave.security import safeio
 from svweave.security.redaction import Redactor
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 
 BUNDLE_VERSION = "1.0"
 
@@ -194,7 +193,7 @@ def make_bundle(
                     "diagnostic_outcome",
                 )
             },
-            "toolchain_lock_hash": _lock_hash(ctx.project_root),
+            "toolchain_lock_hash": lock_hash(ctx.project_root),
             "versions": {"svweave": __version__, "python": platform.python_version()},
             "semantic_digest": digest,
             "reproduce": [

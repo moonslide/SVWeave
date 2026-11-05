@@ -110,6 +110,9 @@ class Session:
     def close(self) -> None:
         try:
             self.jobs.shutdown()
+            from svweave.application.semantic_common import reset_caches
+
+            reset_caches()
         finally:
             with self._lock:
                 reg, self._registry = self._registry, None

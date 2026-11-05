@@ -402,6 +402,32 @@ def test_f7_registry_for_workspace_and_doctor_wire_protected_roots(tmp_path: Pat
     assert seen[0].protected_paths == (tmp_path,)  # no manifest: protect the whole project root
 
 
+def test_f7_doctor_without_a_verified_workspace_keeps_probe_state_out_of_the_project(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Third council review H3: when the workspace fails to load (e.g. a refused, unadopted
+    .svweave/) the fallback registry put its state, and ``--probe`` its rmtree/copytree, under
+    ``<root>/.svweave``. Now a private throwaway directory outside the project, removed after."""
+    seen: list[tuple[Path, Path]] = []
+
+    def fake_health(r: BackendRegistry, probe: bool) -> list[Any]:
+        seen.append((r.backends_root, r.snapshots_root))
+        r.backends_root.mkdir(parents=True)  # what a probe would write
+        return []
+
+    monkeypatch.setattr(doctor_checks, "health_checks", fake_health)
+    monkeypatch.setenv("SVWEAVE_TOOLCHAIN_ROOT", str(toolchain().root))
+    proj = tmp_path / "proj"
+    (proj / ".svweave").mkdir(parents=True)
+    (proj / ".svweave" / "svweave.db").write_bytes(b"shipped")
+    doctor_checks.backend_checks(SimpleNamespace(options=SimpleNamespace(root=proj), workspace=None),
+                                 probe=True)
+    [(backends, snaps)] = seen
+    for p in (backends, snaps):
+        assert proj.resolve() not in p.resolve().parents, p
+    assert sorted(os.listdir(proj / ".svweave")) == ["svweave.db"]  # untouched
+    assert not backends.parent.exists()  # the throwaway directory is gone
+
+
 # ----------------------------------------------------------------------------- F8
 def test_f8_pyslang_ready_requires_a_real_compile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from svweave.orchestration import registry as R

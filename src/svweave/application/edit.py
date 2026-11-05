@@ -14,6 +14,7 @@ enforced here and nowhere else may be bypassed:
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections import Counter
 from collections.abc import Callable, Iterator
@@ -25,8 +26,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from svweave.adapters.serena.guard import tree_hashes
-from svweave.application.build import DB_FILENAME, run_build, run_build_on_record
+from svweave.application.build import run_build, run_build_on_record
 from svweave.application.options import WorkspaceOptions
 from svweave.application.semantic_common import require_build
 from svweave.application.toolchain import compute_toolchain
@@ -41,7 +41,7 @@ from svweave.domain.envelope import (
     Provenance,
 )
 from svweave.domain.errors import ErrorCode, SvwError
-from svweave.domain.ids import canonical_hash
+from svweave.domain.ids import canonical_hash, is_sha256_hex
 from svweave.domain.states import Completeness, DiagnosticOutcome, Freshness
 from svweave.domain.states import TransactionState as S
 from svweave.editing import approval as appr
@@ -67,7 +67,7 @@ from svweave.editing.diffing import (
     patch_hash,
     patch_record,
 )
-from svweave.editing.models import PrepareRequest
+from svweave.editing.models import KEY_PATTERN, Confirmation, PrepareRequest
 from svweave.editing.plan import (
     declared_files,
     denied,
@@ -80,10 +80,11 @@ from svweave.editing.plan import (
     slang_scope_escape,
 )
 from svweave.editing.store import Txn, TxnStore, new_txn_id, now_iso, valid_txn_id
+from svweave.editing.tree import tree_hashes
 from svweave.manifest.resolver import resolve_profile
 from svweave.snapshot.capture import capture_snapshot, check_freshness, load_record, snapshots_dir
 from svweave.snapshot.models import SnapshotRecord
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 from svweave.storage.lock import WorkspaceBusy, workspace_lock
 
 __all__ = [
@@ -221,19 +222,30 @@ def _base_rec(ctx: WorkspaceContext, sid: str) -> tuple[SnapshotRecord, Path]:
     return load_record(d), d
 
 
+class _StaleError(SvwError):
+    """The freshness refusal. ``details`` shows at most 20 changes; ``all_changes`` (never
+    serialized) keeps the complete list for gates that must judge every change."""
+
+    all_changes: list[dict[str, Any]]
+
+
 def _stale(ctx: WorkspaceContext, rec: SnapshotRecord) -> SvwError | None:
     res = check_freshness(ctx, rec)
     if res.freshness == "CURRENT":
         return None
-    return SvwError(
+    changes = [c.model_dump() for c in res.changed]
+    err = _StaleError(
         ErrorCode.STALE_SNAPSHOT,
         "the workspace changed since the base snapshot (sources or dependencies)",
         {
             "reason": "workspace_changed",
             "snapshot_id": rec.snapshot_id,
-            "changed": [c.model_dump() for c in res.changed[:20]],
+            "changed": changes[:20],
+            "changed_total": len(changes),
         },
     )
+    err.all_changes = changes
+    return err
 
 
 # ------------------------------------------------------------------------------ freezing
@@ -825,14 +837,6 @@ def _validation_envelope(
 
 
 # ------------------------------------------------------------------------------ approve
-@dataclass(frozen=True)
-class Confirmation:
-    """What the human typed and how it was obtained (``tty`` or the unqualified ``test_token``)."""
-
-    typed: str
-    method: str
-
-
 def approve(
     opts: WorkspaceOptions,
     request_id: str,
@@ -944,6 +948,11 @@ def commit(
     """Apply an approved, validated transaction. ``crash_after_files`` is TEST-ONLY: keyword
     argument of this function, not reachable from configuration, environment or MCP."""
     _require_id(transaction_id)
+    if not isinstance(request_key, str) or not re.fullmatch(KEY_PATTERN, request_key):
+        # the MCP schema checks this; the CLI did not, and a key JSON escapes (", \, non-ASCII)
+        # never matched the stored record, so reusing it for another transaction went unnoticed
+        raise SvwError(ErrorCode.INVALID_CONFIG,
+                       "request_key must be 8-128 of [A-Za-z0-9._:-]", {"field": "request_key"})
     with _session(opts) as (ctx, db, store):
         require_editing_enabled(ctx)
         _check_trusted_location(ctx)
@@ -1070,23 +1079,27 @@ def check_inputs_unchanged(
     own = tolerate or {}
     for sid in sorted(s for s in sids if s):
         r, _ = _base_rec(ctx, sid)
-        stale = _stale(ctx, r)
+        stale = _stale(ctx, r)  # the one freshness seam (tests disable it to reach the CAS)
         if stale is None:
             continue
-        changed = stale.details.get("changed", [])
+        # decide on the COMPLETE change list: the displayed list is cut at 20 and could hide a
+        # foreign change behind the transaction's own applied files (roll-forward would write)
+        changed = stale.all_changes if isinstance(stale, _StaleError) else stale.details["changed"]
         foreign = [
             c for c in changed
             if not (
                 c["change"] == "modified" and c["path"] in own
-                and jr.current_sha(ctx.to_abs(c["path"])) == own[c["path"]]
+                and jr.target_sha(ctx, c["path"]) == own[c["path"]]
             )
         ]
         if foreign or not changed:
+            shown = foreign or changed
             raise SvwError(
                 ErrorCode.EDIT_CONFLICT,
                 "the workspace changed since validation (a source or dependency was edited); "
                 "nothing was written",
-                {"reason": "workspace_changed", **stale.details, "changed": foreign or changed})
+                {"reason": "workspace_changed", **stale.details,
+                 "changed": shown[:20], "changed_total": len(shown)})
 
 
 def _conflict(store: TxnStore, txn: Txn, err: SvwError) -> SvwError:
@@ -1127,9 +1140,8 @@ def _commit_locked(
     # per-file CAS precondition BEFORE the journal exists (nothing to recover yet)
     try:
         for jf in files:
-            p = ctx.to_abs(jf.logical_path)
-            jr._lstat_regular(p)
-            if jr.current_sha(p) != jf.before_sha256:
+            jr.target_stat(ctx, jf.logical_path)
+            if jr.target_sha(ctx, jf.logical_path) != jf.before_sha256:
                 raise SvwError(
                     ErrorCode.EDIT_CONFLICT,
                     f"{jf.logical_path} changed since the base snapshot; refusing to overwrite",
@@ -1204,7 +1216,7 @@ def _post_apply(
     v = txn.record["validation"]
     expected = {f["logical_path"]: f["after_sha256"] for f in v["files"]}
     failures: list[dict[str, Any]] = []
-    mismatches = [lp for lp, h in expected.items() if jr.current_sha(ctx.to_abs(lp)) != h]
+    mismatches = [lp for lp, h in expected.items() if jr.target_sha(ctx, lp) != h]
     if mismatches:
         failures.append({"reason": "post_apply_bytes_differ", "paths": mismatches})
     pb = txn.record.get("profile_builds", {})
@@ -1246,7 +1258,7 @@ def _post_apply(
         from svweave.application.semantic_common import freshness_of
 
         for prof, bid, old in to_publish:
-            db.publish_build(bid)
+            db.publish_build(bid, prof)  # a shared build_id must move THIS profile's pointer
             verified[prof]["old_build_id"] = old
             verified[prof]["old_build_freshness"] = (
                 freshness_of(ctx, db, require_build(db, old)).value if old else None
@@ -1395,34 +1407,32 @@ def _candidate_bytes(ctx: WorkspaceContext, txn_id: str, logical: str, want: str
     return data if sha256_hex(data) == want else None
 
 
-def _before_bytes(ctx: WorkspaceContext, j: jr.Journal, logical: str, want: str) -> bytes | None:
+def _before_bytes(ctx: WorkspaceContext, base: SnapshotRecord, logical: str,
+                  want: str) -> bytes | None:
+    """The base snapshot's own bytes of ``logical`` (its validated record names the file and its
+    hash), read without following any link."""
     from svweave.domain.ids import sha256_hex
     from svweave.security import safeio
 
-    p = snapshots_dir(ctx) / j.base_snapshot_id / "files" / snapshot_rel(logical)
+    entry = next((f for f in base.files if f.logical_path == logical), None)
+    if entry is None or entry.sha256 != want:
+        return None
     try:
-        data = safeio.read_regular(p)
+        data = safeio.read_regular_under(snapshots_dir(ctx) / base.snapshot_id, entry.snapshot_path)
     except (OSError, SvwError):
         return None
     return data if sha256_hex(data) == want else None
 
 
 def _write_one(ctx: WorkspaceContext, logical: str, data: bytes, expect_current: str) -> None:
-    import os
     import stat as st
 
-    from svweave.security import safeio
 
-    path = ctx.to_abs(logical)
-    if jr.current_sha(path) != expect_current:
+    if jr.target_sha(ctx, logical) != expect_current:
         raise SvwError(ErrorCode.EDIT_CONFLICT, "file changed during recovery",
                        {"reason": "changed_during_recovery", "path": logical})
-    mode = st.S_IMODE(os.lstat(path).st_mode)
-    jr._lstat_regular(path)
-    inside = ctx.project_root in path.parents
-    base = ctx.project_root if inside else path.parent
-    name = path.relative_to(ctx.project_root).as_posix() if inside else path.name
-    safeio.write_under(base, name, data, mode, durable=True)
+    mode = st.S_IMODE(jr.target_stat(ctx, logical).st_mode)
+    jr.write_target(ctx, logical, data, mode)
 
 
 def _roll_forward_gates(ctx: WorkspaceContext, txn: Txn, j: jr.Journal) -> None:
@@ -1460,6 +1470,36 @@ def _roll_forward_gates(ctx: WorkspaceContext, txn: Txn, j: jr.Journal) -> None:
             "the candidate no longer equals the approved patch; roll-forward refused (EDT-04)",
             {"reason": "candidate_changed_after_validation"},
         )
+
+
+def _rollback_gates(ctx: WorkspaceContext, txn: Txn, j: jr.Journal) -> SnapshotRecord:
+    """Rollback writes into the original source too: the same editing permission, trusted
+    location, current policy and approval (valid when the commit began) as roll-forward, a journal
+    that belongs to this transaction and names only its approved files, and bytes taken from the
+    validated base snapshot (third council review M1: rollback wrote the journal's base bytes with
+    none of these checks, from a path built with an unvalidated ``base_snapshot_id``)."""
+    require_editing_enabled(ctx)
+    _check_trusted_location(ctx)
+    if (txn.patch_hash is None or txn.base_snapshot_id is None
+            or j.transaction_id != txn.transaction_id
+            or j.base_snapshot_id != txn.base_snapshot_id or j.patch_hash != txn.patch_hash
+            or not is_sha256_hex(txn.base_snapshot_id)):
+        raise SvwError(ErrorCode.APPROVAL_REQUIRED,
+                       "journal and transaction disagree (id, base snapshot or patch)",
+                       {"reason": "journal_patch_mismatch"})
+    files = [f.logical_path for f in j.files]
+    if not set(files) <= set(txn.record.get("files", [])):
+        raise SvwError(ErrorCode.APPROVAL_REQUIRED,
+                       "the journal names files outside the approved transaction",
+                       {"reason": "journal_files_not_approved"})
+    recheck_edit_policy(ctx, files, list(txn.record.get("profiles", [])))
+    appr.verify_approval(
+        ctx.trusted_dir, _profiles_binding(txn, ctx),
+        allow_test_approvals=ctx.policy.allow_test_approvals,
+        now=datetime.fromisoformat(j.created_at),
+    )
+    rec, _ = _base_rec(ctx, txn.base_snapshot_id)
+    return rec
 
 
 def _recover_locked(
@@ -1514,8 +1554,9 @@ def _recover_locked(
         if conflicts:
             notes.append("rollback refused: conflicts exist (the human's changes are kept)")
         else:
+            base = _rollback_gates(ctx, txn, j)
             for v in applied:
-                data = _before_bytes(ctx, j, v.logical_path, v.before_sha256)
+                data = _before_bytes(ctx, base, v.logical_path, v.before_sha256)
                 if data is None:
                     raise SvwError(ErrorCode.MISSING_INPUT, "original bytes unavailable",
                                    {"reason": "base_missing", "path": v.logical_path})

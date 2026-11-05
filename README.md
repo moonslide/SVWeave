@@ -52,7 +52,7 @@ self-contained HTML graph of a build that you open from disk.
 | What a change to a module, port, signal or instance touches | `svweave query impact` | `svw_impact` | the build's instance tree and resolved references |
 | What a git diff touches | `svweave query diff-impact` | `svw_diff_impact` | `git diff` mapped onto the build's snapshot |
 | Every edit a rename would make, with blockers | `svweave query rename-preview` | `svw_rename_preview` | resolved references plus a verified lexical scan (read-only) |
-| A browsable graph of the hierarchy and its connections | `svweave graph export` | (CLI only) | the build, written as one static HTML file |
+| A browsable graph of the hierarchy and its connections; of one subtree (`--instance`) or of only what a git diff changes (`--diff-base`) | `svweave graph export` | (CLI only) | the build, written as one static HTML file |
 | Change code safely | `svweave edit ...` | `svw_edit` (cannot approve) | candidate copy, slang validation, human approval, compare-and-set |
 | Status, evidence, reports | `svweave doctor`, `svweave query evidence`, `svweave report` | `svw_status`, `svw_evidence` | recorded runs; EDA, simulation and formal stay `NOT_RUN` |
 
@@ -73,6 +73,124 @@ source workspace is reached through exactly one path: the edit coordinator's app
 compare-and-set write (TB4). Dashed lines are trust boundaries TB1 to TB4.*
 
 ## Status
+
+**Open work and hand-off (2026-11-05):** [2026_1105_hand_off.md](2026_1105_hand_off.md) (in
+Traditional Chinese) lists everything still open, in the suggested order: decisions for the project
+owner (a verifiable record of the `--lazy` CSP approval, PR and merge, the `AGENTS.md` edits, the
+first-format state record, `init`'s new behaviour), then security and correctness, architecture
+and documentation, and test-evidence items; plus how to verify and known pitfalls. The project
+stays a developer preview, UNQUALIFIED: `scripts/qualify.py` has not been run on this branch.
+
+### Follow-up of both reviews and third council review (2026-11-05)
+
+Every item left open by the first two reviews was handled, with the project owner's decisions of
+2026-11-05: the `--lazy` CSP relaxation is approved (ADR-014); SVWeave trusts only a `.svweave/`
+it created or a person adopted (**breaking:** run `svweave init --adopt-state` once per existing
+workspace); and the first review's leftovers were handled too. That covers fixes (shared-build
+publish, candidate snapshot under the lock, request-key validation, no-follow writes into
+external roots, usage-error envelopes, doctor exit codes, qualify gates), new tests and
+mutations M32–M40, and behaviour-preserving restructuring (a public query core, one git runner,
+write-safety code in `editing/`, the graph export split, the viewer as a JavaScript file,
+`docs/architecture.md`). Verified at `de0e6fe` (run5, one 4-CPU cloud session, not CI,
+`SVWEAVE_REQUIRE_BACKENDS=1`): unit + contract 1793 passed with the same 4 BLOCKED as before,
+fault injection 21, integration 240, acceptance 12, browser 1 passed; mutations **40/40 KILLED**.
+A first run (run4) caught a regression in a test helper and is kept. Details:
+[evidence/council-review-followup-2026-11-05](evidence/council-review-followup-2026-11-05/README.md).
+
+A third six-specialist review of that state (`41e99df`) found new issues; the high ones and the
+confirmed medium ones are now **fixed**, each with a test:
+- the hardened git runner turns repository hooks off and never refreshes the index
+  (`svw_diff_impact` could run `.git/hooks/post-index-change` of a repository delivered with its
+  `.git/`; reproduced first);
+- `svweave init --adopt-state` adopts the `.svweave/` every command uses (`<project.root>/.svweave`);
+  the state record is a random token inside `.svweave/` (no device/inode numbers), registration is
+  serialized, and a state directory writable by group or others is refused;
+- `doctor` without a verified workspace keeps probe state out of the project;
+- `edit recover --rollback` has roll-forward's gates and reads the original bytes from the
+  validated base snapshot without following links;
+- `schema emit` exits non-zero on errors, the qualify gate blocks when `git status` fails, and
+  the MCP launcher prints the `--adopt-state` hint.
+
+New mutations M41–M45. Verified at `aaecbee` (run7, one 4-CPU cloud session, not CI,
+`SVWEAVE_REQUIRE_BACKENDS=1`): unit + contract 1804 passed with the same 4 BLOCKED as before,
+fault injection 26, integration 240, acceptance 12, browser 1 passed; mutations **45/45 KILLED**.
+The run before it (run6) caught a stale test assumption and is kept. Still open: a verifiable
+record of the owner's `--lazy` CSP approval (H4), files a repository writes into a recorded
+`.svweave/` (M1, content part), and architecture/documentation items. Details:
+[evidence/council-review-3-2026-11-05](evidence/council-review-3-2026-11-05/README.md). Not a
+`scripts/qualify.py` qualification run.
+
+### Second council review: fixes and verified run (2026-11-04)
+
+A second six-specialist review, of the code that followed (large-SoC pages, `--per-commit`, the
+complete-topology default), found two **High** issues, both fixed and each reproduced first:
+`graph export --per-commit` ran `git log`, which runs the repository's `gpg.program` for a signed
+commit when the repository config sets `log.showSignature`; and a `.svweave/` shipped in a
+repository could hold a snapshot whose `files` is a symlink (e.g. to `$HOME`), which the text
+search then walked, and a `snapshot.json` that was trusted as written. Also fixed: graph pages
+now run only their own hashed viewer script; `--split`/`--lazy` refuse per-page caps and no
+longer claim completeness on one page; sandbox binds of a parent of `$HOME`; and correctness and
+interface defects. Each fix has a test that fails without it (new mutation M31).
+
+Verified at `4491a54` in one 4-CPU cloud session (not CI), `SVWEAVE_REQUIRE_BACKENDS=1`: unit +
+contract 1752 passed, 0 failed, 4 BLOCKED (the same four as before, not executable on that host);
+fault injection 20, integration 233 (0 skipped), acceptance 12 passed; critical mutations **31/31
+KILLED**. This is the first recorded run that covers `--per-commit`, the compact page format,
+`--split` and `--lazy`. Details, commands, JUnit files and what is left open (one design decision
+for the project owner among them):
+[evidence/council-review-2-2026-11-04](evidence/council-review-2-2026-11-04/README.md). Not a
+`scripts/qualify.py` qualification run.
+
+### Council review fixes and verified run (2026-11-04)
+
+A six-specialist review of the whole codebase found, among others, one **High** issue:
+diff-impact's git honoured the repository's own config, so a partial clone whose config names
+`remote.<x>.uploadpack` ran that command on the host when `svw_diff_impact` (or
+`graph export --diff-base`) read a missing blob. It is fixed (no user/system config, no transport,
+partial clones refused, an enforced timeout), together with an environment-secret leak through
+`svweave.yaml` (**breaking:** `$VAR` in filelists now also needs the variable in the trusted
+`policy.json` `environment_allowlist`), a roll-forward gate that looked at only 20 changes (new
+mutation M30), unrecorded no-sandbox builds, a halved rename line count and several interface
+defects. Each was reproduced first; each fix has a test that fails without it.
+
+Verified at `a3777ff` in one 4-CPU cloud session (not CI), `SVWEAVE_REQUIRE_BACKENDS=1`:
+unit + contract 1737 passed, 0 failed, 4 BLOCKED (not executable on that host); fault injection
+20, integration 219 (0 skipped), acceptance 12 passed; critical mutations **30/30 KILLED**. A first
+run had caught a regression in these fixes and is kept. Details, commands, JUnit files and what
+was left unfixed: [evidence/council-review-2026-11-04](evidence/council-review-2026-11-04/README.md).
+Not a `scripts/qualify.py` qualification run.
+
+### Graph subtree and git-diff views (2026-11-04)
+
+`svweave graph export` can now draw part of a build instead of all of it, without recompiling:
+
+- `--instance INSTANCE`: one instance and its descendants. Only those rows are read from the build.
+- `--diff-base REF [--diff-head REF]`: only the instances of the modules/interfaces a `git diff`
+  changes (red), with their subtrees and the ancestors that connect them (dashed, context). Build
+  before or after the edit; per file the diff side that matches the build's snapshot is mapped.
+
+Verified on branch `claude/partial-compile-html-1eyxxd` at `c641509`, in one 4-CPU cloud session
+(not a CI run): unit + contract **1731 passed, 0 failed**; integration with real pyslang,
+codebase-memory-mcp, Serena and UVM under `SVWEAVE_REQUIRE_BACKENDS=1` **214 passed, 0 skipped**.
+No artifacts of that run were kept; the recorded run of the code that followed is the council
+review run above.
+New tests use the hand-written RTL `fixtures/language/grf_subtree` and check every subtree page,
+and the changed instances of diff pages, against the full page.
+
+Measured with `scripts/benchmark_graph_subtree.py` on that host, 41,090 instances, CLI wall time
+([evidence](evidence/bench/graph-subtree/README.md)):
+
+| Page | Instances drawn | Time | Size |
+|---|---:|---:|---:|
+| whole build | 41,090 | 14.6 s | 77.6 MB |
+| `--instance` one cluster | 642 | 1.70 s | 1.2 MB |
+| `--diff-base`, one module with 65 instances changed | 130 | 1.63 s | 0.2 MB |
+| `--diff-base`, one module with 8,192 instances changed | 41,025 | 15.7 s | 78.2 MB |
+
+The saving is as large as the change is local: a module instantiated almost everywhere draws
+almost everything and is slower than the full export. On a 90-instance design every mode is
+Python start-up (about 1.5 s). One synthetic design on one host: not the plan 22.3 reference
+corpus, no qualification claim.
 
 ### Snapshot I/O update validation (2026-10-29)
 
@@ -231,7 +349,8 @@ simulation, formal or EDA result: `eda_compile`, `simulation` and `formal` are `
 import your own evidence, and imported evidence is `EXTERNAL_DECLARED`, never verified by SVWeave.
 Read `docs/limitations.md` before relying on any result.
 
-**Latest full test run (2026-10-20, Linux x86_64, this host only):** a fresh copy installed with the
+**Latest full test run (2026-10-20, Linux x86_64, this host only; unrecorded: no JUnit, log or lock
+hash of it was kept, so it is not evidence in the sense of AGENTS rule 12):** a fresh copy installed with the
 documented offline procedure (`vendor/`, Serena included) and run with `SVWEAVE_REQUIRE_BACKENDS=1`:
 **1066 passed, 1 skipped, 0 failed**; `ruff`, `mypy` and `svweave schema emit --check` clean. It
 covers the impact, diff-impact, rename-preview and graph-export tools and the fixes of the
@@ -254,7 +373,8 @@ declared subset) and the owner has not signed the waiver. Copies of the evidence
 `evidence/qualification/`. This is a snapshot of one run, not a standing claim; re-run
 `scripts/qualify.py` for the state of your tree.
 
-**Tried on a real SoC** (2026-10-20, not part of the test suite): an Arm SSE-315-based design of
+**Tried on a real SoC** (2026-10-20, not part of the test suite; a one-off observation on one
+host, no evidence file kept, not a performance claim): an Arm SSE-315-based design of
 3835 HDL files (135 MiB) built in 606 s (worker peak 11 GB) to 115,552 instances and 605,874 port
 associations; the result was honestly `PARTIAL` (compile errors in a gate-level PHY model,
 unresolved references, 6637 empty module bodies). Running it found and fixed the instance-array id
@@ -455,8 +575,11 @@ svweave build --profile rtl_demo   # the shipped demo: exit 0
 
 Expected: `svweave doctor` exits 0 with `outcome` `OK`; `client_boundary` is always `WARN`
 (`not qualified`, `docs/security.md` section 4) and the shipped `svweave.yaml` gives a
-`root_mapping:uvm` `WARN` until you map that external root. A `FAIL` gives exit 4 and `outcome`
-`ERROR`; `backend:serena_exe FAIL` is expected only if Serena was skipped (`--skip-serena`).
+`root_mapping:uvm` `WARN` until you map that external root. A `FAIL` gives `outcome` `ERROR` and
+the exit code of the most fundamental failing check, whatever the check order: 2 configuration,
+6 policy, 3 missing input or root mapping, 4 backend (`error.details.failed_checks` lists every
+failing check); `backend:serena_exe FAIL` (exit 4) is expected only if Serena was skipped
+(`--skip-serena`).
 `svweave build --profile rtl_demo` exits 0 with `"completeness": "COMPLETE"`,
 `"diagnostic_outcome": "NO_ERRORS"` and `"published": true` and prints the `build_id` and
 `snapshot_id` to use in the [Quickstart](#quickstart) queries; the full output is in
@@ -476,6 +599,14 @@ Re-run the installer as in the path you used (`--create-venv` repairs an existin
   uses other cache buckets and does not work offline).
 * The documented flows no longer start with `uv venv`; an earlier `.venv` made that way is kept and
   re-used by `--create-venv`.
+* From 2026-11-05 SVWeave trusts only a `.svweave/` it recorded (breaking): in each existing
+  workspace run `svweave init --adopt-state` once for the state directory you created (the
+  first command otherwise refuses it with `state_dir_not_adopted`; `svweave-mcp` prints the same
+  hint on stderr). `init` adopts `<project.root>/.svweave`, the directory every command uses. A
+  workspace recorded by the first 2026-11-05 version is re-recorded automatically. A state
+  directory writable by group or others is refused (`chmod go-w .svweave`).
+* A filelist that expands `$VAR` also needs the variable in the trusted policy's
+  `environment_allowlist` (2026-11-04, breaking).
 
 ### Install once; reuse it across projects
 
@@ -538,7 +669,8 @@ Code and Codex](#using-svweave-with-claude-code-and-codex)).*
 **1. Point SVWeave at the project.** SVWeave never has to live inside the design: keep
 `svweave.yaml` in a workspace directory and attach the design as an **external root** (declared
 without a `path` in `svweave.yaml`, mapped to an absolute path in `svweave.local.yaml`, and that
-path added to `allowed_roots` of the trusted `policy.json`): `docs/manifest.md`, section 2b, has
+path added to `allowed_roots` of the trusted `policy.json`; a `$VAR` in a filelist also needs the
+variable in that policy's `environment_allowlist`): `docs/manifest.md`, section 2b, has
 the exact YAML and the differences from a simulator command line (strict filelists, no simulator
 options, `timescale`, several tops, encrypted IP, UVM). In that workspace:
 
@@ -621,6 +753,7 @@ by SVWeave's test suite; details in
 | `--verify-only`: `gateway venv missing: nothing to verify` | `--verify-only` ran before `--create-venv`, or against another `--venv-dir`; add `--no-venv` to check the toolchain alone. |
 | `GLIBC_2.38' not found` from `codebase-memory-mcp` | The lock pins the `linux-amd64-portable` (static) build for this reason; do not replace it with the standard build (`docs/install.md` section 4). |
 | Serena does not start; its stderr log says `/usr/bin/env: '.../serena-venv/bin/serena': No such file or directory` | A build from before the sandbox recreated the interpreter's symlink chain (the venv was built on a python-build-standalone runtime such as `.toolchain/runtime/`). Update SVWeave; the venvs do not need to be rebuilt. |
+| `uvm_core: download of https://github.com/accellera-official/uvm-core/archive/... failed (HTTP Error 403: Forbidden)` | The network allows GitHub release downloads but not source archives (in a Claude Code cloud session: the session's GitHub repository scope). Rebuild the locked tarball from the git tag (`git archive` + `gzip -n` reproduces the locked sha256; the installer verifies it) or install without UVM using `--skip-uvm` (reported as skipped, never as verified): `docs/install.md`, "When a locked archive cannot be downloaded". |
 | A failed install left a partial `.toolchain/` | Re-run the same command: artifacts already present with the right sha256 are reused, everything else is re-downloaded and re-verified. Uninstall: remove `.venv`, `.toolchain/`, `.svweave/` and, if wanted, the trusted directory. |
 
 ## Quickstart
@@ -645,6 +778,8 @@ svweave query impact --build BUILD_ID --name demo_lane
 svweave query diff-impact --build BUILD_ID                       # your uncommitted git changes
 svweave query rename-preview --build BUILD_ID --name demo_lane.valid_i --to valid_in
 svweave graph export --build BUILD_ID                            # .svweave/exports/graph-<id>.html
+svweave graph export --build BUILD_ID --instance demo_top.g_lane[0].u_lane   # one subtree only
+svweave graph export --build BUILD_ID --diff-base HEAD           # only what your git diff changes
 
 # serve the MCP gateway for your client (stdio)
 svweave serve --transport stdio
@@ -687,7 +822,7 @@ snippet, check) is step 1 to 5 of
 All four read one build and say so: the envelope carries the build id, completeness, freshness and
 limitations, lists are capped with complete totals, and nothing they report is a risk score.
 
-<p align="center"><img src="docs/images/analysis-tools.svg" alt="Analysis tools. Top: one build, build_id = hash of snapshot_id, config_id, toolchain_id and schema version, COMPLETE or PARTIAL and CURRENT, STALE or HISTORICAL, holding the immutable snapshot bytes, the instance tree elaborated under the profile's tops, the declarations with statically resolved references, and the direct port associations. Four columns read it. Impact (svw_impact, svweave query impact): one target by --name, --symbol, --file plus --byte or --instance; returns for a module or interface every instance, dependents up to --depth, dependencies and references, for a port each connection site and dependents, for a net, variable or parameter resolved references and connections, for an instance its ancestors, subtree and port connections; ambiguity gives AMBIGUOUS_SYMBOL. Git diff impact (svw_diff_impact, svweave query diff-impact): git diff -U0 from --base HEAD to --head, the working tree by default, with fixed argv, no shell and a size cap; old-side lines are mapped onto the snapshot bytes, per file aligned or approximate; returns changed declarations, their modules' instances and dependents and changed ports with their connection sites; files outside the build are only listed, headers are not re-expanded. Rename preview (svw_rename_preview, svweave query rename-preview), read-only: the declaration, resolved references, formal names of named connections, the end label and bind targets, each verified against the snapshot bytes; returns diff, blockers, warnings, other lexical occurrences and an edit_request when ready; blocks on unresolved references, .* and .name connections, macro sites, name collisions, a build that is not COMPLETE and CURRENT, and named parameter overrides. Graph export (svweave graph export --build B, CLI only): one static .svweave/exports/graph-build.html with the instance tree and dashed connections between instances that use the same signal declaration in a direct port association; hubs over --max-fanout 16 are listed, at most --max-instances 5000 shallowest first, file://, strict CSP, not a netlist. Bottom: impact and diff impact return a JSON envelope, rename preview feeds the controlled edit loop with its edit_request, graph export is opened in a browser from disk." width="100%"></p>
+<p align="center"><img src="docs/images/analysis-tools.svg" alt="Analysis tools. Top: one build, build_id = hash of snapshot_id, config_id, toolchain_id and schema version, COMPLETE or PARTIAL and CURRENT, STALE or HISTORICAL, holding the immutable snapshot bytes, the instance tree elaborated under the profile's tops, the declarations with statically resolved references, and the direct port associations. Four columns read it. Impact (svw_impact, svweave query impact): one target by --name, --symbol, --file plus --byte or --instance; returns for a module or interface every instance, dependents up to --depth, dependencies and references, for a port each connection site and dependents, for a net, variable or parameter resolved references and connections, for an instance its ancestors, subtree and port connections; ambiguity gives AMBIGUOUS_SYMBOL. Git diff impact (svw_diff_impact, svweave query diff-impact): git diff -U0 from --base HEAD to --head, the working tree by default, with fixed argv, no shell and a size cap; old-side lines are mapped onto the snapshot bytes, per file aligned or approximate; returns changed declarations, their modules' instances and dependents and changed ports with their connection sites; files outside the build are only listed, headers are not re-expanded. Rename preview (svw_rename_preview, svweave query rename-preview), read-only: the declaration, resolved references, formal names of named connections, the end label and bind targets, each verified against the snapshot bytes; returns diff, blockers, warnings, other lexical occurrences and an edit_request when ready; blocks on unresolved references, .* and .name connections, macro sites, name collisions, a build that is not COMPLETE and CURRENT, and named parameter overrides. Graph export (svweave graph export --build B, CLI only): one static .svweave/exports/graph-build.html with the instance tree and dashed connections between instances that use the same signal declaration in a direct port association; by default every instance and every signal (complete topology); --max-fanout and --max-instances are optional reductions, file://, strict CSP, not a netlist. Bottom: impact and diff impact return a JSON envelope, rename preview feeds the controlled edit loop with its edit_request, graph export is opened in a browser from disk." width="100%"></p>
 
 *All four tools are views of the same stored build; none re-elaborates the design or touches the
 source tree. They differ in what they start from (a declaration or instance, a git diff, a rename
@@ -753,7 +888,7 @@ stop early.
 
 ```bash
 svweave graph export --build BUILD_ID          # writes .svweave/exports/graph-<build>.html
-svweave graph export --build BUILD_ID --root top.u_sub   # only that instance and its descendants
+svweave graph export --build BUILD_ID --instance top.u_sub   # only that instance and its descendants
 svweave graph export --build BUILD_ID --diff-base HEAD    # only what `git diff HEAD` changes
 ```
 
@@ -761,12 +896,16 @@ Open the file in a browser (`file://`, no server). It shows the elaborated insta
 one build (double-click collapses a subtree, search expands to matches, drag and wheel pan and
 zoom) and, as dashed lines, the connections derived from the build's direct port associations: two
 instances reference the same signal declaration, oriented by the declared port direction. One line
-stands for all signals between two nodes; click it for the list. Clock-like signals used by more
-than `--max-fanout` instances (default 16) are listed as hubs, not drawn. The page carries the
-build's completeness and freshness and says so when it is PARTIAL, STALE or truncated
-(`--max-instances`, shallowest first). It is not a netlist. The page has no network access (strict
-CSP) and treats source text as data. On the 115k-instance SoC above the export took 27 s and drew
-the 5000 shallowest instances (38 MB). `--root INSTANCE` (a path or an instance id) reads and draws
+stands for all signals between two nodes; click it for the list. **By default the page is the
+complete topology of the build**: every instance and every signal, deeper levels only start
+collapsed. Reductions are options: `--max-instances N` (shallowest first) and `--max-fanout N`
+(signals used by more than N instances are listed as hubs instead of drawn), like `--instance`
+and `--diff-base` below. The page carries the build's completeness and freshness and says so when
+it is PARTIAL, STALE or truncated. It is not a netlist. The page has no network access (strict
+CSP) and treats source text as data. On the C906 minimal SoC (2,072 instances) the complete page
+has 30,378 connections in a 2.0 MB page (compact format); above 20,000 instances or 64 MiB the
+envelope warns that a browser may be slow and points to `--split` / `--lazy`. (Under the former caps, the 115k-instance SoC above drew its
+5000 shallowest instances, 38 MB, in 27 s.) `--instance INSTANCE` (a path or an instance id) reads and draws
 only that instance's subtree of the same build: nothing is recompiled, depth is counted from the
 root, and signals declared outside it (what the root's ports connect to) are listed as boundary
 signals instead of being drawn. `--diff-base REF` (optionally `--diff-head REF`) reads the git
@@ -775,6 +914,82 @@ changes (outlined in red) with their subtrees, plus their ancestors as context. 
 after the edit: the side of the diff that matches the build's snapshot is used, per file. A change
 that maps to no instance (a package, a file outside the build) is listed, not drawn. Rationale:
 `docs/adr/ADR-014-static-graph-export.md`.
+
+**From a git diff to a page.** The build is the "compile"; the page only reads the part of it the
+diff reaches. Either order works:
+
+```bash
+# A. build the committed state, then edit: the OLD side of each file is mapped
+svweave build --profile rtl_demo                      # -> BUILD_ID
+vi rtl/my_block.sv                                    # your change, not yet committed
+svweave graph export --build BUILD_ID --diff-base HEAD
+
+# B. edit, then build the changed tree: the NEW side is mapped
+svweave build --profile rtl_demo
+svweave graph export --build BUILD_ID --diff-base HEAD
+
+# C. commit to commit (reads git blobs only; also works where git filters are configured)
+svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature
+
+# D. several small commits on one page, each changed instance labelled with its commits
+#    (build the --diff-head revision first)
+svweave graph export --build BUILD_ID --diff-base main --diff-head my-feature --per-commit
+```
+
+With `--per-commit` the page lists the commits of `main..my-feature`; each changed instance
+carries the commits that changed its module (traced with `git log -L` over the module's lines in
+the head version, so a deletion-only commit is found too), and clicking a commit highlights what
+it changed. Labels are per module definition: two instances of one module carry the same
+commits. They need a build of the head revision; otherwise they are left out with a warning.
+Example on a real SoC (C906, several sub-systems changed several times):
+[evidence/c906-per-commit-example](evidence/c906-per-commit-example/README.md).
+
+The envelope's `data.diff` lists the changed definitions with `instances` and `instances_drawn`,
+the changed files with the side used (`old`/`new`; `aligned: false` means an approximate mapping
+and comes with a warning), files not in the build, and changes that belong to no module (package,
+class). Add `--instance INSTANCE` to keep only the changes below one instance (the others are counted
+as `outside_root`). A diff that reaches no instance (for example a clean tree) is an answer, not an
+error: exit 0, `data.written: false`, `data.path: null`, `data.diff.nothing_to_draw` says why, and
+no page is written. As with `diff-impact`, a STALE build does not change the exit code here, and
+comparing with the working tree is refused when the repository configures git clean/process filters
+(use form C); a partial clone (promisor remote) is refused because reading it could fetch.
+
+**Very large SoCs.** Pages are written in a compact, lossless format (`svweave-graph/2`: on the
+C906 SoC 8x smaller than before), but the complete topology of a 100k-instance SoC is still a
+40 MB page that takes about 10 s to open. Two outputs cut it into parts of at most
+`--page-budget` instances (default 5000); together the parts are exactly the complete topology:
+
+```bash
+svweave graph export --build BUILD_ID --split   # linked pages: .svweave/exports/<name>/index.html
+svweave graph export --build BUILD_ID --lazy    # one page that loads the other parts when opened
+```
+
+A subtree that does not fit becomes a portal: one node on its parent page, with its own port
+connections, that opens its part (`--split`: a link to its page; `--lazy`: double-click loads it
+into the same drawing). The index page searches every instance of the design and opens the
+right part. On 115,562 instances: the single page opens in 10.1 s, the `--split` or `--lazy` index
+in about 0.55 s, a search result in about 1 s
+([evidence](evidence/bench/graph-large/README.md)). `--lazy` admits scripts from its own
+directory in the page's CSP (needed for local files; verified in Chromium only); `--split` keeps
+the strict CSP and works in any browser. Every page runs only its own viewer script (the CSP
+names its sha256; no `'unsafe-inline'` script). `--split` and `--lazy` write a directory
+(`--name` names it) and refuse `--max-instances` / `--max-fanout`: their pages together are the
+complete topology, `--page-budget` (at least 100) makes the pages smaller. One exception is said
+on every page: a connection through a signal no instance declares (a package variable) between
+instances on different pages is not drawn.
+
+Envelope `data` per mode (`data.mode`): a single page (`page`: default, `--instance`,
+`--diff-base`) has `path`, `bytes`, `sha256`, `stats`, `truncated`, `root` (and `diff` with
+`--diff-base`); "nothing to draw" has `path: null`, `written: false` and `diff`. `--split`
+(`split`) and `--lazy` (`lazy`) write a directory: `path` (its `index.html`), `directory`, `root`
+and `parts`: `pages`, `budget`, `largest_page`, `oversized_pages`, `bytes_total`,
+`largest_file_bytes`, `files` (at most 200 names), `files_total`, `files_truncated`.
+
+Exit codes of `graph export`: 0 when the page was written (or there was nothing to draw); like the
+`query` commands, 3 for a PARTIAL build and 5 for a STALE/HISTORICAL one even though the page was
+written (the page says so too), unless `--allow-partial` / `--allow-stale` is given; with
+`--diff-base`, STALE never changes the exit code. `pagination.truncated` is true when
+`--max-instances` cut the drawing.
 
 ## Using SVWeave with Claude Code and Codex
 
@@ -1171,7 +1386,7 @@ profiles:
     library_dirs: []
     library_files: []
     library_extensions: [".v", ".sv"]
-    environment_allowlist: []          # only these variables may be expanded in paths
+    environment_allowlist: []          # variables a path may expand; each must ALSO be in policy.json
     generated_inputs: []               # must already exist; nothing is generated
     diagnostic_policy: "no_errors"
     # language_options:                # allowlisted slang knobs, part of config_id
@@ -1223,7 +1438,12 @@ until the mapping exists.
 `svweave init` creates it and never overwrites it. It is outside the repository on purpose: the
 repository content (and anything an agent writes there) must not be able to widen its own
 permissions. A repository file can only tighten the policy; a repo-local policy file is ignored and
-a `--policy` path inside the project tree is `POLICY_DENIED`.
+a `--policy` path inside the project tree is `POLICY_DENIED`. The same directory records which
+`.svweave/` SVWeave created for the workspace (`state_dir.json`: the sha256 of a random token
+SVWeave keeps in `.svweave/.svweave-id`, keyed by the directory's real path): any other non-empty
+`.svweave/` (shipped with a repository or tarball, extracted in place of a deleted one, moved or
+copied to another path) is refused with `state_dir_not_adopted` until you run
+`svweave init --adopt-state` for a state directory you made yourself.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -1234,6 +1454,7 @@ a `--policy` path inside the project tree is `POLICY_DENIED`.
 | `network_enabled` | `false` | no network for backends |
 | `editing_enabled` | `false` | master switch; editing also needs `editing.enabled` in `svweave.yaml` |
 | `allow_test_approvals` | `false` | accept the non-qualified test-token approval path; only a human editing this file can set it |
+| `environment_allowlist` | `[]` | environment variables a profile may expand in filelist paths; a profile's own `environment_allowlist` only narrows it |
 
 The same trusted directory holds `approval.key` (mode 0600), `cursor.key`, the approval records and
 the last backend probe record.
@@ -1247,7 +1468,7 @@ the last backend probe record.
 | `+incdir+a+b`, `-I DIR`, `-IDIR` | include dirs, order preserved, never sorted or de-duplicated |
 | `+define+N=V+M`, `-DN=V` | macro text is token-exact; `NAME`, `NAME=` and `NAME=V` differ; a conflicting redefinition is `INVALID_CONFIG` |
 | `-v FILE`, `-y DIR`, `+libext+.v+.sv` | library file, library directory, library extensions |
-| `$VAR`, `${VAR}` in path tokens | only if the variable is in `environment_allowlist` and set, else `MISSING_INPUT` |
+| `$VAR`, `${VAR}` in path tokens | only if the variable is in the profile's `environment_allowlist` AND the trusted `policy.json` `environment_allowlist`, and set; else `MISSING_INPUT` (`env_not_allowed_by_policy` names the policy field) |
 | `-l`, `-logfile`, `-nologo`, `-quiet`, `-q` | output-only options: dropped and recorded as ignored |
 
 | Refused | Result |
@@ -1290,7 +1511,7 @@ prints one JSON envelope.
 | `svweave query search --snapshot S --query Q` | graph candidates or marked text fallback (`--scope`, `--no-graph`) |
 | `svweave report --build B` | status report filled from real data; unevaluated gates say so |
 | `svweave evidence import --manifest FILE` | import external evidence (stored `EXTERNAL_DECLARED`) |
-| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--root I] [--diff-base R [--diff-head R]]` | write `.svweave/exports/<name>.html`: instance hierarchy plus port-association connections, one self-contained page, nothing served (ADR-014); `--root` draws only the subtree of instance I; `--diff-base` only the instances a git diff changes |
+| `svweave graph export --build B [--name N] [--max-instances N] [--max-fanout N] [--instance I] [--diff-base R [--diff-head R [--per-commit]]] [--split \| --lazy [--page-budget N]] [--allow-stale] [--allow-partial]` | write `.svweave/exports/<name>.html`, one self-contained page (or with `--split`/`--lazy` the directory `.svweave/exports/<name>/`, `index.html` first; these refuse `--max-instances`/`--max-fanout`): instance hierarchy plus port-association connections, nothing served (ADR-014); `--instance` draws only the subtree of instance I; `--diff-base` only the instances a git diff changes |
 | `svweave cache gc [--no-dry-run]` | garbage-collect snapshots; keeps the last 3 and referenced ones; dry run by default |
 | `svweave debug bundle --build B [--out DIR]` | reproduction bundle: hashes, manifest, diagnostics summary, redacted paths |
 | `svweave schema emit [--check] [--out DIR]` | write or verify `schemas/*.schema.json` |
@@ -1372,7 +1593,7 @@ page is not proven absent.
 | `UNSUPPORTED_OPTION` | option the slang adapter cannot honour | 3 |
 | `PARTIAL_ANALYSIS` | partial result | 3 |
 | `AMBIGUOUS_SYMBOL` | several scoped candidates | 3 |
-| `PATH_NOT_ALLOWED` | path outside the allowed roots, include/exclude rules or symlink target rules | 6 |
+| `PATH_NOT_ALLOWED` | path outside the allowed roots, include/exclude rules or symlink target rules | 6; 3 from `build`/`update` when the build itself read a file outside its snapshot (`details.reason: dependency_leak`, outcome `BLOCKED`) |
 | `POLICY_DENIED` | policy refuses the operation | 6 |
 | `APPROVAL_REQUIRED`, `APPROVAL_EXPIRED` | missing, forged or expired approval | 6 |
 | `WORKSPACE_UNSTABLE`, `STALE_SNAPSHOT` | workspace changed during capture, or `expected_snapshot_id` mismatch | 5 |
@@ -1509,8 +1730,9 @@ repository and `.toolchain/`, then run
 offline install/verify and individually isolated backends, but a trusted host controller without
 an outer network-isolation guarantee. Its narrower acceptance **passed at `cc931de` in run 40627613557**; it is not an
 end-to-end offline or physically air-gapped claim. See [ADR-016](docs/adr/ADR-016-dep01-trusted-host-controller.md).
-`scripts/gateway_lock_refresh.py` is a maintainer tool that regenerates the
-gateway wheelhouse section of the lock. Procedure: `docs/install.md`.
+`scripts/gateway_lock_refresh.py --online` is a maintainer tool that regenerates the
+gateway wheelhouse section of the lock (online; it refuses without `--online`). Network scope of
+the maintainer tools: `docs/security.md` section 6.
 
 **Sandbox.** Every backend, the pyslang worker included, starts through a `bwrap` argument array:
 read-only system and toolchain, read-write only to its candidate (where applicable) and its own
@@ -1540,10 +1762,15 @@ falls back to a marked literal-text search with outcome `PARTIAL`.
 .venv/bin/python -m pytest tests/fault_injection                        # commit crash and recovery
 SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest -m integration    # real backends, skips fail
 SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest tests/acceptance  # end-to-end demo flow, docs check
+SVWEAVE_REQUIRE_BROWSER=1 .venv/bin/python -m pytest tests/browser     # viewer in Chromium (opt-in: node + Playwright)
 .venv/bin/python scripts/qualify.py                                     # release gates G0-G5
 ```
 
-The only custom marker is `integration` (real pinned backends). `SVWEAVE_REQUIRE_BACKENDS=1` turns
+The custom markers are `integration` (real pinned backends) and `browser` (the graph viewer driven
+in Chromium; Playwright and its Chromium are not in `toolchain.lock.json`, so `tests/browser` is
+an opt-in suite outside the required CI run, recorded when it runs). The viewer's JavaScript checks
+in `tests/unit` need `node`; `SVWEAVE_REQUIRE_NODE=1` (set in CI) makes a missing node a failure.
+`SVWEAVE_REQUIRE_BACKENDS=1` turns
 a missing backend from a skip into a failure; `qualify.py` always sets it and treats a skipped test
 as a failed gate. Mocks are for unit and fault-injection tests only. The DEP-01 clean-room test
 (`tests/integration/test_dep01_cleanroom.py`) also needs the cached artifacts under `.toolchain/`
@@ -1560,7 +1787,7 @@ and a benchmark within the plan 22.3 budgets. A gate computed from a step that d
 `NOT_EVALUATED`, never PASS. The release decision is `ACCEPTED_STATIC_PREVIEW` only when every gate
 passes and no blocker is open; otherwise `BLOCKED` with reasons.
 
-**Mutation suite.** `scripts/mutation_suite.py` injects 29 critical mutations (M01–M29, covering plan 20.5
+**Mutation suite.** `scripts/mutation_suite.py` injects 45 critical mutations (M01–M45, covering plan 20.5
 and additional write/workspace-binding/snapshot-reuse safety guards) one at a time into a throwaway copy of the
 repository and runs the mapped tests; a mutation is killed when they fail. `--only M01,M05` selects some; anything
 other than a clean fail (missing patch anchor, timeout, red baseline) is `ERROR`, never killed.
@@ -1697,6 +1924,7 @@ Exit codes are listed in [CLI reference](#cli-reference); the daily and onboardi
 | Decisions | `docs/adr/` |
 | Toolchain spike facts | `docs/m0_spike_report.md` |
 | Rules for coding agents | `AGENTS.md` |
+| Open work and hand-off (2026-11-05) | `2026_1105_hand_off.md` |
 
 ## Contributing
 

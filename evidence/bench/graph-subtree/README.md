@@ -1,6 +1,7 @@
 # Graph export: whole build vs `--root` subtree vs `--diff-base` diff view (paired timing)
 
-Script: `scripts/benchmark_graph_subtree.py` (sha256 in each JSON). Design: the hand-written fixture
+Script: `scripts/benchmark_graph_subtree.py` (sha256 in each JSON). The subtree mode was then
+selected with `--root`; that option is now called `--instance` (same behaviour). Design: the hand-written fixture
 `fixtures/language/grf_subtree` (`grf_soc`, CLUSTERS x CORES x 4 pipeline stages), elaborated once
 by the real pyslang 12 worker under mandatory bwrap. The two diff views are commit-to-commit diffs
 of the workspace's own git repository against the build of `main`: `chg-reduce` changes one line
@@ -9,7 +10,7 @@ of `grf_reduce` (CLUSTERS+1 instances, a localized change), `chg-core` one line 
 
 Source identity: the `src/` tree hash in all three files equals commit `862cd1b` (the diff view);
 `c4x4` and `c32x64` record git head `ffaf3b4` because they ran just before that commit on the same
-code. Host: Intel Xeon @ 2.10GHz, 4 logical CPUs, 15.7 GiB RAM, Linux 6.18, Python 3.12, page cache
+code. Host: Intel Xeon @ 2.80GHz (as recorded in each JSON), 4 logical CPUs, 15.7 GiB RAM, Linux 6.18, Python 3.12, page cache
 warm. One host, one synthetic design: not the plan 22.3 reference corpus, no qualification claim.
 This host measured slower than the one of the previous version of this file (full export at 41k
 instances 14.6 s here vs 8.4 s there); compare rows within one file only.

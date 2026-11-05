@@ -29,7 +29,7 @@ Plan references: section 14 of `SVWeave_plan.md`. Schemas: `schemas/mcp/<tool>.i
 
 ## Tools
 
-Exactly eleven tools: the ten read/build tools below plus `svw_edit` (registered through
+Exactly fourteen tools: the thirteen read/build tools below plus `svw_edit` (registered through
 `svweave.gateway.tools.register_tool`; schemas `schemas/mcp/svw_edit.{input,output}.json`, behaviour in `docs/editing.md`;
 `prepare` edits are `symbol_replacement`, `slang_symbol` (ADR-013) or `exact_range`). There is
 no approve tool over MCP: approval is a trusted local CLI step only.
@@ -40,12 +40,12 @@ no approve tool over MCP: approval is a trusted local CLI step only.
 | `svw_build` | `profile` | `expected_snapshot_id`, `reuse` | Starts a background job, returns `job_id` immediately. One build at a time. | not read-only, not idempotent |
 | `svw_job` | `job_id` | `action` = `status` (default) or `cancel` | Job lifecycle/progress/result; cancel kills the worker process tree. | not read-only |
 | `svw_search` | `snapshot_id`, `query` | `scope`, `limit`, `cursor` | Graph candidates (when the graph backend is READY) or literal text fallback. `SOURCE_CANDIDATE` evidence only. | not read-only (graph index cache), idempotent |
-| `svw_symbol` | `build_id` + one of `symbol_id`, `location{file,byte}`, `name` | - | Declaration lookup. Several matches -> `AMBIGUOUS_SYMBOL`. | read-only |
+| `svw_symbol` | `build_id` + one of `symbol_id`, `location{file,byte}`, `name` | `limit` (default 50), `cursor` | Declaration lookup. Several matches -> `AMBIGUOUS_SYMBOL`. | read-only |
 | `svw_references` | `build_id`, `symbol_id` | `scope`, `limit`, `cursor` | Resolved and unresolved occurrences. | read-only |
 | `svw_hierarchy` | `build_id` | one of `instance_id`/`instance_path`/`top`; `depth`, `limit`, `cursor` | Pre-order instance tree. | read-only |
 | `svw_connections` | `build_id` + one of `instance_id`/`instance_path` | `port`, `limit`, `cursor` | Direct formal/actual associations. | read-only |
 | `svw_impact` | `build_id` + one of `symbol_id`, `location`, `name`, `instance_id`/`instance_path` | `depth` (1-20, default 3), `limit` (per list, default 50) | What a change touches (instances, dependents/dependencies, port connection sites, references). A port and its implicit net are one target. Lists are capped; totals are complete. | read-only |
-| `svw_diff_impact` | `build_id` | `base` (default `HEAD`), `head` (default the working tree), `depth`, `limit` | What a git diff touches in the build: affected declarations and modules, their instances and dependents, changed ports with connection sites. Old-side lines are mapped onto the build's snapshot; `files[].aligned` says when that is exact. Plain revisions only (no options, no ranges); the repository is the project root. | read-only (runs `git diff`) |
+| `svw_diff_impact` | `build_id` | `base` (default `HEAD`), `head` (default the working tree), `depth`, `limit` | What a git diff touches in the build: affected declarations and modules, their instances and dependents, changed ports with connection sites. Old-side lines are mapped onto the build's snapshot; `files[].aligned` says when that is exact. Plain revisions only (no options, no ranges); the repository is the project root. git runs without user/system config and without any transport; a partial clone is refused (`POLICY_DENIED`). A cut list sets `pagination.truncated`. | read-only (runs `git diff`) |
 | `svw_rename_preview` | `build_id`, `new_name` + one of `symbol_id`, `location`, `name` | `limit` | READ-ONLY. Every edit site of renaming one declaration (verified against the snapshot bytes), the diff, `blockers`, `warnings`, a lexical list of other occurrences and, when nothing blocks, `edit_request`: a ready `svw_edit` prepare request (exact_range edits). It never writes the source tree and cannot approve. | read-only |
 | `svw_assertions` | `build_id` | `scope`, `kind` (`source`/`bind`/`elaborated`), `limit`, `cursor` | Static SVA inventory; execution status is never represented. | read-only |
 | `svw_evidence` | one of `build_id`/`evidence_id` | `type`, `limit`, `cursor` | Static record, imported external records, NOT_RUN/EXTERNAL_DECLARED state per kind. | read-only |

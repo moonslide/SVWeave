@@ -13,9 +13,9 @@ import os
 import sys
 from typing import Any
 
-from svweave.application.edit import Confirmation
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.editing.diffing import visible
+from svweave.editing.models import Confirmation
 
 TEST_TOKEN_ENV = "SVWEAVE_TEST_CONFIRM_TOKEN"
 

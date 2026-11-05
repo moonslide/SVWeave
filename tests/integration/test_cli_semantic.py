@@ -87,6 +87,7 @@ def test_build_blocked_dependency_leak_exits_3(tmp_path: Path) -> None:
     top.write_text(f'`include "{visible}"\n' + top.read_text())
     code, b = run(w.root, "build", "--profile", "p")
     assert code == 3 and b["outcome"] == "BLOCKED" and b["data"]["published"] is False
+    assert b["error"]["code"] == "PATH_NOT_ALLOWED" and b["error"]["details"]["reason"] == "dependency_leak"
 
 
 def test_build_with_missing_input_is_blocked_before_any_worker_runs(tmp_path: Path) -> None:

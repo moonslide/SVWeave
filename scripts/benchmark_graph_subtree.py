@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Paired timing of `svweave graph export` on a whole build vs `--root` (subtree view).
+"""Paired timing of `svweave graph export` on a whole build vs `--instance` (subtree view).
 
 The design is the hand-written fixture ``fixtures/language/grf_subtree`` (grf_soc: CLUSTERS
 clusters x CORES cores x 4 stages; 1 + CLUSTERS*(2+5*CORES) + 1 instances), elaborated ONCE by the
@@ -30,7 +30,6 @@ import datetime as dt
 import hashlib
 import json
 import os
-import re
 import shutil
 import statistics
 import subprocess
@@ -48,7 +47,6 @@ REPO = Path(__file__).resolve().parents[1]
 FIXTURE = REPO / "fixtures" / "language" / "grf_subtree"
 SVWEAVE = REPO / ".venv" / "bin" / "svweave"
 CLI_TIMEOUT_S = 900.0
-_DATA = re.compile(r'<script id="data" type="application/json">(.*?)</script>', re.S)
 
 MANIFEST = """\
 schema_version: "1.0"
@@ -111,11 +109,12 @@ def _cli(root: Path, args: list[str]) -> tuple[float, int, dict[str, Any]]:
 
 
 def _page(path: Path) -> dict[str, Any]:
-    m = _DATA.search(path.read_text())
-    if not m:
-        raise SystemExit(f"no data block in {path}")
-    data: dict[str, Any] = json.loads(m.group(1))
-    return data
+    from svweave.application.graph_codec import read_page
+
+    try:
+        return read_page(path.read_text())
+    except ValueError as e:
+        raise SystemExit(f"{path}: {e}") from e
 
 
 def equivalence(full: dict[str, Any], sub: dict[str, Any], root: str) -> list[str]:
@@ -150,7 +149,7 @@ def equivalence(full: dict[str, Any], sub: dict[str, Any], root: str) -> list[st
     return why
 
 
-_KW = {"--root": "root", "--diff-base": "diff_base", "--diff-head": "diff_head"}
+_KW = {"--instance": "instance", "--diff-base": "diff_base", "--diff-head": "diff_head"}
 _GIT_ENV = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_AUTHOR_NAME": "bench",
             "GIT_AUTHOR_EMAIL": "bench@invalid", "GIT_COMMITTER_NAME": "bench",
             "GIT_COMMITTER_EMAIL": "bench@invalid"}
@@ -225,8 +224,8 @@ def main() -> int:
     mid = a.clusters // 2
     modes: dict[str, list[str]] = {
         "full": [],
-        "cluster_subtree": ["--root", f"grf_soc.g_cl[{mid}].u_cl"],
-        "core_subtree": ["--root", f"grf_soc.g_cl[{mid}].u_cl.g_core[{a.cores // 2}].u_core"],
+        "cluster_subtree": ["--instance", f"grf_soc.g_cl[{mid}].u_cl"],
+        "core_subtree": ["--instance", f"grf_soc.g_cl[{mid}].u_cl.g_core[{a.cores // 2}].u_core"],
         "diff_reduce": ["--diff-base", "main", "--diff-head", "chg-reduce"],
         "diff_core": ["--diff-base", "main", "--diff-head", "chg-core"],
     }

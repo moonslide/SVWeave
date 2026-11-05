@@ -318,6 +318,18 @@ def test_f7_commit_key_cannot_be_reused_for_another_transaction(ws: EditWs) -> N
     assert C(ws, t2, h2, key="other-key-22").data["state"] == "POST_APPLY_VERIFIED"
 
 
+def test_f7_a_commit_key_outside_the_key_pattern_is_refused_before_anything(ws: EditWs) -> None:
+    """First council review: the CLI did not validate --request-key; a key JSON escapes (", \\,
+    non-ASCII) never matched the stored record, so reusing it went undetected."""
+    base = ws.build()
+    t1, h1 = to_approval(ws, base, [ws.range_edit("rtl/pkg.sv", *TASK)], serena=False)
+    for bad in ("clé-0001", 'key"with"quote', "short", "a" * 129, "back\\slash-1"):
+        e = err(C, ws, t1, h1, key=bad)
+        assert e.code is ErrorCode.INVALID_CONFIG and e.details["field"] == "request_key", bad
+    assert st(ws, t1) == "APPROVED"  # nothing happened
+    assert C(ws, t1, h1, key="valid_key-1").data["state"] == "POST_APPLY_VERIFIED"
+
+
 def test_f7_aborted_prepare_key_keeps_its_payload(ws: EditWs) -> None:
     base = ws.build()
     a = prepared(ws, base, [ws.range_edit("rtl/pkg.sv", *TASK)], serena=False, key="reuse-key-1")

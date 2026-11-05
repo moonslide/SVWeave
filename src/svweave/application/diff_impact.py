@@ -25,9 +25,7 @@ import hashlib
 import os
 import re
 import sqlite3
-import subprocess
-import threading
-import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -35,22 +33,51 @@ from svweave.application.impact import (
     DEFAULT_LIST,
     DEFINITION_KINDS,
     MAX_DEPTH,
-    _closure_items,
-    _definition_graph,
-    _fit,
-    _instances_of,
-    _names,
-    _owner_definition,
-    _references_of,
-    _twins,
 )
 from svweave.application.options import WorkspaceOptions
-from svweave.application.queries import _decl_dto, _gap_limits, _session
 from svweave.application.semantic_common import build_envelope
+from svweave.application.semantic_read import (
+    QuerySession,
+)
+from svweave.application.semantic_read import (
+    closure_items as _closure_items,
+)
+from svweave.application.semantic_read import (
+    decl_dto as _decl_dto,
+)
+from svweave.application.semantic_read import (
+    definition_graph as _definition_graph,
+)
+from svweave.application.semantic_read import (
+    fit_lists as _fit,
+)
+from svweave.application.semantic_read import (
+    gap_limits as _gap_limits,
+)
+from svweave.application.semantic_read import (
+    instances_of as _instances_of,
+)
+from svweave.application.semantic_read import (
+    names_of as _names,
+)
+from svweave.application.semantic_read import (
+    owner_definition as _owner_definition,
+)
+from svweave.application.semantic_read import (
+    references_of as _references_of,
+)
+from svweave.application.semantic_read import (
+    session as _session,
+)
+from svweave.application.semantic_read import (
+    twins as _twins,
+)
 from svweave.domain.cursor import MAX_RESPONSE_BYTES, check_limit
-from svweave.domain.envelope import Envelope
+from svweave.domain.envelope import Envelope, Pagination
 from svweave.domain.errors import ErrorCode, SvwError
+from svweave.security.git import HARDENED_CONFIG, LOG_SAFE, run_git
 from svweave.snapshot.capture import load_record, snapshots_dir
+from svweave.snapshot.models import SnapFile
 
 DIFF_NOTE = (
     "old-side line ranges of the git diff mapped onto the build's snapshot; exact only for files "
@@ -83,90 +110,34 @@ def check_ref(ref: str, field: str) -> str:
     return ref
 
 
+# git runs through the one hardened runner (security/git.py): untrusted repository config,
+# no transport, enforced deadline, capped output
+_GIT_CONFIG = HARDENED_CONFIG
+_LOG_SAFE = LOG_SAFE
+
+
 def _git(repo: Path, args: list[str], ok: tuple[int, ...] = (0,)) -> bytes:
-    argv = [
-        "git",
-        "-C",
-        str(repo),
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "core.quotePath=false",
-        "--no-pager",
-        *args,
-    ]
-    env = {
-        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-        "HOME": os.environ.get("HOME", "/nonexistent"),
-        "LC_ALL": "C",
-        "GIT_OPTIONAL_LOCKS": "0",
-        "GIT_TERMINAL_PROMPT": "0",
-    }
-    try:
-        proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell, refs validated by check_ref
-            argv,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
-            env=env,
-        )
-    except FileNotFoundError as e:
-        raise SvwError(
-            ErrorCode.BACKEND_UNAVAILABLE, "git is not installed", {"reason": "git_missing"}
-        ) from e
-    # stdout is read in bounded chunks and git is killed the moment the cap is exceeded: the diff
-    # (or a blob) is never buffered whole just to be refused afterwards. stderr is drained on a
-    # thread so a chatty git cannot block on a full pipe.
-    err: list[bytes] = []
+    # module globals read at call time (tests and callers may lower them)
+    return run_git(repo, args, ok, timeout_s=GIT_TIMEOUT_S, max_bytes=MAX_DIFF_BYTES)
 
-    def drain_err() -> None:
-        assert proc.stderr is not None
-        err.append(proc.stderr.read(1 << 16))
-        while proc.stderr.read(1 << 16):
-            pass
 
-    t = threading.Thread(target=drain_err, daemon=True)
-    t.start()
-    chunks: list[bytes] = []
-    size = 0
-    over = timed_out = False
-    deadline = time.monotonic() + GIT_TIMEOUT_S
-    assert proc.stdout is not None
-    while True:
-        if time.monotonic() > deadline:
-            timed_out = True
-            proc.kill()
-            break
-        chunk = proc.stdout.read(1 << 20)
-        if not chunk:
-            break
-        size += len(chunk)
-        if size > MAX_DIFF_BYTES:
-            over = True
-            proc.kill()
-            break
-        chunks.append(chunk)
-    rc = proc.wait()
-    t.join(timeout=5)
-    for f in (proc.stdout, proc.stderr):
-        if f is not None:
-            f.close()
-    if timed_out:
+def _refuse_lazy_objects(top: Path) -> None:
+    """A partial clone / promisor remote can make a plain read fetch missing objects, i.e. run
+    transport commands named by the repository config. Transports are disabled anyway; refuse the
+    layout outright so the answer is a clear policy refusal, not a confusing git error."""
+    lazy = _git(
+        top,
+        ["config", "--get-regexp", r"^(extensions\.partialclone|remote\..*\.promisor)$"],
+        ok=(0, 1),
+    ).decode("utf-8", "replace").strip()
+    if lazy:
         raise SvwError(
-            ErrorCode.BUILD_TIMEOUT, f"git did not finish in {GIT_TIMEOUT_S}s", {"reason": "git_timeout"}
+            ErrorCode.POLICY_DENIED,
+            "the repository is a partial clone (promisor remote): reading it may need to fetch "
+            "objects, which SVWeave never does; use a full clone",
+            {"reason": "partial_clone_unsupported",
+             "settings": sorted({ln.split()[0] for ln in lazy.splitlines()})[:10]},
         )
-    if over:
-        raise SvwError(
-            ErrorCode.OUTPUT_LIMIT, "the diff is larger than 64 MiB", {"reason": "diff_too_large"}
-        )
-    if rc not in ok:
-        first = (err[0] if err else b"").decode("utf-8", "replace").strip().splitlines()[:1]
-        raise SvwError(
-            ErrorCode.MISSING_INPUT,
-            "git could not answer: " + (first[0][:200] if first else f"exit {rc}"),
-            {"reason": "git_failed", "args": args[:3]},
-        )
-    return b"".join(chunks)
 
 
 class FileDiff:
@@ -211,8 +182,8 @@ def parse_diff(text: str) -> list[FileDiff]:
             cur = FileDiff(old, _path(line[4:]))
             out.append(cur)
         elif line.startswith("Binary files ") or line.startswith("GIT binary patch"):
-            m = re.match(r"Binary files (?:a/)?(.*?) and (?:b/)?(.*?) differ$", line)
-            b = FileDiff(m.group(1) if m else None, m.group(2) if m else None)
+            m = re.match(r"Binary files (.*?) and (.*?) differ$", line)
+            b = FileDiff(_path(m.group(1)) if m else None, _path(m.group(2)) if m else None)
             b.binary = True
             out.append(b)
             cur = None
@@ -257,9 +228,12 @@ def _ranges(hunks: list[tuple[int, int]], data: bytes) -> list[tuple[int, int, i
             off = starts[line - 1] if line - 1 < len(starts) else max(len(data) - 1, 0)
             out.append((off, off + 1, line, line))
             continue
-        first, last = max(a, 1), max(min(a + n - 1, nlines), 1)
+        # a hunk past the end of these bytes (an unaligned, shorter snapshot) anchors at the last
+        # line, like an insertion: never at byte 0, which would cover the whole file
+        first = min(max(a, 1), max(nlines, 1))
+        last = max(min(a + n - 1, nlines), first)
         end = starts[last] if last < len(starts) else len(data)
-        out.append((starts[first - 1] if first - 1 < len(starts) else 0, max(end, 1), first, last))
+        out.append((starts[first - 1], max(end, 1), first, last))
     return out
 
 
@@ -302,9 +276,29 @@ def _new_version(top: Path, path: str, head: str | None) -> bytes | None:
         return f.read()
 
 
+@dataclass(frozen=True)
+class Changes:
+    """What :func:`collect_changes` found (second council review, architecture finding 7: it was
+    an untyped 11-key dict). ``top``/``rel``/``snap_dir``/``by_logical`` are the git top-level, the
+    project's path in it, the build's snapshot directory and its files, for callers that read
+    further revisions (per-commit labels)."""
+
+    top: Path
+    rel: str
+    diffs: list[FileDiff]
+    files: list[dict[str, Any]]
+    unmapped: list[dict[str, Any]]
+    unattributed: list[dict[str, Any]]
+    affected: list[dict[str, Any]]
+    non_instance: list[dict[str, Any]]
+    by_def: dict[str, dict[str, Any]]
+    snap_dir: Path
+    by_logical: dict[str, SnapFile]
+
+
 def collect_changes(
-    s: Any, *, base: str, head: str | None, repo: str | None, new_side: bool = False
-) -> dict[str, Any]:
+    s: QuerySession, *, base: str, head: str | None, repo: str | None, new_side: bool = False
+) -> Changes:
     """Read the git diff and attribute its changed ranges to declarations of the build behind
     session ``s``; shared by :func:`diff_impact` and the graph diff view. ``base``/``head`` must
     already have passed :func:`check_ref`.
@@ -315,6 +309,7 @@ def collect_changes(
     repo_dir = Path(repo) if repo else s.ctx.project_root
     _, real = s.ctx.path_policy.check(str(repo_dir), s.ctx.project_root)
     top = Path(_git(real, ["rev-parse", "--show-toplevel"]).decode().strip())
+    _refuse_lazy_objects(top)
     _git(top, ["rev-parse", "--verify", "-q", base + "^{commit}"])
     if head is not None:
         _git(top, ["rev-parse", "--verify", "-q", head + "^{commit}"])
@@ -334,7 +329,8 @@ def collect_changes(
                 {"reason": "git_filters_configured",
                  "filters": sorted({ln.split()[0] for ln in filters.splitlines()})[:10]},
             )
-    diff_args = ["diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames"]
+    diff_args = ["diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames",
+                 "--src-prefix=a/", "--dst-prefix=b/", "--ignore-submodules=all"]
     diff_args += [base] + ([head] if head else []) + ["--"]
     # only the project's own subtree: a monorepo around it is none of this tool's business
     proj = Path(os.path.realpath(s.ctx.project_root))
@@ -458,9 +454,36 @@ def collect_changes(
                 *ids,
             )
             d["port_changes"].append({"port": rep["qualified_name"], "connection_sites": sites})
-    return {"top": top, "rel": rel, "diffs": diffs, "files": files_out, "unmapped": unmapped,
-            "unattributed": unattributed, "affected": affected, "non_instance": non_instance,
-            "by_def": by_def}
+    return Changes(top=top, rel=rel, diffs=diffs, files=files_out, unmapped=unmapped,
+                   unattributed=unattributed, affected=affected, non_instance=non_instance,
+                   by_def=by_def, snap_dir=snap_dir,
+                   by_logical={f.logical_path: f for f in rec.files})
+
+
+MAX_RANGE_COMMITS = 500
+_MARK = "\x01svw:"
+
+
+def commits_in_range(top: Path, base: str, head: str) -> tuple[list[dict[str, str]], bool]:
+    """Commits of ``base..head``, oldest first, at most MAX_RANGE_COMMITS (second value: cut).
+    The subject is repository text: data, capped, never interpreted."""
+    out = _git(top, ["log", *_LOG_SAFE, "--reverse", "--format=%H%x00%s", f"{base}..{head}", "--"])
+    rows = []
+    for ln in out.decode("utf-8", "replace").splitlines():
+        sha, _, subject = ln.partition("\x00")
+        if sha:
+            rows.append({"sha": sha, "subject": subject[:200]})
+    return rows[:MAX_RANGE_COMMITS], len(rows) > MAX_RANGE_COMMITS
+
+
+def commits_touching(top: Path, base: str, head: str, path: str, first: int, last: int) -> list[str]:
+    """Commits of ``base..head`` that changed lines first..last (1-based, in the HEAD version)
+    of ``path``: git's own line-history tracing (``log -L``), which also sees deletions inside
+    the range. ``-s``: commit ids only, no patches."""
+    out = _git(top, ["log", *_LOG_SAFE, "-s", "--format=%x01svw:%H", f"-L{first},{last}:{path}",
+                     f"{base}..{head}"])
+    return [ln[len(_MARK):].strip() for ln in out.decode("utf-8", "replace").splitlines()
+            if ln.startswith(_MARK)]
 
 
 def diff_impact(
@@ -482,9 +505,9 @@ def diff_impact(
     lim = DEFAULT_LIST if limit is None else check_limit(limit)
     with _session(opts, build_id) as s:
         ch = collect_changes(s, base=base, head=head, repo=repo)
-        top, rel, diffs = ch["top"], ch["rel"], ch["diffs"]
-        files_out, unmapped, unattributed = ch["files"], ch["unmapped"], ch["unattributed"]
-        affected, non_instance, by_def = ch["affected"], ch["non_instance"], ch["by_def"]
+        top, rel, diffs = ch.top, ch.rel, ch.diffs
+        files_out, unmapped, unattributed = ch.files, ch.unmapped, ch.unattributed
+        affected, non_instance, by_def = ch.affected, ch.non_instance, ch.by_def
         graphs = _definition_graph(s)
         up, down = graphs
         names = _names(s, set(by_def))
@@ -560,6 +583,8 @@ def diff_impact(
             s.build,
             request_id,
             data,
+            # a cut list is a truncated answer: absence from it is not proof (docs/mcp_contract)
+            pagination=Pagination(limit=lim, truncated=bool(cut)),
             warnings=warns,
             extra_limits=[*_gap_limits(s), DIFF_NOTE],
             freshness=s.fresh(),

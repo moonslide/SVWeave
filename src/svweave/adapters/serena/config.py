@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from svweave.domain.errors import ErrorCode, SvwError
+from svweave.editing.tree import GENERATED_FILES as _GENERATED_FILES
 from svweave.security import safeio
 from svweave.security.python_runtime import (  # re-export the established adapter API
     python_binds as python_binds,
@@ -24,8 +25,11 @@ from svweave.security.python_runtime import (
 
 VERIBLE_SUFFIXES = (".sv", ".svh", ".v", ".vh")
 FILELIST_NAME = "verible.filelist"
-#: Files the adapter itself writes into the candidate; the gateway excludes them from edit diffs.
-GENERATED_FILES: frozenset[str] = frozenset({FILELIST_NAME})
+#: Files the adapter itself writes into the candidate; the gateway (editing/tree.py, the owner of
+#: the list) excludes them from edit diffs. The dependency runs adapter -> editing only.
+GENERATED_FILES: frozenset[str] = _GENERATED_FILES
+if FILELIST_NAME not in GENERATED_FILES:  # pragma: no cover - import-time contract
+    raise RuntimeError("editing.tree.GENERATED_FILES must list the Serena filelist")
 
 #: Exactly these tools are exposed by the SVWeave context: no shell, no file create, no project
 #: switching, no memory tools, no regex replace.

@@ -23,9 +23,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from svweave.adapters.slang.runner import WorkerHandle
-from svweave.application.build import DB_FILENAME, require_execution_fingerprint, run_build
+from svweave.application.build import require_execution_fingerprint, run_build
 from svweave.application.events import EventLog, read_events
-from svweave.application.evidence import record_static_for
+from svweave.application.evidence import post_build
 from svweave.application.options import WorkspaceOptions
 from svweave.config.context import WorkspaceContext
 from svweave.domain.envelope import Envelope, ErrorInfo, Outcome, error_envelope
@@ -34,7 +34,7 @@ from svweave.domain.ids import new_job_id
 from svweave.domain.states import ACTIVE_JOB_STATES, JobLifecycle
 from svweave.execution.ledger import ensure_reconciled, job_requires_reconciliation
 from svweave.execution.slurm import ensure_available
-from svweave.storage.db import Database
+from svweave.storage.db import DB_FILENAME, Database
 from svweave.storage.lock import WorkspaceBusy, build_lock
 
 log = logging.getLogger("svweave.gateway")
@@ -256,7 +256,7 @@ class JobManager:
                         "UPDATE jobs SET build_id=?, snapshot_id=? WHERE job_id=?",
                         (env.build_id, env.snapshot_id, job_id),
                     )
-            record_static_for(self.opts, build_id)
+            post_build(self.opts, build_id)
         except SvwError as e:
             env = error_envelope(
                 e,

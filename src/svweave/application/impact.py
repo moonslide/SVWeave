@@ -21,26 +21,60 @@ member) is invisible here.
 
 from __future__ import annotations
 
-import json
 import sqlite3
-from collections import defaultdict
 from typing import Any
 
 from svweave.application.options import WorkspaceOptions
 from svweave.application.queries import (
-    _S,
     LOCATION_CONVENTION,
-    _decl_dto,
-    _decl_rows_by_location,
-    _gap_limits,
-    _inst_dto,
-    _qualified,
-    _resolve_instance,
-    _session,
 )
 from svweave.application.semantic_common import build_envelope
+from svweave.application.semantic_read import (
+    QuerySession as _S,
+)
+from svweave.application.semantic_read import (
+    ambiguous_target_envelope,
+    check_target_selector,
+    resolve_declaration_target,
+)
+from svweave.application.semantic_read import (
+    closure_items as _closure_items,
+)
+from svweave.application.semantic_read import (
+    decl_dto as _decl_dto,
+)
+from svweave.application.semantic_read import (
+    definition_graph as _definition_graph,
+)
+from svweave.application.semantic_read import (
+    fit_lists as _fit,
+)
+from svweave.application.semantic_read import (
+    gap_limits as _gap_limits,
+)
+from svweave.application.semantic_read import (
+    inst_dto as _inst_dto,
+)
+from svweave.application.semantic_read import (
+    instances_of as _instances_of,
+)
+from svweave.application.semantic_read import (
+    names_of as _names,
+)
+from svweave.application.semantic_read import (
+    owner_definition as _owner_definition,
+)
+from svweave.application.semantic_read import (
+    references_of as _references_of,
+)
+from svweave.application.semantic_read import (
+    resolve_instance as _resolve_instance,
+)
+from svweave.application.semantic_read import (
+    session as _session,
+)
 from svweave.domain.cursor import MAX_RESPONSE_BYTES, check_limit
-from svweave.domain.envelope import Envelope, ErrorInfo, Outcome, Pagination
+from svweave.domain.envelope import Envelope, Pagination
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.storage.semantic import loads
 
@@ -51,114 +85,6 @@ IMPACT_NOTE = (
     "static impact from one build's elaborated tree and resolved references; counts, not a risk "
     "score; no runtime, UVM factory/config_db or bit-level dataflow"
 )
-_LISTS = (
-    "instances",
-    "dependents",
-    "dependencies",
-    "connections",
-    "signal_uses",
-    "references",
-    "ancestors",
-    "descendants",
-    "files",
-)
-
-
-def _names(s: _S, ids: set[str]) -> dict[str, dict[str, Any]]:
-    out: dict[str, dict[str, Any]] = {}
-    for did, (qn, kind) in _qualified(s, ids).items():
-        out[did] = {"declaration_id": did, "qualified_name": qn, "kind": kind}
-    return out
-
-
-def _definition_graph(
-    s: _S,
-) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]]]:
-    """(up, down): definition -> {parent definition: n}, definition -> {child definition: n}."""
-    up: dict[str, dict[str, int]] = defaultdict(dict)
-    down: dict[str, dict[str, int]] = defaultdict(dict)
-    for r in s.rows(
-        "SELECT i.definition_declaration_id AS d, p.definition_declaration_id AS pd, COUNT(*) AS n "
-        "FROM instances i JOIN instances p ON p.build_id=i.build_id AND p.instance_id=i.parent_id "
-        "WHERE i.build_id=? AND i.definition_declaration_id IS NOT NULL "
-        "AND p.definition_declaration_id IS NOT NULL GROUP BY d, pd",
-        s.bid,
-    ):
-        up[r["d"]][r["pd"]] = int(r["n"])
-        down[r["pd"]][r["d"]] = int(r["n"])
-    return up, down
-
-
-def _closure(
-    graph: dict[str, dict[str, int]], start: str, depth: int
-) -> list[tuple[int, str, int]]:
-    """Breadth-first (level, definition, via_instances) from ``start``; each definition once, at
-    its shortest level. ``start`` itself is never listed (recursive instantiation is not looped)."""
-    seen = {start}
-    frontier = [start]
-    out: list[tuple[int, str, int]] = []
-    for level in range(1, depth + 1):
-        nxt: list[str] = []
-        for d in frontier:
-            for t, n in sorted(graph.get(d, {}).items()):
-                if t in seen:
-                    continue
-                seen.add(t)
-                nxt.append(t)
-                out.append((level, t, n))
-        frontier = nxt
-        if not frontier:
-            break
-    return out
-
-
-def _closure_items(
-    s: _S, graph: dict[str, dict[str, int]], start: str, depth: int
-) -> list[dict[str, Any]]:
-    rows = _closure(graph, start, depth)
-    names = _names(s, {d for _, d, _ in rows})
-    return [
-        {**names.get(d, {"declaration_id": d, "qualified_name": None, "kind": None}), "level": lv, "via_instances": n}
-        for lv, d, n in rows
-    ]
-
-
-def _instances_of(s: _S, def_id: str, lim: int) -> tuple[int, list[dict[str, Any]]]:
-    total = s.count(
-        "SELECT COUNT(*) FROM instances WHERE build_id=? AND definition_declaration_id=?",
-        s.bid,
-        def_id,
-    )
-    paths = {
-        r["instance_id"]: r["path"]
-        for r in s.rows(
-            "SELECT p.instance_id, p.path FROM instances p WHERE p.build_id=? AND p.instance_id IN "
-            "(SELECT parent_id FROM instances WHERE build_id=? AND definition_declaration_id=? "
-            "AND parent_id IS NOT NULL LIMIT ?)",
-            s.bid,
-            s.bid,
-            def_id,
-            lim,
-        )
-    }
-    items = []
-    for r in s.rows(
-        "SELECT * FROM instances WHERE build_id=? AND definition_declaration_id=? ORDER BY ord LIMIT ?",
-        s.bid,
-        def_id,
-        lim,
-    ):
-        d = _inst_dto(r)
-        items.append(
-            {
-                "instance_id": d["instance_id"],
-                "path": d["path"],
-                "parent_path": paths.get(d["parent_id"]) if d["parent_id"] else None,
-                "parameters": d["parameters"],
-                "location": d["location"],
-            }
-        )
-    return total, items
 
 
 def _bindings_referencing(
@@ -208,103 +134,6 @@ def _paths_for(s: _S, ids: set[str]) -> dict[str, str]:
         ):
             out[r["instance_id"]] = r["path"]
     return out
-
-
-def _references_of(
-    s: _S, decl_ids: list[str], lim: int
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
-    """(summary, sample references, per-file counts) of references to one entity (its declaration
-    ids: a port and its implicit internal net are one entity)."""
-    q = ",".join("?" for _ in decl_ids)
-    total = s.count(
-        f'SELECT COUNT(*) FROM "references" WHERE build_id=? AND target_id IN ({q})',
-        s.bid,
-        *decl_ids,
-    )
-    by_kind = {
-        r["kind"]: int(r["n"])
-        for r in s.rows(
-            f'SELECT kind, COUNT(*) n FROM "references" WHERE build_id=? AND target_id IN ({q}) '
-            "GROUP BY kind",
-            s.bid,
-            *decl_ids,
-        )
-    }
-    files = [
-        {"file": r["file"], "references": int(r["n"])}
-        for r in s.rows(
-            f'SELECT file, COUNT(*) n FROM "references" WHERE build_id=? AND target_id IN ({q}) '
-            "GROUP BY file ORDER BY n DESC, file LIMIT ?",
-            s.bid,
-            *decl_ids,
-            lim,
-        )
-    ]
-    sample = []
-    rows = s.rows(
-        f'SELECT * FROM "references" WHERE build_id=? AND target_id IN ({q}) '
-        "ORDER BY file, span_start LIMIT ?",
-        s.bid,
-        *decl_ids,
-        lim,
-    )
-    cont = _qualified(s, {r["container_id"] for r in rows if r["container_id"]})
-    for r in rows:
-        c = cont.get(r["container_id"]) if r["container_id"] else None
-        sample.append(
-            {
-                "kind": r["kind"],
-                "status": r["resolution_status"],
-                "location": loads(r["loc"]),
-                "container": c[0] if c else None,
-            }
-        )
-    distinct_files = s.count(
-        f'SELECT COUNT(DISTINCT file) FROM "references" WHERE build_id=? AND target_id IN ({q})',
-        s.bid,
-        *decl_ids,
-    )
-    return {"total": total, "by_kind": by_kind, "distinct_files": distinct_files}, sample, files
-
-
-def _scope_parents(scope: str) -> list[str]:
-    """``scope`` and every enclosing scope, innermost first: ``top.g.f`` -> top.g.f, top.g, top;
-    ``p::c::m`` -> p::c::m, p::c, p (generate blocks and subroutines nest inside a module)."""
-    out = []
-    cur = scope
-    while cur:
-        out.append(cur)
-        cut = max(cur.rfind("."), cur.rfind("::"))
-        if cut <= 0:
-            break
-        cur = cur[:cut]
-    return out
-
-
-def _enclosing(s: _S, scope: str | None, kinds: tuple[str, ...]) -> sqlite3.Row | None:
-    """The innermost declaration of one of ``kinds`` that encloses ``scope`` (walking up through
-    generate blocks, functions, tasks ...); None when there is none."""
-    if not scope:
-        return None
-    q = ",".join("?" for _ in kinds)
-    for cand in _scope_parents(scope):
-        r = s.one(
-            f"SELECT * FROM declarations WHERE build_id=? AND qualified_name=? AND kind IN ({q}) "
-            "ORDER BY span_start LIMIT 1",
-            s.bid,
-            cand,
-            *kinds,
-        )
-        if r is not None:
-            return r
-    return None
-
-
-def _owner_definition(s: _S, decl: sqlite3.Row) -> str | None:
-    """Declaration id of the module/interface/program that owns a declaration: the innermost one
-    enclosing its scope (a variable in a generate block or a function belongs to the module)."""
-    r = _enclosing(s, decl["scope"], ("module", "interface", "program"))
-    return str(r["declaration_id"]) if r else None
 
 
 def _definition_block(
@@ -494,55 +323,6 @@ def _instance_impact(s: _S, inst: sqlite3.Row, depth: int, lim: int, graphs: Any
     }
 
 
-def _twins(rows: list[sqlite3.Row]) -> list[sqlite3.Row] | None:
-    """slang declares an ANSI port as a port AND an implicit internal net at the same span. When
-    every candidate has the same name and source span they are ONE entity: return them with the
-    port first. Anything else stays ambiguous (None)."""
-    if len(rows) < 2:
-        return None
-    keys = {(r["name"], r["file"], r["span_start"], r["span_end"], r["scope"]) for r in rows}
-    if len(keys) != 1:
-        return None
-    return sorted(rows, key=lambda r: (r["kind"] != "port", r["declaration_id"]))
-
-
-def _with_twins(s: _S, rows: list[sqlite3.Row]) -> list[sqlite3.Row]:
-    """A single row picked by symbol_id or location gains the other declarations at the SAME name
-    span (slang's implicit net of an ANSI port), so every entry point sees one entity."""
-    if len(rows) != 1:
-        return rows
-    r = rows[0]
-    same = s.rows(
-        "SELECT * FROM declarations WHERE build_id=? AND name=? AND file=? AND span_start=? "
-        "AND span_end=? AND scope IS ?",
-        s.bid,
-        r["name"],
-        r["file"],
-        r["span_start"],
-        r["span_end"],
-        r["scope"],
-    )
-    return same if len(same) > 1 else rows
-
-
-def _fit(data: dict[str, Any], budget: int, keys: tuple[str, ...] = _LISTS) -> list[str]:
-    """Shrink the list sections until the JSON fits ``budget``; returns the keys that were cut. A
-    cut list keeps its ``*_total``/``summary`` figures, so the omission is visible."""
-    cut: list[str] = []
-    while len(json.dumps(data, default=str).encode("utf-8")) > budget:
-        key = max(
-            (k for k in keys if isinstance(data.get(k), list) and len(data[k]) > 1),
-            key=lambda k: len(json.dumps(data[k], default=str)),
-            default=None,
-        )
-        if key is None:
-            break
-        data[key] = data[key][: max(1, len(data[key]) // 2)]
-        if key not in cut:
-            cut.append(key)
-    return cut
-
-
 def impact(
     opts: WorkspaceOptions,
     build_id: str,
@@ -556,22 +336,7 @@ def impact(
     depth: int = 3,
     limit: int | None = None,
 ) -> Envelope:
-    modes = [
-        symbol_id is not None,
-        file is not None or byte is not None,
-        name is not None,
-        instance is not None,
-    ]
-    if sum(modes) != 1:
-        raise SvwError(
-            ErrorCode.INVALID_CONFIG,
-            "give exactly one of: symbol_id, file+byte, name, instance",
-            {"fields": ["symbol_id", "file+byte", "name", "instance"]},
-        )
-    if (file is None) != (byte is None) and not (name or symbol_id or instance):
-        raise SvwError(ErrorCode.INVALID_CONFIG, "file and byte must be given together")
-    if byte is not None and (not isinstance(byte, int) or byte < 0):
-        raise SvwError(ErrorCode.INVALID_CONFIG, "byte must be a non-negative integer")
+    check_target_selector(symbol_id, file, byte, name, instance)
     if not isinstance(depth, int) or isinstance(depth, bool) or not 1 <= depth <= MAX_DEPTH:
         raise SvwError(ErrorCode.INVALID_CONFIG, f"depth must be in 1..{MAX_DEPTH}")
     lim = DEFAULT_LIST if limit is None else check_limit(limit)
@@ -584,59 +349,11 @@ def impact(
             target = {"type": "instance", **_inst_dto(inst)}
             data = _instance_impact(s, inst, depth, lim, graphs)
         else:
-            if symbol_id is not None:
-                rows = s.rows(
-                    "SELECT * FROM declarations WHERE build_id=? AND symbol_id=?", s.bid, symbol_id
-                )
-            elif file is not None and byte is not None:
-                rows = _decl_rows_by_location(s, file, byte)
-            else:
-                rows = s.rows(
-                    "SELECT * FROM declarations WHERE build_id=? AND (qualified_name=? OR name=?) "
-                    "ORDER BY file, span_start",
-                    s.bid,
-                    name,
-                    name,
-                )
-            if not rows:
-                raise SvwError(
-                    ErrorCode.MISSING_INPUT,
-                    "no declaration matches the target",
-                    {"reason": "symbol_missing"},
-                )
-            rows = _with_twins(s, rows)
-            twins = _twins(rows)
-            if twins is not None:
-                rows = [twins[0]]
+            rows, twins = resolve_declaration_target(
+                s, symbol_id=symbol_id, file=file, byte=byte, name=name)
             if len(rows) > 1:
-                return build_envelope(
-                    s.ctx,
-                    s.db,
-                    s.build,
-                    request_id,
-                    {"candidate_count": len(rows)},
-                    outcome=Outcome.ERROR,
-                    error=ErrorInfo(
-                        code=ErrorCode.AMBIGUOUS_SYMBOL.value,
-                        message=f"{len(rows)} scoped candidates; choose one by symbol_id "
-                        "(no candidate was selected automatically)",
-                        details={
-                            "candidates": [
-                                {
-                                    "symbol_id": r["symbol_id"],
-                                    "qualified_name": r["qualified_name"],
-                                    "kind": r["kind"],
-                                    "location": loads(r["loc"]),
-                                }
-                                for r in rows[:50]
-                            ],
-                            "candidate_count": len(rows),
-                        },
-                    ),
-                    freshness=s.fresh(),
-                    reference_query="impact",
-                    reference_depth=depth,
-                )
+                return ambiguous_target_envelope(s, request_id, rows, reference_query="impact",
+                                                 reference_depth=depth)
             decl = rows[0]
             ids = [str(t["declaration_id"]) for t in twins] if twins else [str(decl["declaration_id"])]
             target = {"type": "declaration", **_decl_dto(decl)}

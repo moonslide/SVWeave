@@ -25,6 +25,7 @@ from typing import Any
 from svweave.config.context import WorkspaceContext
 from svweave.domain.errors import SvwError
 from svweave.security import safeio
+from svweave.security.git import untrusted_repo_env
 
 GIT_TIMEOUT_S = 10.0
 GIT_TERMINATION_GRACE_S = 0.5
@@ -140,20 +141,8 @@ def _bounded_run(
 
 
 def _environment() -> dict[str, str]:
-    return {
-        "PATH": os.defpath,
-        "HOME": "/nonexistent",
-        "XDG_CONFIG_HOME": "/nonexistent",
-        "LC_ALL": "C",
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_SYSTEM": os.devnull,
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_ATTR_NOSYSTEM": "1",
-        "GIT_OPTIONAL_LOCKS": "0",
-        "GIT_TERMINAL_PROMPT": "0",
-        "GIT_NO_LAZY_FETCH": "1",
-        "GIT_ALLOW_PROTOCOL": "",
-    }
+    # the one untrusted-repository environment (security/git.py), with the fixed default PATH
+    return untrusted_repo_env(os.defpath)
 
 
 def _metadata(ctx: WorkspaceContext, budget: _Budget) -> tuple[Path, list[str], list[str]]:

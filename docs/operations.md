@@ -36,10 +36,12 @@ Editing stays disabled during all of this (and in M3 it does not exist at all).
    then validates it with slang and a human approves it. The preview itself never writes.
 8. Draw it: `svweave graph export --build B` writes one self-contained HTML page under
    `.svweave/exports/` (hierarchy plus port-association connections, nothing served, ADR-014).
-   Add `--root INSTANCE` to read and draw only that instance's subtree of the same build (signals
+   Add `--instance INSTANCE` to read and draw only that instance's subtree of the same build (signals
    declared outside it are listed as boundary signals); on large designs this is much faster.
    Add `--diff-base REF` (and `--diff-head REF`) to draw only the instances whose module or
    interface the git diff changes, with their subtrees and connecting ancestors.
+   For a very large SoC add `--split` (linked pages) or `--lazy` (one page that loads its parts),
+   each part at most `--page-budget` instances (default 5000).
 
 ```text
 svweave edit prepare --spec spec.json

@@ -23,6 +23,16 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from svweave.adapters.capability import (
+    SERENA_ALLOWLIST,
+    SERENA_CORE_FEATURES,
+    SERENA_FEATURES,
+    SERENA_FORBIDDEN,
+    CapabilityComparison,
+    SerenaEditSubset,
+    compare_capabilities,
+    derive_serena_edit_subset,
+)
 from svweave.adapters.mcp_client import (
     SIZE_VIOLATIONS,
     InitInfo,
@@ -35,18 +45,8 @@ from svweave.adapters.mcp_client import (
 from svweave.adapters.serena import config as cfg
 from svweave.adapters.serena import guard as gd
 from svweave.adapters.serena import offsets
+from svweave.adapters.toolchain import Toolchain, sha256_file
 from svweave.domain.errors import ErrorCode, SvwError
-from svweave.orchestration.capability import (
-    SERENA_ALLOWLIST,
-    SERENA_CORE_FEATURES,
-    SERENA_FEATURES,
-    SERENA_FORBIDDEN,
-    CapabilityComparison,
-    SerenaEditSubset,
-    compare_capabilities,
-    derive_serena_edit_subset,
-)
-from svweave.orchestration.toolchain import Toolchain, sha256_file
 from svweave.security import safeio
 from svweave.security.redaction import Redactor
 from svweave.security.sandbox import IsolationMode, SandboxRunner, SandboxSpec

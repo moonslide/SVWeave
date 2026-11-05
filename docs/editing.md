@@ -148,7 +148,11 @@ it did not write: conflict files keep the human's version and the candidate vers
 `.svweave/recovery/<txn>/<path>.candidate`. The block is cleared only when every file is consistent
 (all applied or none applied) or by an explicit choice: `--roll-forward` (no conflicts), `--rollback`
 (restores originals only for files still equal to the after-hash, no conflicts) or `--accept-current`
-(keep what is on disk). No `git reset` / `git checkout` is ever used.
+(keep what is on disk). No `git reset` / `git checkout` is ever used. Both writing modes re-check
+what a commit checks: editing enabled, the trusted location, the current policy for every file,
+and the approval as it stood when the commit began; the journal must belong to the transaction
+(id, base snapshot, patch hash) and `--rollback` restores only the approved files, with bytes
+read (no link followed) from the validated base snapshot whose record names their hash.
 
 ## MCP
 

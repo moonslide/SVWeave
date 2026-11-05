@@ -340,12 +340,15 @@ the tested SHA; later documentation commits are not automatically native-tested.
 * Connection edges are shared-signal links from direct port associations, oriented by the declared
   port direction. They are not a netlist: no driver/load analysis, no bit level, no cross-hierarchy
   continuous assignments, `tran`/`alias`, or UVM runtime topology.
-* Signals used by more instances than `--max-fanout` are listed as hubs, not drawn; instances beyond
-  `--max-instances` are not drawn (shallowest first). Neither is proof of absence.
+* By default nothing is capped: the page is the complete topology (every instance, every signal).
+  Only when asked, signals used by more instances than `--max-fanout` are listed as hubs, not
+  drawn, and instances beyond `--max-instances` are not drawn (shallowest first); neither is proof
+  of absence. A complete page of a very large SoC can be too big for a browser (the envelope
+  warns above 20,000 instances or 64 MiB).
 * The page is a snapshot of one build and does not refresh. Layout is a plain tree; very large
   designs need `--max-instances` or collapsing to stay readable.
 * Only the user's browser renders it; the viewer is not part of the qualification gates.
-* `--root` (subtree view) reads only the root and its descendants. Signals declared outside the
+* `--instance` (subtree view) reads only the root and its descendants. Signals declared outside the
   subtree are listed as boundary signals, not drawn; fan-out counts uses inside the subtree, so a
   hierarchical reference from outside the subtree into it is not counted. It is a view of the same
   build, not a separate compile: a design that does not elaborate as a whole has no subtree either.
@@ -355,6 +358,16 @@ the tested SHA; later documentation commits are not automatically native-tested.
   not drawn (headers are not re-expanded, as in `diff-impact`). Per file the diff side matching the
   build's snapshot is used; a file matching neither is mapped approximately (warned). A change to a
   module instantiated everywhere draws most of the design: the view is only as small as the change.
+* `--split` / `--lazy` cut the topology into parts of at most `--page-budget` instances; a
+  subtree under 50 instances is never a part of its own, so a part can exceed the budget (the
+  envelope reports it). `--lazy` loads its parts with `<script src>`, which on file:// needs
+  `script-src 'self'` in that page's CSP; it is verified in Chromium only (Firefox applies a
+  stricter file:// origin). Data files are only loaded by the names the page checks
+  (`c-<10 hex>.js`); there is no integrity check of them (SRI does not work on file://), they sit
+  in the same private directory as the page.
+* `--per-commit` labels a changed module with the commits that touched its lines in the head
+  version; it needs a build of `--diff-head` (otherwise no labels, with a warning), labels every
+  instance of a module alike, and traces at most 200 changed modules and 500 commits.
 * Measured (`evidence/bench/graph-subtree/`, one 4-CPU host, one synthetic design, not the
   reference corpus), CLI at 41,090 instances: full 14.6 s, one cluster subtree 1.70 s, a diff that
   changes one module with 65 instances 1.63 s, a diff that changes a module with 8,192 instances

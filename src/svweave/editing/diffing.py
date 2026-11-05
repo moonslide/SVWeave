@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from svweave.adapters.serena.guard import ChangeSet, diff_hashes
 from svweave.domain.ids import canonical_hash, sha256_hex
+from svweave.editing.tree import ChangeSet, diff_hashes
 
 DIFF_DISPLAY_LIMIT = 64 * 1024
 
