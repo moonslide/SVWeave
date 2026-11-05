@@ -38,11 +38,29 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   prefixes are pinned. **Breaking:** `$VAR` expansion in filelists now also needs the variable in
   the trusted `policy.json` `environment_allowlist` (a repository `svweave.yaml` could read any
   variable, e.g. a token, and echo it in an error message to the MCP client).
-* **`.svweave/` must be SVWeave's own** (**breaking**, owner decision of 2026-11-05): its identity
-  is recorded in the trusted directory when SVWeave creates it; any other non-empty `.svweave/`
-  (repository-shipped, copied, moved) is refused (`state_dir_not_adopted`) until
-  `svweave init --adopt-state`. After upgrading, an existing workspace needs that one step (the
-  error says so). Mutation M32.
+* **`.svweave/` must be SVWeave's own** (**breaking**, owner decision of 2026-11-05): when
+  SVWeave creates it, a random token goes into `.svweave/.svweave-id` and its sha256, keyed by
+  the directory's real path, into `state_dir.json` in the trusted directory; any other non-empty
+  `.svweave/` (repository-shipped, extracted over a deleted one, moved) is refused
+  (`state_dir_not_adopted`) until `svweave init --adopt-state`. After upgrading, an existing
+  workspace needs that one step (the error, also on the MCP launcher's stderr, says so; a record of
+  the first, device/inode format is accepted once and rewritten). A state directory writable by
+  group or others, or a `.svweave` that is not a directory, is refused. Mutations M32, M43.
+* **Fixes from the third council review** (`evidence/council-review-3-2026-11-05/`): the
+  untrusted-repo git runner sets `core.hooksPath=/dev/null` and `diff.autoRefreshIndex=false`
+  (a repository delivered with its `.git/` ran `.git/hooks/post-index-change` from
+  `svw_diff_impact`; reproduced; mutation M44); `svweave init` records and adopts the state
+  directory every other command uses (`<project.root>/.svweave`, not `<--root>/.svweave`), honours
+  `--manifest`, and leaves a `project.root` outside the manifest directory to the first command
+  (`data.state_dir.deferred`); `doctor` without a verified workspace keeps backend probe state in a
+  private temporary directory, never in the project's `.svweave/`, and names a refused state
+  directory `state_dir` instead of `policy_tightening`; `edit recover --rollback` now needs what
+  roll-forward needs (editing enabled, trusted location, current policy, the approval, a journal
+  of this transaction naming only its approved files) and reads the base bytes from the validated
+  base snapshot without following links (mutations M41, M42); `svweave schema emit` exits with
+  the error's code (an INTERNAL or POLICY_DENIED error exited 0); `scripts/qualify.py` blocks
+  when `git status` fails (the tree's state is unknown; `tree_state` in the report). The source
+  writer's own no-follow is pinned by a swap-after-check test (mutation M45).
 * **Fixes from the second council review** (each with a test that fails without it):
   `--per-commit`'s `git log` ran the repository's `gpg.program` for a signed commit when the
   repository config set `log.showSignature` (reproduced; signature checks, ext-diff and textconv

@@ -41,7 +41,7 @@ from svweave.domain.envelope import (
     Provenance,
 )
 from svweave.domain.errors import ErrorCode, SvwError
-from svweave.domain.ids import canonical_hash
+from svweave.domain.ids import canonical_hash, is_sha256_hex
 from svweave.domain.states import Completeness, DiagnosticOutcome, Freshness
 from svweave.domain.states import TransactionState as S
 from svweave.editing import approval as appr
@@ -1407,13 +1407,18 @@ def _candidate_bytes(ctx: WorkspaceContext, txn_id: str, logical: str, want: str
     return data if sha256_hex(data) == want else None
 
 
-def _before_bytes(ctx: WorkspaceContext, j: jr.Journal, logical: str, want: str) -> bytes | None:
+def _before_bytes(ctx: WorkspaceContext, base: SnapshotRecord, logical: str,
+                  want: str) -> bytes | None:
+    """The base snapshot's own bytes of ``logical`` (its validated record names the file and its
+    hash), read without following any link."""
     from svweave.domain.ids import sha256_hex
     from svweave.security import safeio
 
-    p = snapshots_dir(ctx) / j.base_snapshot_id / "files" / snapshot_rel(logical)
+    entry = next((f for f in base.files if f.logical_path == logical), None)
+    if entry is None or entry.sha256 != want:
+        return None
     try:
-        data = safeio.read_regular(p)
+        data = safeio.read_regular_under(snapshots_dir(ctx) / base.snapshot_id, entry.snapshot_path)
     except (OSError, SvwError):
         return None
     return data if sha256_hex(data) == want else None
@@ -1465,6 +1470,36 @@ def _roll_forward_gates(ctx: WorkspaceContext, txn: Txn, j: jr.Journal) -> None:
             "the candidate no longer equals the approved patch; roll-forward refused (EDT-04)",
             {"reason": "candidate_changed_after_validation"},
         )
+
+
+def _rollback_gates(ctx: WorkspaceContext, txn: Txn, j: jr.Journal) -> SnapshotRecord:
+    """Rollback writes into the original source too: the same editing permission, trusted
+    location, current policy and approval (valid when the commit began) as roll-forward, a journal
+    that belongs to this transaction and names only its approved files, and bytes taken from the
+    validated base snapshot (third council review M1: rollback wrote the journal's base bytes with
+    none of these checks, from a path built with an unvalidated ``base_snapshot_id``)."""
+    require_editing_enabled(ctx)
+    _check_trusted_location(ctx)
+    if (txn.patch_hash is None or txn.base_snapshot_id is None
+            or j.transaction_id != txn.transaction_id
+            or j.base_snapshot_id != txn.base_snapshot_id or j.patch_hash != txn.patch_hash
+            or not is_sha256_hex(txn.base_snapshot_id)):
+        raise SvwError(ErrorCode.APPROVAL_REQUIRED,
+                       "journal and transaction disagree (id, base snapshot or patch)",
+                       {"reason": "journal_patch_mismatch"})
+    files = [f.logical_path for f in j.files]
+    if not set(files) <= set(txn.record.get("files", [])):
+        raise SvwError(ErrorCode.APPROVAL_REQUIRED,
+                       "the journal names files outside the approved transaction",
+                       {"reason": "journal_files_not_approved"})
+    recheck_edit_policy(ctx, files, list(txn.record.get("profiles", [])))
+    appr.verify_approval(
+        ctx.trusted_dir, _profiles_binding(txn, ctx),
+        allow_test_approvals=ctx.policy.allow_test_approvals,
+        now=datetime.fromisoformat(j.created_at),
+    )
+    rec, _ = _base_rec(ctx, txn.base_snapshot_id)
+    return rec
 
 
 def _recover_locked(
@@ -1519,8 +1554,9 @@ def _recover_locked(
         if conflicts:
             notes.append("rollback refused: conflicts exist (the human's changes are kept)")
         else:
+            base = _rollback_gates(ctx, txn, j)
             for v in applied:
-                data = _before_bytes(ctx, j, v.logical_path, v.before_sha256)
+                data = _before_bytes(ctx, base, v.logical_path, v.before_sha256)
                 if data is None:
                     raise SvwError(ErrorCode.MISSING_INPUT, "original bytes unavailable",
                                    {"reason": "base_missing", "path": v.logical_path})

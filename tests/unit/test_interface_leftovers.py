@@ -60,6 +60,19 @@ def test_IF_02_schema_check_out_of_sync_names_its_error(tmp_path: Path) -> None:
     assert victim.name in env["error"]["details"]["out_of_sync"]
 
 
+def test_IF_02b_schema_emit_failing_to_write_exits_non_zero(tmp_path: Path) -> None:
+    """Third council review M4: every error other than out-of-sync exited 0."""
+    out = tmp_path / "schemas"
+    out.mkdir()
+    (out / "mcp").write_text("a file where the MCP schema directory should be")
+    code, env, output = _run(tmp_path, "schema", "emit", "--out", str(out))
+    assert env is not None and env["error"]["details"].get("reason") != "usage_error", output
+    assert env is not None and env["outcome"] == "ERROR", output
+    from svweave.domain.errors import ErrorCode, exit_code_for
+
+    assert code != 0 and code == exit_code_for(ErrorCode(env["error"]["code"])), env["error"]
+
+
 def test_IF_03_schema_emit_replaces_a_planted_link_instead_of_writing_through_it(
         tmp_path: Path) -> None:
     out = tmp_path / "schemas"

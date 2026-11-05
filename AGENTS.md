@@ -92,7 +92,7 @@ SVWEAVE_REQUIRE_BACKENDS=1 .venv/bin/python -m pytest -m acceptance    # end-to-
 SVWEAVE_REQUIRE_BROWSER=1 .venv/bin/python -m pytest tests/browser     # graph viewer in Chromium (opt-in)
 .venv/bin/python scripts/bootstrap_locked.py --verify-only    # lock vs installed toolchain
 .venv/bin/python scripts/probe_backends.py                    # real backend contract probe
-.venv/bin/python scripts/mutation_suite.py                    # 40 critical mutations (plan 20.5 + write/Slurm/workspace/snapshot/approval guards)
+.venv/bin/python scripts/mutation_suite.py                    # 45 critical mutations (plan 20.5 + write/Slurm/workspace/snapshot/approval guards)
 .venv/bin/python scripts/benchmark.py --scale 0.1             # PERF-01 (use --scale 1.0 on a big host)
 .venv/bin/python scripts/qualify.py                           # all release gates, writes the report
 ```

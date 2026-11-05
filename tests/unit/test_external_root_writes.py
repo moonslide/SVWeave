@@ -59,3 +59,66 @@ def test_SEC_EXT02_a_parent_swapped_for_a_link_is_refused_not_followed(tmp_path:
     assert e.value.code is ErrorCode.POLICY_DENIED
     assert (elsewhere / "b" / "c.sv").read_bytes() == old, "the write followed the swapped parent"
     assert jr.target_sha(ctx, "@ext/a/b/c.sv") == "non-regular"
+
+
+def _swap_parent(ext: Path, tmp_path: Path) -> Path:
+    """Replace ``ext/a`` by a link to a directory holding the same bytes; returns that file."""
+    elsewhere = tmp_path / "attacker"
+    (elsewhere / "b").mkdir(parents=True)
+    victim = elsewhere / "b" / "c.sv"
+    victim.write_bytes((ext / "a" / "b" / "c.sv").read_bytes())
+    os.rename(ext / "a", tmp_path / "a-moved")
+    (ext / "a").symlink_to(elsewhere)
+    return victim
+
+
+def test_SEC_EXT03_a_parent_swapped_after_the_compare_and_set_check_is_not_followed(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Third council review M6: EXT02 plants the link BEFORE the check, which the read side
+    already refuses, so the write side's own no-follow was never exercised. Here the parent is
+    swapped right after the check passed: only ``write_target`` stands in the way."""
+    w, ext = _ext_ws(tmp_path)
+    ctx = w.ctx()
+    old = b"module c; endmodule\n"
+    new = b"module c; wire w; endmodule\n"
+    real_sha = jr.target_sha
+    swapped: list[Path] = []
+
+    def check_then_swap(c: object, logical: str) -> str | None:
+        sha = real_sha(ctx, logical)
+        swapped.append(_swap_parent(ext, tmp_path))
+        return sha
+
+    monkeypatch.setattr(jr, "target_sha", check_then_swap)
+    with pytest.raises(SvwError) as e:
+        jr.apply_files(ctx, _journal(old, new), {"@ext/a/b/c.sv": new})
+    assert e.value.code is ErrorCode.POLICY_DENIED
+    assert swapped and swapped[0].read_bytes() == old, "the write followed the swapped parent"
+
+
+def test_SEC_EXT04_recovery_writes_into_an_external_root_follow_no_swapped_parent(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Third council review M6: the recovery writer was not exercised with an external root."""
+    from svweave.application import edit as E
+
+    w, ext = _ext_ws(tmp_path)
+    ctx = w.ctx()
+    old = (ext / "a" / "b" / "c.sv").read_bytes()
+    real_stat = jr.target_stat
+    swapped: list[Path] = []
+
+    def stat_then_swap(c: object, logical: str) -> os.stat_result:
+        st = real_stat(ctx, logical)
+        swapped.append(_swap_parent(ext, tmp_path))
+        return st
+
+    monkeypatch.setattr(jr, "target_stat", stat_then_swap)
+    with pytest.raises(SvwError) as e:
+        E._write_one(ctx, "@ext/a/b/c.sv", b"module c; wire r; endmodule\n", sha256_hex(old))
+    assert e.value.code is ErrorCode.POLICY_DENIED
+    assert swapped and swapped[0].read_bytes() == old, "recovery followed the swapped parent"
+    monkeypatch.setattr(jr, "target_stat", real_stat)
+    os.unlink(ext / "a")
+    os.rename(tmp_path / "a-moved", ext / "a")
+    E._write_one(ctx, "@ext/a/b/c.sv", b"module c; wire r; endmodule\n", sha256_hex(old))
+    assert (ext / "a" / "b" / "c.sv").read_bytes() == b"module c; wire r; endmodule\n"

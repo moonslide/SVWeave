@@ -6,6 +6,8 @@ only with ``probe=True``; without a probe backend health is reported as not prov
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -105,14 +107,19 @@ def backend_checks(
     out = static_checks(tc)
     reg = registry
     own = False
+    scratch: Path | None = None
     if reg is None:
         ws = getattr(dc, "workspace", None)
         if ws is not None:
             reg = BackendRegistry.for_workspace(ws, tc)  # original source roots are protected
         else:
+            # no verified workspace (no manifest, or it was refused, e.g. an unadopted .svweave/):
+            # nothing is written into the project; a private throwaway directory holds the probe
+            # state (third council review H3: the probe ran rmtree/copytree in <root>/.svweave)
             ws_root = Path(dc.options.root) if dc is not None and hasattr(dc, "options") else Path.cwd()
+            scratch = Path(tempfile.mkdtemp(prefix="svweave-doctor-"))
             reg = BackendRegistry(
-                tc, ws_root / ".svweave" / "backends", ws_root / ".svweave" / "snapshots",
+                tc, scratch / "backends", scratch / "snapshots",
                 protected_paths=(ws_root,),  # no manifest loaded: protect the whole project root
             )
         own = True
@@ -121,4 +128,6 @@ def backend_checks(
     finally:
         if own:
             reg.shutdown()
+        if scratch is not None:
+            shutil.rmtree(scratch, ignore_errors=True)
     return out

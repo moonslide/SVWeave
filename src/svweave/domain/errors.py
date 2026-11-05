@@ -85,3 +85,11 @@ class SvwError(Exception):
     @property
     def exit_code(self) -> int:
         return exit_code_for(self.code)
+
+
+def startup_message(prog: str, e: SvwError) -> str:
+    """What a stdio server prints on stderr when it refuses to start: code, message and the
+    error's ``hint`` (third council review M5: the MCP path dropped the ``--adopt-state`` hint)."""
+    text = f"{prog}: {e.code.value}: {e.message}"
+    hint = e.details.get("hint")
+    return text + (f"\n{prog}: hint: {hint}" if isinstance(hint, str) and hint else "")

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Critical mutation suite (plan 20.5, release gate "Critical invariants").
 
-Forty deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
+Forty-five deliberate defects cover the ten classes of plan 20.5 (class 7 has two variants),
 the M12–M22 extra write-safety rules, M23–M26 Slurm boundaries, and M27 shared-launcher workspace
 binding, plus M28–M29 verified incremental-snapshot reuse, M30 the complete change list of
 the roll-forward input gate and M31 the verified candidate snapshot of edit validate M32 the recorded state directory, M33 no-follow writes into external roots and M34–M39 the
 commit freeze check, approval binding, test-token, expiry and key-mode checks and the
-roll-forward journal/patch match, and M40 the exact-range patch's expected bytes. They are injected, one at a time, into a THROWAWAY COPY of the
+roll-forward journal/patch match, M40 the exact-range patch's expected bytes, M41–M42 the
+recovery rollback's gates and no-follow base read, M43 the state-dir token, M44 disabled
+repository hooks in the git runner and M45 the source writer's own no-follow. They are injected, one at a time, into a THROWAWAY COPY of the
 repository. For each one the mapped test subset is run against the copy; a mutation is ``KILLED`` when the subset
 fails (pytest exit 1 with at least one FAILED test) and ``SURVIVED`` when it stays green. Anything
 else (patch anchor missing, syntax/collection error, timeout, red baseline) is ``ERROR`` and is
@@ -421,7 +423,7 @@ MUTATIONS: list[Mutation] = [
         ["tests/unit/test_state_trust.py::"
          "test_SEC_STA01_a_shipped_state_dir_is_refused_by_every_command",
          "tests/unit/test_state_trust.py::"
-         "test_SEC_STA04_a_copied_or_replaced_state_dir_no_longer_matches_its_record"],
+         "test_SEC_STA04_a_replaced_or_forged_state_dir_does_not_match_its_record"],
     ),
     m(
         "M33", "edit writes into an external root follow linked parent directories",
@@ -503,6 +505,60 @@ MUTATIONS: list[Mutation] = [
                "    if hashlib.sha256(data[start_byte:end_byte]).hexdigest() != expected_sha256:\n",
                "    if False:  # " + MARK + ":M40\n")],
         ["tests/unit/test_adapters_serena.py", "tests/unit/test_edit_slang_symbol.py"],
+    ),
+    m(
+        "M41", "recovery rollback writes the journal's base bytes without approval/policy/journal checks",
+        "A3/EDT-08 (beyond 20.5); third council review M1",
+        [Patch("src/svweave/application/edit.py",
+               "            base = _rollback_gates(ctx, txn, j)\n",
+               "            base, _ = _base_rec(ctx, txn.base_snapshot_id)  # " + MARK + ":M41\n")],
+        ["tests/fault_injection/test_recover_gates.py::"
+         "test_rb_rollback_without_a_valid_approval_is_refused",
+         "tests/fault_injection/test_recover_gates.py::test_rb_rollback_with_editing_disabled_is_refused",
+         "tests/fault_injection/test_recover_gates.py::"
+         "test_rb_rollback_of_a_journal_naming_an_unapproved_file_is_refused"],
+    ),
+    m(
+        "M42", "recovery rollback reads the base bytes through linked snapshot directories",
+        "A1/SEC (beyond 20.5); third council review M1",
+        [Patch("src/svweave/application/edit.py",
+               "        data = safeio.read_regular_under(snapshots_dir(ctx) / base.snapshot_id, "
+               "entry.snapshot_path)\n",
+               "        data = safeio.read_regular(snapshots_dir(ctx) / base.snapshot_id / "
+               "entry.snapshot_path)  # " + MARK + ":M42\n")],
+        ["tests/fault_injection/test_recover_gates.py::"
+         "test_rb_rollback_takes_the_base_bytes_from_the_validated_snapshot_only"],
+    ),
+    m(
+        "M43", "a recorded state-dir path is trusted without its token (a replaced .svweave/)",
+        "SEC (beyond 20.5); third council review M2",
+        [Patch("src/svweave/config/trusted.py",
+               "    return want is not None and token is not None and hmac.compare_digest(_sha(token), "
+               "want)\n",
+               "    return want is not None  # " + MARK + ":M43\n")],
+        ["tests/unit/test_state_trust.py::"
+         "test_SEC_STA04_a_replaced_or_forged_state_dir_does_not_match_its_record"],
+    ),
+    m(
+        "M44", "the untrusted-repo git runner refreshes the index and lets repository hooks run",
+        "rule 9 (beyond 20.5); third council review H1",
+        [Patch("src/svweave/security/git.py",
+               '    "core.hooksPath=" + os.devnull,\n    "diff.autoRefreshIndex=false",\n',
+               "    # " + MARK + ":M44\n")],
+        ["tests/unit/test_diff_git_hardening.py::"
+         "test_SEC_DIF09_a_working_tree_diff_runs_no_repository_hook_and_leaves_the_index"],
+    ),
+    m(
+        "M45", "the source writer alone follows a parent swapped after the compare-and-set check",
+        "A1/SEC (beyond 20.5); third council review M6 (M33 reverts three sites at once)",
+        [Patch("src/svweave/editing/journal.py",
+               "    safeio.write_under(base, rel, data, mode, durable=True)\n",
+               "    p = ctx.to_abs(logical)  # " + MARK + ":M45\n"
+               "    safeio.write_under(p.parent, p.name, data, mode, durable=True)\n")],
+        ["tests/unit/test_external_root_writes.py::"
+         "test_SEC_EXT03_a_parent_swapped_after_the_compare_and_set_check_is_not_followed",
+         "tests/unit/test_external_root_writes.py::"
+         "test_SEC_EXT04_recovery_writes_into_an_external_root_follow_no_swapped_parent"],
     ),
 ]
 

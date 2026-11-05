@@ -24,7 +24,7 @@ G0 lock verified + lock fields non-null + backend probe (pyslang/slang READY, cb
 G1 manifest/snapshot/config/path-policy suites (unit + integration) with no FAIL/SKIP.
 G2 semantic suites (SEM/LOC/SVA/UVM/build identity, real pyslang, real UVM) with no FAIL/SKIP.
 G3 backend suites (cbm, Serena, registry, stdio gateway, API) + MCP contract tests.
-G4 edit safety (unit, fault injection, real-backend edit flow) + all 29 critical mutations (10 plan classes plus write/Slurm/workspace/snapshot safety) killed.
+G4 edit safety (unit, fault injection, real-backend edit flow) + all critical mutations (M01–M45: 10 plan classes plus write/Slurm/workspace/snapshot safety) killed.
 G5 every P0 suite has no FAIL/BLOCKED/SKIP, acceptance flow, statement >= 85 %, branch >= 80 %,
    docs check, benchmark within the plan 22.3 budgets on the reference corpus.
 
@@ -757,16 +757,20 @@ def main(argv: list[str] | None = None) -> int:
         shutil.rmtree(out)
     (out / "logs").mkdir(parents=True)
 
+    # None: git failed (no checkout, dubious ownership, no git): the tree's state is unknown,
+    # which blocks like a dirty tree (third council review M3: it passed as clean)
+    status = git("status", "--porcelain")
     R: dict[str, Any] = {
         "version": "0.1.0-dev",
         "generated_utc": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         "platform": f"{platform.system()} {platform.machine()} {platform.release()} "
                     f"py{platform.python_version()}",
         "source_commit": (git("rev-parse", "HEAD") or "NONE (no commit in this repository)")
-        + (" +dirty" if git("status", "--porcelain") else ""),
+        + (" +unknown-tree" if status is None else " +dirty" if status else ""),
         # a release decision is computed from a commit: uncommitted changes (tests, goldens,
         # this script) are tied to no identity, so they block (first council review, policy 3)
-        "uncommitted": (git("status", "--porcelain") or "").splitlines()[:50],
+        "uncommitted": (status or "").splitlines()[:50],
+        "tree_state": "unknown" if status is None else "dirty" if status else "clean",
         "lock_sha256": sha256(REPO / "toolchain.lock.json"),
         "source_identity": source_identity(),
         "skipped_steps": sorted(skip),
@@ -818,7 +822,10 @@ def main(argv: list[str] | None = None) -> int:
     R["gates"] = compute_gates(R)
     R["blockers"] = blockers(R) + (
         [f"source tree has {len(R['uncommitted'])} uncommitted change(s) (first: "
-         f"{R['uncommitted'][0].strip()}); qualify a commit"] if R["uncommitted"] else [])
+         f"{R['uncommitted'][0].strip()}); qualify a commit"] if R["uncommitted"] else []) + (
+        ["the source tree's state is unknown (`git status` failed: no checkout, an unsafe "
+         "owner or no git); qualify a commit of a git checkout"]
+        if R["tree_state"] == "unknown" else [])
     reasons = [f"{k} {v['status']}: " + "; ".join(v["reasons"] or ["(no detail)"])
                for k, v in R["gates"].items() if v["status"] != "PASS"] + R["blockers"]
     R["decision_reasons"] = reasons

@@ -35,6 +35,11 @@ HARDENED_CONFIG = (
     "gpg.program=" + os.devnull,
     "gpg.ssh.program=" + os.devnull,
     "gpg.x509.program=" + os.devnull,
+    # a repository delivered WITH its .git/ (tarball, copied checkout) can ship hooks: a working
+    # tree diff refreshes and rewrites the index, which runs `post-index-change` (reproduced,
+    # third council review H1). No hook ever runs, and a read never rewrites the index.
+    "core.hooksPath=" + os.devnull,
+    "diff.autoRefreshIndex=false",
 )
 #: every `git log` runs with these (signature checks, external diff and textconv off)
 LOG_SAFE = ("--no-show-signature", "--no-ext-diff", "--no-textconv")

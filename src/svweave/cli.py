@@ -35,7 +35,7 @@ from svweave.domain.envelope import (
     error_envelope,
     new_request_id,
 )
-from svweave.domain.errors import EXIT_BUILD, EXIT_CONFIG, EXIT_OK, EXIT_STALE, SvwError
+from svweave.domain.errors import EXIT_BUILD, EXIT_STALE, SvwError, startup_message
 from svweave.domain.errors import ErrorCode as EC
 from svweave.domain.states import Completeness, Freshness
 from svweave.gateway.schemas import check_mcp_schemas, emit_mcp_schemas
@@ -234,7 +234,8 @@ def cli(
 def init_cmd(st: _State, adopt_state: bool) -> None:
     """Create svweave.yaml template, .svweave/ and policy.json (never overwrites)."""
     st.emit(st.run(lambda rid: init_workspace(st.opts.root, rid, st.opts.policy_path,
-                                              adopt_state=adopt_state)))
+                                              adopt_state=adopt_state,
+                                              manifest_path=st.opts.manifest_path)))
 
 
 @cli.command("doctor")
@@ -378,8 +379,9 @@ def schema_emit(st: _State, out_dir: Path, check: bool) -> None:
             data={"written": [str(p) for p in emit_schemas(out) + emit_mcp_schemas(out / "mcp")]},
         )
 
-    env = st.run(run)
-    st.emit(env, EXIT_CONFIG if env.data.get("out_of_sync") else EXIT_OK)
+    # the exit code follows the error, whatever it is (third council review M4: an INTERNAL or
+    # POLICY_DENIED error without ``out_of_sync`` exited 0)
+    st.emit(st.run(run))
 
 
 @cli.command("build")
@@ -966,7 +968,7 @@ def serve_cmd(
             opts = st.opts if workspace is None else replace(st.opts, root=workspace.resolve())
         serve_stdio(opts, use_graph=graph)
     except SvwError as e:
-        click.echo(f"svweave serve: {e.code.value}: {e.message}", err=True)
+        click.echo(startup_message("svweave serve", e), err=True)
         sys.exit(e.exit_code)
 
 

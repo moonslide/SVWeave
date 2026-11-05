@@ -9,8 +9,12 @@ approval store in the same directory (`trusted_dir`).
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
+import re
+import secrets
 import stat
 from pathlib import Path
 from typing import Any
@@ -20,6 +24,7 @@ from svweave.config.models import Manifest, Policy
 from svweave.config.paths import is_within, lexical_join
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import sha256_hex
+from svweave.security.safeio import write_under
 
 
 def config_home() -> Path:
@@ -54,6 +59,13 @@ def ensure_outside_tree(path: Path, *trees: Path) -> None:
             )
 
 
+#: ``details.reason`` of every refusal of the state directory itself
+STATE_DIR_REASONS = frozenset({
+    "state_dir_symlink", "state_dir_foreign_owner", "state_dir_not_directory",
+    "state_dir_writable_by_others", "state_dir_not_adopted",
+})
+
+
 def check_state_dir(path: Path) -> None:
     """The runtime state dir must be a real directory owned by the current user."""
     try:
@@ -64,71 +76,145 @@ def check_state_dir(path: Path) -> None:
         raise SvwError(
             ErrorCode.POLICY_DENIED,
             f"{path} is a symlink; refusing to use it as state dir",
-            {"path": str(path)},
+            {"path": str(path), "reason": "state_dir_symlink"},
         )
     if st.st_uid != os.geteuid():
         raise SvwError(
             ErrorCode.POLICY_DENIED,
             f"{path} is not owned by the current user",
-            {"path": str(path), "uid": st.st_uid},
+            {"path": str(path), "uid": st.st_uid, "reason": "state_dir_foreign_owner"},
+        )
+    if not stat.S_ISDIR(st.st_mode):
+        raise SvwError(ErrorCode.POLICY_DENIED, f"{path} is not a directory",
+                       {"path": str(path), "reason": "state_dir_not_directory"})
+    if st.st_mode & 0o022:  # others could plant builds, snapshots or journals in it
+        raise SvwError(
+            ErrorCode.POLICY_DENIED,
+            f"{path} is writable by group or others; refusing to use it as state dir "
+            f"(chmod go-w {path})",
+            {"path": str(path), "reason": "state_dir_writable_by_others"},
         )
 
 
-#: in the trusted directory: the identity of the `.svweave/` SVWeave created (or a person adopted)
+#: in the trusted directory: which `.svweave/` directories SVWeave created (or a person adopted)
 STATE_RECORD = "state_dir.json"
+#: inside `.svweave/`: a random token whose sha256 the record holds. A repository, tarball or copy
+#: cannot ship the right token (it never leaves this machine's state); no device or inode number
+#: is compared (unstable on NFS and across remounts; an inode can be reused: third council review)
+STATE_TOKEN = ".svweave-id"
+_RECORD_SCHEMA = 2
+_MAX_RECORDED = 256
 ADOPT_HINT = (
-    "a .svweave/ that SVWeave did not create here is not trusted (a repository, tarball or shared "
-    "directory can ship one, with fabricated builds and snapshots). If you created it (e.g. the "
-    "project was moved or copied), run `svweave init --adopt-state`; otherwise delete it"
+    "SVWeave trusts only a .svweave/ it recorded for this workspace: a repository, tarball, copy or "
+    "shared directory can ship one with fabricated builds, snapshots or journals. If you created "
+    "this one (an SVWeave version before 2026-11-05, or the project was moved or copied), run "
+    "`svweave init --adopt-state` once; otherwise move it aside (it may hold an interrupted "
+    "commit's journal: do not delete it unread)"
 )
 
 
-def _identity(state: Path) -> dict[str, Any]:
-    st = os.lstat(state)
-    return {"path": os.path.realpath(state), "dev": st.st_dev, "ino": st.st_ino}
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode("ascii")).hexdigest()
 
 
-def _read_record(trusted: Path) -> dict[str, Any] | None:
+def _read_token(state: Path) -> str | None:
+    """The token inside ``state``, read without following any link (None: absent or unusable)."""
     try:
-        fd = os.open(trusted / STATE_RECORD, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        dfd = os.open(state, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     except OSError:
         return None
     try:
+        fd = os.open(STATE_TOKEN, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+                     dir_fd=dfd)
+    except OSError:
+        return None
+    finally:
+        os.close(dfd)
+    try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
-        with os.fdopen(os.dup(fd), "rb") as f:
-            rec = json.loads(f.read(1 << 16) or b"null")
-    except (OSError, ValueError):
+        raw = os.read(fd, 256).decode("ascii", "replace").strip()
+    except OSError:
         return None
     finally:
         os.close(fd)
-    return rec if isinstance(rec, dict) else None
+    return raw if re.fullmatch(r"[0-9a-f]{64}", raw) else None
+
+
+def _read_record(trusted: Path) -> dict[str, Any]:
+    try:
+        fd = os.open(trusted / STATE_RECORD, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError:
+        return {}
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return {}
+        with os.fdopen(os.dup(fd), "rb") as f:
+            rec = json.loads(f.read(1 << 20) or b"null")
+    except (OSError, ValueError):
+        return {}
+    finally:
+        os.close(fd)
+    return rec if isinstance(rec, dict) else {}
+
+
+def _recorded(trusted: Path) -> dict[str, str]:
+    rec = _read_record(trusted)
+    dirs = rec.get("dirs") if rec.get("schema") == _RECORD_SCHEMA else None
+    if not isinstance(dirs, dict):
+        return {}
+    return {k: v for k, v in dirs.items() if isinstance(k, str) and isinstance(v, str)}
+
+
+def _legacy_match(trusted: Path, state: Path) -> bool:
+    """A record of the first format (path, device, inode; 2026-11-05 only) still admits its
+    directory once, which is then re-recorded with a token."""
+    rec = _read_record(trusted)
+    try:
+        st = os.lstat(state)
+    except OSError:
+        return False
+    return (rec.get("path") == os.path.realpath(state) and rec.get("dev") == st.st_dev
+            and rec.get("ino") == st.st_ino)
 
 
 def register_state_dir(trusted: Path, state: Path) -> None:
-    """Record ``state`` (an existing real directory) as this workspace's trusted state dir."""
+    """Record ``state`` (an existing real directory) as a trusted state dir of this workspace: a
+    fresh token inside it, its sha256 in the trusted record, keyed by the real path."""
     check_state_dir(state)
+    os.chmod(state, 0o700, follow_symlinks=False)  # private, whatever umask made it
+    token = secrets.token_hex(32)
+    write_under(state, STATE_TOKEN, (token + "\n").encode("ascii"), 0o600)
     trusted.mkdir(parents=True, exist_ok=True, mode=0o700)
-    tmp = trusted / f".{STATE_RECORD}.{os.getpid()}.tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    dirs = _recorded(trusted)
+    key = os.path.realpath(state)
+    dirs.pop(key, None)
+    dirs[key] = _sha(token)
+    while len(dirs) > _MAX_RECORDED:
+        dirs.pop(next(iter(dirs)))
+    tmp = trusted / f".{STATE_RECORD}.{secrets.token_hex(8)}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(_identity(state), f)
+        json.dump({"schema": _RECORD_SCHEMA, "dirs": dirs}, f)
     os.replace(tmp, trusted / STATE_RECORD)
 
 
 def state_dir_registered(trusted: Path, state: Path) -> bool:
-    rec = _read_record(trusted)
-    try:
-        return rec is not None and rec == _identity(state)
-    except OSError:
-        return False
+    want = _recorded(trusted).get(os.path.realpath(state))
+    token = _read_token(state)
+    return want is not None and token is not None and hmac.compare_digest(_sha(token), want)
+
+
+def state_dir_has_content(state: Path) -> bool:
+    """Anything in ``state`` besides a token (a token alone vouches for nothing)."""
+    return any(name != STATE_TOKEN for name in os.listdir(state))
 
 
 def verify_state_dir(trusted: Path, state: Path) -> None:
-    """``state`` is the `.svweave/` SVWeave created for this workspace (or a person adopted).
+    """``state`` is a `.svweave/` SVWeave created for this workspace (or a person adopted).
 
-    Missing: created now (0700) and recorded. Present and recorded (same real path, device and
-    inode): trusted. Present, empty, unrecorded: nothing in it to trust, recorded. Present,
+    Missing: created now (0700) and recorded. Recorded (its token matches the record for its real
+    path): trusted. Present, empty, unrecorded: nothing in it to trust, recorded. Present,
     unrecorded and not empty: ``POLICY_DENIED`` (reason ``state_dir_not_adopted``)."""
     check_state_dir(state)
     if not os.path.lexists(state):
@@ -142,12 +228,14 @@ def verify_state_dir(trusted: Path, state: Path) -> None:
         check_state_dir(state)
     if state_dir_registered(trusted, state):
         return
-    if not os.listdir(state):
+    if _legacy_match(trusted, state) or not state_dir_has_content(state):
         register_state_dir(trusted, state)
         return
     raise SvwError(
         ErrorCode.POLICY_DENIED,
-        f"{state} was not created by SVWeave for this workspace; refusing to use it",
+        f"{state} is not recorded as this workspace's SVWeave state; refusing to use it. If you "
+        "created it (before 2026-11-05, or the project was moved or copied), run "
+        "`svweave init --adopt-state` once",
         {"path": str(state), "reason": "state_dir_not_adopted", "hint": ADOPT_HINT},
     )
 

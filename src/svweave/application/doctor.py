@@ -19,7 +19,7 @@ from svweave.config.context import (
 )
 from svweave.config.loader import load_local_config, load_manifest, load_policy
 from svweave.config.models import LocalConfig, Manifest, Policy
-from svweave.config.trusted import load_trusted_policy, policy_path_for
+from svweave.config.trusted import STATE_DIR_REASONS, load_trusted_policy, policy_path_for
 
 # CheckResult/Status are defined in domain.checks and re-exported here for importers
 from svweave.domain.checks import CheckResult as CheckResult
@@ -124,7 +124,9 @@ def check_repo_local_policy(dc: DoctorContext) -> list[CheckResult]:
 def check_tightening(dc: DoctorContext) -> list[CheckResult]:
     err = dc.errors.get("workspace")
     if err is not None:
-        return [_fail("policy_tightening", err)]
+        # a refused state directory is not a policy-tightening failure (third council review M5)
+        state = err.details.get("reason") in STATE_DIR_REASONS
+        return [_fail("state_dir" if state else "policy_tightening", err)]
     if dc.workspace is None:
         return [
             CheckResult(

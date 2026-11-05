@@ -180,3 +180,32 @@ def test_SEC_DIF08_the_report_commit_lookup_uses_the_hardened_runner(tmp_path: P
     assert report._git_commit(repo) == head
     assert report._git_commit(tmp_path / "not-a-repo") is None
     assert "run_git(" in inspect.getsource(report._git_commit)
+
+
+def test_SEC_DIF09_a_working_tree_diff_runs_no_repository_hook_and_leaves_the_index(
+        tmp_path: Path) -> None:
+    """Third council review H1 (reproduced): a repository delivered WITH its .git/ can ship
+    hooks; `git diff` against the working tree refreshes the index when timestamps changed but
+    content did not, and writing the index runs `post-index-change`."""
+    repo, marker = tmp_path / "r", tmp_path / "PWNED"
+    git("init", "-q", "-b", "main", str(repo))
+    (repo / "a.sv").write_text("module a; endmodule\n")
+    (repo / "b.sv").write_text("module b; endmodule\n")
+    git("-C", str(repo), "add", "-A")
+    git("-C", str(repo), "commit", "-qm", "base")
+    hook = repo / ".git" / "hooks" / "post-index-change"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    hook.chmod(0o755)
+    index = repo / ".git" / "index"
+    time.sleep(1.1)
+    os.utime(repo / "a.sv")  # same bytes, new timestamps: an index refresh would follow
+    (repo / "b.sv").write_text("module b; wire w; endmodule\n")
+    before = (index.read_bytes(), index.stat().st_mtime_ns)
+    out = dimp._git(repo, ["diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv",
+                           "--no-renames", "HEAD", "--"]).decode()
+    assert "b.sv" in out and "a.sv" not in out
+    assert not marker.exists(), "SVWeave's git ran a hook the repository ships"
+    assert (index.read_bytes(), index.stat().st_mtime_ns) == before  # a read writes nothing
+    # setup check: plain git with the same repository does run the hook
+    git("-C", str(repo), "diff", "HEAD", "--")
+    assert marker.exists(), "setup: plain git diff must run post-index-change here"

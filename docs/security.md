@@ -12,7 +12,7 @@ environment, and the user's host.
 | Threat | Control | Where |
 |---|---|---|
 | An AI client or a backend writes the original source | Original source is never mounted writable into a backend. Edits happen in a **candidate** (a real byte copy of the snapshot). Only the gateway write coordinator changes the source, after a valid approval and compare-and-set checks. | `editing/`, ADR-007 |
-| Repository configuration executes commands | `svweave.yaml` is pure data; no hooks, Make, Tcl, shell substitution or `eval`. Unknown fields are rejected. A project-level Serena `.serena/` folder is rejected. | `config/`, `manifest/` |
+| Repository configuration executes commands | `svweave.yaml` is pure data; no hooks, Make, Tcl, shell substitution or `eval`. Unknown fields are rejected. A project-level Serena `.serena/` folder is rejected. Git reads an untrusted repository without user/system config, transport, fsmonitor, signature programs, external diff or textconv, and with repository hooks off (`core.hooksPath=/dev/null`) and no index refresh, so a `.git/` delivered with a tarball or copied checkout runs nothing. | `config/`, `manifest/`, `security/git.py` |
 | Prompt injection from comments, READMEs, AGENTS.md, tool output | Text from sources and tools is data. It cannot change the trusted policy, create an approval or skip validation (SEC-03). The MCP edit schema has no approval field. | `gateway/`, `editing/` |
 | Reading outside the project | Lexical normalisation, `realpath`, root allowlist from the trusted policy, include/exclude globs, symlink target checks. Any failure is `PATH_NOT_ALLOWED`. | `config/paths.py`, `security/safeio.py` |
 | An agent forges "approved" | No boolean approval is accepted anywhere. Approval is created only by the human CLI (`svweave edit approve`, interactive TTY), bound to patch hash, base snapshot, profile set, policy hash, transaction id and expiry, and signed with HMAC-SHA256. See the non-guarantees below. | `editing/approval.py` |
@@ -33,17 +33,27 @@ environment, and the user's host.
   disables, drop required human approval, list writable paths outside the policy or read an
   environment variable the policy's `environment_allowlist` does not name. There is no network
   field in `svweave.yaml`.
-* `.svweave/` (runtime state) must be a real directory owned by the current user. It holds
+* `.svweave/` (runtime state) must be a real directory owned by the current user and not writable
+  by group or others (`state_dir_writable_by_others`; SVWeave makes it 0700). It holds
   snapshots, the semantic database, candidates, journals, run logs and backend state; it is never
   committed.
-* `.svweave/` is trusted only when SVWeave created it for this workspace: its identity (real path,
-  device, inode) is recorded in `state_dir.json` in the trusted directory when it is created. A
-  non-empty `.svweave/` without a matching record (shipped with a repository, a tarball or a
-  shared directory, or copied/moved) is refused with `POLICY_DENIED`, reason
-  `state_dir_not_adopted`; an empty one is recorded. `svweave init --adopt-state` is the explicit
-  human step for a state directory you created yourself (for example after moving the project).
-  Within a trusted state directory, snapshot trees and records are still read without following
-  links and checked against their identity.
+* `.svweave/` is trusted only when SVWeave created it for this workspace: SVWeave writes a random
+  token to `.svweave/.svweave-id` and records its sha256, keyed by the directory's real path, in
+  `state_dir.json` in the trusted directory. A repository, tarball or shared directory cannot
+  ship the token, and no device or inode number is compared (unstable on NFS and across
+  remounts; an inode can be reused after `rm -rf`). A non-empty `.svweave/` without a matching
+  token (shipped, extracted in place of a deleted one, moved) is refused with `POLICY_DENIED`,
+  reason `state_dir_not_adopted`, and a hint; an empty one is recorded. `svweave init
+  --adopt-state` is the explicit human step for a state directory you created yourself (an
+  SVWeave version before 2026-11-05, or a moved project); `init` resolves the state directory
+  exactly as every other command does (`<project.root>/.svweave`). The person's own backup
+  restored in place carries the token and stays trusted.
+* The record vouches for the directory, not for every byte in it: within a trusted state
+  directory, snapshot trees and records are still read without following links and checked
+  against their identity, and recovery writes only what the approval, the current policy and the
+  validated base snapshot allow (`edit recover --rollback` has the same gates as roll-forward).
+* `doctor` without a verified workspace (no manifest, or a refused `.svweave/`) keeps backend probe
+  state in a private temporary directory, never in the project.
 
 The trusted `policy.json` is refused (`policy_writable_by_others`) when it or its directory is
 writable by other users; `svweave init` creates it 0600 in a 0700 directory. Group-write is allowed,

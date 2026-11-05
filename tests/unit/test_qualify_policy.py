@@ -63,6 +63,19 @@ def test_QUAL_03_a_dirty_tree_blocks_and_only_existing_evidence_is_listed(
     assert "evidence/m0/" not in rep["evidence_paths"]
 
 
+def test_QUAL_03b_an_unknown_tree_state_blocks_like_a_dirty_tree(tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Third council review M3: when `git status` failed the uncommitted list was empty and
+    nothing blocked."""
+    out = tmp_path / "q"
+    monkeypatch.setattr(qualify, "git", lambda *a: None)
+    rc = qualify.main(["--out-dir", str(out), "--skip", ",".join(qualify.STEPS)])
+    rep = json.loads((out / "report.json").read_text())
+    assert rc == 1 and rep["release_decision"] == "BLOCKED" and rep["tree_state"] == "unknown"
+    assert any("state is unknown" in r for r in rep["decision_reasons"])
+    assert rep["source_commit"].endswith("+unknown-tree")
+
+
 def test_QUAL_04_no_baseline_never_counts_a_mutation_as_killed(tmp_path: Path) -> None:
     """policy finding 8: with --no-baseline a test that was already red counted as KILLED."""
     dest = tmp_path / "m.json"

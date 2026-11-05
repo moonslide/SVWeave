@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -163,8 +164,7 @@ def test_C1_state_dir_symlink_or_foreign_owner_rejected(
     check_state_dir(tmp_path / "does-not-exist")  # absent is fine
     real = tmp_path / "elsewhere"
     real.mkdir()
-    (ws.root / ".svweave").mkdir(exist_ok=True)
-    (ws.root / ".svweave").rmdir()
+    shutil.rmtree(ws.root / ".svweave")  # the recorded one (holds its token)
     os.symlink(real, ws.root / ".svweave")
     expect(ErrorCode.POLICY_DENIED, ws.ctx)
     res = CliRunner().invoke(cli, ["--root", str(ws.root), "--compact", "init"])
