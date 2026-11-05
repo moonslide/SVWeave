@@ -7,6 +7,16 @@ Editing stays disabled during all of this (and in M3 it does not exist at all).
 1. `svweave doctor` (add `--probe` to start each backend once with a real fixture query; slow).
    The output always contains a `client_boundary` item: **client boundary not qualified**.
 2. Create the manifest: `svweave init`, then edit `svweave.yaml` (see `docs/manifest.md`).
+   `init` never overwrites a file. It creates and records the state directory every command
+   uses, `<project.root>/.svweave` (with `--manifest`, relative to that manifest). It reads an
+   existing `svweave.yaml` to find `project.root`, so an invalid one makes `init` fail with
+   `INVALID_CONFIG` (fix the manifest first). When `project.root` leaves the manifest
+   directory, `init` writes the template and policy but no state directory
+   (`data.state_dir.deferred: project_root_outside_manifest_dir`); the first command creates it
+   once the trusted policy's `allowed_roots` lists that root. Any command, read-only ones
+   included, creates and records a missing or empty `.svweave/` the same way (every command
+   needs it for the database and snapshots); only a non-empty, unrecorded one is refused
+   (`state_dir_not_adopted`, see `docs/security.md`).
 3. `svweave manifest resolve --profile P` and review the argument ledger by hand: top, file order,
    compilation units.
 4. `svweave build --profile P` (exit 3 means errors, PARTIAL or BLOCKED: read the diagnostics with

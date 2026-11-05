@@ -111,7 +111,7 @@ _MAX_RECORDED = 256
 ADOPT_HINT = (
     "SVWeave trusts only a .svweave/ it recorded for this workspace: a repository, tarball, copy or "
     "shared directory can ship one with fabricated builds, snapshots or journals. If you created "
-    "this one (an SVWeave version before 2026-11-05, or the project was moved or copied), run "
+    "this one (an earlier SVWeave version, or the project was moved or copied), run "
     "`svweave init --adopt-state` once; otherwise move it aside (it may hold an interrupted "
     "commit's journal: do not delete it unread)"
 )
@@ -168,18 +168,6 @@ def _recorded(trusted: Path) -> dict[str, str]:
     if not isinstance(dirs, dict):
         return {}
     return {k: v for k, v in dirs.items() if isinstance(k, str) and isinstance(v, str)}
-
-
-def _legacy_match(trusted: Path, state: Path) -> bool:
-    """A record of the first format (path, device, inode; 2026-11-05 only) still admits its
-    directory once, which is then re-recorded with a token."""
-    rec = _read_record(trusted)
-    try:
-        st = os.lstat(state)
-    except OSError:
-        return False
-    return (rec.get("path") == os.path.realpath(state) and rec.get("dev") == st.st_dev
-            and rec.get("ino") == st.st_ino)
 
 
 _held = threading.local()
@@ -264,13 +252,13 @@ def verify_state_dir(trusted: Path, state: Path) -> None:
     with state_dir_lock(trusted):  # decide once the other registrations are done
         if state_dir_registered(trusted, state):
             return
-        if _legacy_match(trusted, state) or not state_dir_has_content(state):
+        if not state_dir_has_content(state):
             _register(trusted, state)
             return
     raise SvwError(
         ErrorCode.POLICY_DENIED,
         f"{state} is not recorded as this workspace's SVWeave state; refusing to use it. If you "
-        "created it (before 2026-11-05, or the project was moved or copied), run "
+        "created it (an earlier SVWeave version, or the project was moved or copied), run "
         "`svweave init --adopt-state` once",
         {"path": str(state), "reason": "state_dir_not_adopted", "hint": ADOPT_HINT},
     )

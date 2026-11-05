@@ -376,7 +376,7 @@ svweave build --profile rtl_demo   # the shipped demo: exit 0
 
 * 由 build backend 尚未鎖定之前（2026-10-20 之前）的安裝程式所填入的 uv 快取，可能含有以未鎖定 backend 建置的 `proxy-tools` 或 `serena-agent` wheel，而 uv 會重用這類已建置的 wheel。升級後請刪除 `.toolchain/state/uv-cache`（或你的 `--uv-cache-dir`）一次。在 `vendor/` 路徑上，之後請重新解壓縮 `vendor/uv-cache.tar.gz`：它已用鎖定的 backend 與鎖定版本的 uv 重新產生（由其他 uv 版本寫入的快取使用不同的快取 bucket，離線時無法使用）。
 * 文件所述的流程不再以 `uv venv` 開頭；先前以該方式建立的 `.venv` 會被保留，並由 `--create-venv` 重用。
-* 自 2026-11-05 起，SVWeave 只信任它記錄過的 `.svweave/`（破壞性變更）：請在每個既有工作區對你自己建立的狀態目錄執行一次 `svweave init --adopt-state`（否則第一個指令會以 `state_dir_not_adopted` 拒絕）。`svweave-mcp` 也會在 stderr 印出同樣的提示。`init` 認領的是 `<project.root>/.svweave`，也就是每個指令使用的目錄。由 2026-11-05 第一版記錄過的工作區會自動重新記錄。群組或其他人可寫入的狀態目錄也會被拒絕（`chmod go-w .svweave`）。
+* 自 2026-11-05 起，SVWeave 只信任它記錄過的 `.svweave/`（破壞性變更）：請在每個既有工作區對你自己建立的狀態目錄執行一次 `svweave init --adopt-state`（否則第一個指令會以 `state_dir_not_adopted` 拒絕）。`svweave-mcp` 也會在 stderr 印出同樣的提示。`init` 認領的是 `<project.root>/.svweave`，也就是每個指令使用的目錄。只被 2026-11-05 分支版本（device/inode 紀錄）記錄過的工作區，也需要執行一次 `--adopt-state`。群組或其他人可寫入的狀態目錄也會被拒絕（`chmod go-w .svweave`）。
 * 會展開 `$VAR` 的 filelist，也需要該變數出現在受信任 policy 的 `environment_allowlist` 中（2026-11-04，破壞性變更）。
 
 ### 安裝一次，跨專案共用

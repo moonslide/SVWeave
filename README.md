@@ -603,8 +603,9 @@ Re-run the installer as in the path you used (`--create-venv` repairs an existin
   workspace run `svweave init --adopt-state` once for the state directory you created (the
   first command otherwise refuses it with `state_dir_not_adopted`; `svweave-mcp` prints the same
   hint on stderr). `init` adopts `<project.root>/.svweave`, the directory every command uses. A
-  workspace recorded by the first 2026-11-05 version is re-recorded automatically. A state
-  directory writable by group or others is refused (`chmod go-w .svweave`).
+  workspace recorded only by the branch version of 2026-11-05 (device/inode record) needs
+  `--adopt-state` too. A state directory writable by group or others is refused
+  (`chmod go-w .svweave`).
 * A filelist that expands `$VAR` also needs the variable in the trusted policy's
   `environment_allowlist` (2026-11-04, breaking).
 
@@ -1443,7 +1444,11 @@ a `--policy` path inside the project tree is `POLICY_DENIED`. The same directory
 SVWeave keeps in `.svweave/.svweave-id`, keyed by the directory's real path): any other non-empty
 `.svweave/` (shipped with a repository or tarball, extracted in place of a deleted one, moved or
 copied to another path) is refused with `state_dir_not_adopted` until you run
-`svweave init --adopt-state` for a state directory you made yourself.
+`svweave init --adopt-state` for a state directory you made yourself. A missing or empty
+`.svweave/` is created and recorded by the first command, read-only commands included. `init`
+reads an existing `svweave.yaml` to find `project.root` (an invalid one fails with
+`INVALID_CONFIG`); a `project.root` outside the manifest directory gets its state directory from
+the first command once the policy allows that root (`data.state_dir.deferred`).
 
 | Field | Default | Meaning |
 |---|---|---|

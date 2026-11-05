@@ -43,9 +43,11 @@ environment, and the user's host.
   ship the token, and no device or inode number is compared (unstable on NFS and across
   remounts; an inode can be reused after `rm -rf`). A non-empty `.svweave/` without a matching
   token (shipped, extracted in place of a deleted one, moved) is refused with `POLICY_DENIED`,
-  reason `state_dir_not_adopted`, and a hint; an empty one is recorded. `svweave init
+  reason `state_dir_not_adopted`, and a hint; a missing one is created (0700) and an empty one
+  recorded by the first command, read-only commands included, since every command needs the
+  database and snapshots in it. `svweave init
   --adopt-state` is the explicit human step for a state directory you created yourself (an
-  SVWeave version before 2026-11-05, or a moved project); `init` resolves the state directory
+  earlier SVWeave version, or a moved project); `init` resolves the state directory
   exactly as every other command does (`<project.root>/.svweave`). The person's own backup
   restored in place carries the token and stays trusted.
 * The record vouches for the directory, not for every byte in it: within a trusted state

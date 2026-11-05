@@ -157,21 +157,26 @@ def test_SEC_STA06_init_records_and_adopts_the_state_dir_every_command_uses(
     assert not (a.root / ".svweave").exists()
 
 
-def test_SEC_STA07_a_first_format_record_admits_its_directory_once_and_is_rewritten(
-        tmp_path: Path) -> None:
+def test_SEC_STA07_a_first_format_record_is_not_accepted(tmp_path: Path) -> None:
+    """The first record format (path, device, inode) existed only on the branch between
+    `d8d5415` and `673fdb4`; it is no longer accepted (owner decision 2026-11-05): an inode can
+    be reused after `rm -rf`, so a shipped directory could match it. `--adopt-state` once."""
     w = _fresh(tmp_path)
     state = w.root / ".svweave"
     state.mkdir(mode=0o700)
-    (state / "notes.txt").write_text("made by the 2026-11-05 version")
+    (state / "notes.txt").write_text("made by the branch version of 2026-11-05")
     st = os.lstat(state)
     record = w.policy_path.parent / STATE_RECORD
     record.write_text(json.dumps({"path": os.path.realpath(state), "dev": st.st_dev,
                                   "ino": st.st_ino}))
     code, env = _cli(w.root, "snapshot", "create", "--profile", "p")
+    assert env["error"]["details"]["reason"] == "state_dir_not_adopted", env
+    code, env = _cli(w.root, "init", "--adopt-state")
     assert code == 0, env.get("error")
     rec = json.loads(record.read_text())
     assert rec["schema"] == 2 and list(rec["dirs"]) == [os.path.realpath(state)]
-    assert (state / STATE_TOKEN).is_file()
+    code, env = _cli(w.root, "snapshot", "create", "--profile", "p")
+    assert code == 0, env.get("error")
 
 
 def test_SEC_STA08_a_state_dir_others_can_write_or_a_file_is_refused(tmp_path: Path) -> None:

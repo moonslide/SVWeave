@@ -44,7 +44,8 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   `.svweave/` (repository-shipped, extracted over a deleted one, moved) is refused
   (`state_dir_not_adopted`) until `svweave init --adopt-state`. After upgrading, an existing
   workspace needs that one step (the error, also on the MCP launcher's stderr, says so; a record of
-  the first, device/inode format is accepted once and rewritten). A state directory writable by
+  the first, device/inode format, which only the branch between `d8d5415` and `673fdb4` wrote, is
+  not accepted: `--adopt-state` once more). A state directory writable by
   group or others, or a `.svweave` that is not a directory, is refused. Registration decisions
   are serialized by a lock in the trusted directory (two first commands could otherwise leave
   one's token next to the other's record). Mutations M32, M43.
@@ -54,7 +55,10 @@ pre-release until the qualification report says `ACCEPTED_STATIC_PREVIEW`.
   `svw_diff_impact`; reproduced; mutation M44); `svweave init` records and adopts the state
   directory every other command uses (`<project.root>/.svweave`, not `<--root>/.svweave`), honours
   `--manifest`, and leaves a `project.root` outside the manifest directory to the first command
-  (`data.state_dir.deferred`); `doctor` without a verified workspace keeps backend probe state in a
+  (`data.state_dir.deferred`); **behaviour change:** because it reads an existing `svweave.yaml`
+  to find `project.root`, `init` now fails with `INVALID_CONFIG` on an invalid one (owner
+  decision 2026-11-05: kept and documented); read-only commands, like every command, create and
+  record a missing or empty `.svweave/` (by design, documented); `doctor` without a verified workspace keeps backend probe state in a
   private temporary directory, never in the project's `.svweave/`, and names a refused state
   directory `state_dir` instead of `policy_tightening`; `edit recover --rollback` now needs what
   roll-forward needs (editing enabled, trusted location, current policy, the approval, a journal
