@@ -13,12 +13,13 @@ import sqlite3
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Literal
 
 from svweave.application.keys import cursor_key
 from svweave.application.options import WorkspaceOptions
-from svweave.application.semantic_common import freshness_of, require_build
+from svweave.application.semantic_common import build_envelope, freshness_of, require_build
 from svweave.config.context import WorkspaceContext
+from svweave.domain.envelope import Envelope, ErrorInfo, Outcome
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.ids import is_sha256_hex
 from svweave.domain.states import Freshness
@@ -473,3 +474,91 @@ def rows_in(s: QuerySession, sql: str, ids: list[str], chunk: int = IN_CHUNK) ->
         part = ids[i : i + chunk]
         out.extend(s.rows(sql.format(",".join("?" * len(part))), s.bid, *part))
     return out
+
+
+# ---------------------------------------------------------------------------- target resolution
+_UNSET = object()
+
+
+def check_target_selector(
+    symbol_id: str | None, file: str | None, byte: int | None, name: str | None,
+    instance: object = _UNSET,
+) -> None:
+    """Exactly one of symbol_id, file+byte, name (and instance, where the tool takes one); the
+    one argument check of svw_symbol, svw_impact and svw_rename_preview (first council review,
+    architecture finding 2: three copies)."""
+    takes_instance = instance is not _UNSET
+    modes = [symbol_id is not None, file is not None or byte is not None, name is not None]
+    fields = ["symbol_id", "file+byte", "name"]
+    if takes_instance:
+        modes.append(instance is not None)
+        fields.append("instance")
+    if sum(modes) != 1:
+        raise SvwError(ErrorCode.INVALID_CONFIG, "give exactly one of: " + ", ".join(fields),
+                       {"fields": fields})
+    others = name or symbol_id or (instance if takes_instance else None)
+    if (file is None) != (byte is None) and not others:
+        raise SvwError(ErrorCode.INVALID_CONFIG, "file and byte must be given together")
+    if byte is not None and (not isinstance(byte, int) or byte < 0):
+        raise SvwError(ErrorCode.INVALID_CONFIG, "byte must be a non-negative integer")
+
+
+def lookup_declarations(
+    s: QuerySession, *, symbol_id: str | None, file: str | None, byte: int | None,
+    name: str | None,
+) -> list[sqlite3.Row]:
+    """The declarations a selector names: by symbol id, by location (declaration or resolved
+    reference at the byte), or by name / qualified name in source order."""
+    if symbol_id is not None:
+        return s.rows("SELECT * FROM declarations WHERE build_id=? AND symbol_id=?", s.bid,
+                      symbol_id)
+    if file is not None and byte is not None:
+        return decl_rows_by_location(s, file, byte)
+    return s.rows(
+        "SELECT * FROM declarations WHERE build_id=? AND (qualified_name=? OR name=?) "
+        "ORDER BY file, span_start", s.bid, name, name)
+
+
+def resolve_declaration_target(
+    s: QuerySession, *, symbol_id: str | None, file: str | None, byte: int | None,
+    name: str | None, collapse_twins: bool = True,
+) -> tuple[list[sqlite3.Row], list[sqlite3.Row] | None]:
+    """(candidate rows, twins) of a target; no row is ``MISSING_INPUT``. ``collapse_twins``: an
+    ANSI port and its implicit net are ONE entity (impact, rename); ``svw_symbol`` passes False
+    on purpose, it lists every declaration at a location."""
+    rows = lookup_declarations(s, symbol_id=symbol_id, file=file, byte=byte, name=name)
+    if not rows:
+        raise SvwError(ErrorCode.MISSING_INPUT, "no declaration matches the target",
+                       {"reason": "symbol_missing"})
+    if not collapse_twins:
+        return rows, None
+    rows = with_twins(s, rows)
+    tw = twins(rows)
+    return ([tw[0]] if tw is not None else rows), tw
+
+
+def ambiguous_target_envelope(
+    s: QuerySession, request_id: str, rows: list[sqlite3.Row], *,
+    reference_query: Literal["impact", "rename_preview"], reference_depth: int | None = None,
+) -> Envelope:
+    """``AMBIGUOUS_SYMBOL``: several scoped candidates, none selected automatically."""
+    return build_envelope(
+        s.ctx, s.db, s.build, request_id, {"candidate_count": len(rows)},
+        outcome=Outcome.ERROR,
+        error=ErrorInfo(
+            code=ErrorCode.AMBIGUOUS_SYMBOL.value,
+            message=f"{len(rows)} scoped candidates; choose one by symbol_id "
+            "(no candidate was selected automatically)",
+            details={
+                "candidates": [
+                    {"symbol_id": r["symbol_id"], "qualified_name": r["qualified_name"],
+                     "kind": r["kind"], "location": loads(r["loc"])}
+                    for r in rows[:50]
+                ],
+                "candidate_count": len(rows),
+            },
+        ),
+        freshness=s.fresh(),
+        reference_query=reference_query,
+        reference_depth=reference_depth,
+    )

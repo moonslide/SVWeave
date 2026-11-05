@@ -27,10 +27,11 @@ from svweave.application.semantic_read import (  # the shared query core
     QuerySession as _S,
 )
 from svweave.application.semantic_read import (
-    decl_dto as _decl_dto,
+    check_target_selector,
+    lookup_declarations,
 )
 from svweave.application.semantic_read import (
-    decl_rows_by_location as _decl_rows_by_location,
+    decl_dto as _decl_dto,
 )
 from svweave.application.semantic_read import (
     gap_limits as _gap_limits,
@@ -260,37 +261,16 @@ def symbol(
 ) -> Envelope:
     """Declaration lookup by ``symbol_id`` OR ``file``+``byte`` (OR a name). Several candidates
     are returned together with ``AMBIGUOUS_SYMBOL`` instead of picking one."""
-    modes = [symbol_id is not None, file is not None or byte is not None, name is not None]
-    if sum(modes) != 1:
-        raise SvwError(
-            ErrorCode.INVALID_CONFIG,
-            "give exactly one of: symbol_id, file+byte, name",
-            {"fields": ["symbol_id", "file+byte", "name"]},
-        )
-    if (file is None) != (byte is None) and name is None and symbol_id is None:
-        raise SvwError(ErrorCode.INVALID_CONFIG, "file and byte must be given together")
-    if byte is not None and (not isinstance(byte, int) or byte < 0):
-        raise SvwError(ErrorCode.INVALID_CONFIG, "byte must be a non-negative integer")
+    check_target_selector(symbol_id, file, byte, name)
     with _session(opts, build_id) as s:
-        if symbol_id is not None:
-            rows = s.rows(
-                "SELECT * FROM declarations WHERE build_id=? AND symbol_id=?", s.bid, symbol_id
-            )
-            if not rows:
-                raise SvwError(
-                    ErrorCode.MISSING_INPUT,
-                    f"unknown symbol {symbol_id}",
-                    {"reason": "symbol_missing"},
-                )
-        elif file is not None and byte is not None:
-            rows = _decl_rows_by_location(s, file, byte)
-        else:
-            rows = s.rows(
-                "SELECT * FROM declarations WHERE build_id=? AND (qualified_name=? OR name=?) "
-                "ORDER BY file, span_start",
-                s.bid,
-                name,
-                name,
+        # the same lookup as impact/rename, but twins are NOT collapsed on purpose: svw_symbol
+        # lists every declaration at a location; an empty name/location lookup is an answer
+        rows = lookup_declarations(s, symbol_id=symbol_id, file=file, byte=byte, name=name)
+        if symbol_id is not None and not rows:
+            raise SvwError(
+                ErrorCode.MISSING_INPUT,
+                f"unknown symbol {symbol_id}",
+                {"reason": "symbol_missing"},
             )
         lim = SYMBOL_PAGE_DEFAULT if limit is None else check_limit(limit)
         qh = query_hash(

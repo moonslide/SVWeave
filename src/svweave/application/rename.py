@@ -38,10 +38,12 @@ from svweave.application.queries import (
 )
 from svweave.application.semantic_common import build_envelope
 from svweave.application.semantic_read import (
-    decl_dto as _decl_dto,
+    ambiguous_target_envelope,
+    check_target_selector,
+    resolve_declaration_target,
 )
 from svweave.application.semantic_read import (
-    decl_rows_by_location as _decl_rows_by_location,
+    decl_dto as _decl_dto,
 )
 from svweave.application.semantic_read import (
     enclosing as _enclosing,
@@ -61,14 +63,8 @@ from svweave.application.semantic_read import (
 from svweave.application.semantic_read import (
     session as _session,
 )
-from svweave.application.semantic_read import (
-    twins as _twins,
-)
-from svweave.application.semantic_read import (
-    with_twins as _with_twins,
-)
 from svweave.domain.cursor import MAX_RESPONSE_BYTES, check_limit
-from svweave.domain.envelope import Envelope, ErrorInfo, Outcome, Pagination
+from svweave.domain.envelope import Envelope, Pagination
 from svweave.domain.errors import ErrorCode, SvwError
 from svweave.domain.states import Completeness, Freshness
 from svweave.editing.plan import mask_comments_strings
@@ -173,72 +169,14 @@ def rename_preview(
     name: str | None = None,
     limit: int | None = None,
 ) -> Envelope:
-    modes = [symbol_id is not None, file is not None or byte is not None, name is not None]
-    if sum(modes) != 1:
-        raise SvwError(
-            ErrorCode.INVALID_CONFIG,
-            "give exactly one of: symbol_id, file+byte, name",
-            {"fields": ["symbol_id", "file+byte", "name"]},
-        )
-    if (file is None) != (byte is None) and name is None and symbol_id is None:
-        raise SvwError(ErrorCode.INVALID_CONFIG, "file and byte must be given together")
-    if byte is not None and (not isinstance(byte, int) or byte < 0):
-        raise SvwError(ErrorCode.INVALID_CONFIG, "byte must be a non-negative integer")
+    check_target_selector(symbol_id, file, byte, name)
     check_identifier(new_name, "new_name")
     lim = DEFAULT_LIST if limit is None else check_limit(limit)
     with _session(opts, build_id) as s:
-        if symbol_id is not None:
-            rows = s.rows(
-                "SELECT * FROM declarations WHERE build_id=? AND symbol_id=?", s.bid, symbol_id
-            )
-        elif file is not None and byte is not None:
-            rows = _decl_rows_by_location(s, file, byte)
-        else:
-            rows = s.rows(
-                "SELECT * FROM declarations WHERE build_id=? AND (qualified_name=? OR name=?) "
-                "ORDER BY file, span_start",
-                s.bid,
-                name,
-                name,
-            )
-        if not rows:
-            raise SvwError(
-                ErrorCode.MISSING_INPUT,
-                "no declaration matches the target",
-                {"reason": "symbol_missing"},
-            )
-        rows = _with_twins(s, rows)
-        twins = _twins(rows)
-        if twins is not None:
-            rows = [twins[0]]
+        rows, twins = resolve_declaration_target(
+            s, symbol_id=symbol_id, file=file, byte=byte, name=name)
         if len(rows) > 1:
-            return build_envelope(
-                s.ctx,
-                s.db,
-                s.build,
-                request_id,
-                {"candidate_count": len(rows)},
-                outcome=Outcome.ERROR,
-                error=ErrorInfo(
-                    code=ErrorCode.AMBIGUOUS_SYMBOL.value,
-                    message=f"{len(rows)} scoped candidates; choose one by symbol_id "
-                    "(no candidate was selected automatically)",
-                    details={
-                        "candidates": [
-                            {
-                                "symbol_id": r["symbol_id"],
-                                "qualified_name": r["qualified_name"],
-                                "kind": r["kind"],
-                                "location": loads(r["loc"]),
-                            }
-                            for r in rows[:50]
-                        ],
-                        "candidate_count": len(rows),
-                    },
-                ),
-                freshness=s.fresh(),
-                reference_query="rename_preview",
-            )
+            return ambiguous_target_envelope(s, request_id, rows, reference_query="rename_preview")
         decl = rows[0]
         ids = [str(t["declaration_id"]) for t in twins] if twins else [str(decl["declaration_id"])]
         old = str(decl["name"])
